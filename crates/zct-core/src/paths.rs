@@ -78,9 +78,19 @@ impl DataRoot {
         self.root.join("local")
     }
 
-    /// chewing 的使用者詞庫與學習資料（M4 會改成可同步的格式）
-    pub fn chewing_user_dir(&self) -> PathBuf {
-        self.local().join("chewing")
+    /// 使用者詞庫、學習紀錄、選字統計
+    pub fn learning(&self) -> PathBuf {
+        self.local().join("learning")
+    }
+
+    /// 每日備份
+    pub fn backup(&self) -> PathBuf {
+        self.local().join("backup")
+    }
+
+    /// M2 / M3 版本的學習資料位置（啟動時遷移）
+    pub fn legacy_chewing_dir(&self) -> PathBuf {
+        self.local().join("chewing").join("v4")
     }
 }
 

@@ -30,6 +30,8 @@ shift_tap_max_ms = 300     # 按住 Shift 超過這個時間才放開，不算�
 width = "shift+space"      # 切換全形 / 半形
 output = ""                # 切換繁體 / 簡體（預設不綁定）
 game_mode = "ctrl+shift+f12"  # 開關遊戲模式（所有 App 一起）
+forget = "shift+delete"    # 候選窗中：忘記選擇框所在詞的學習紀錄（並取消固頂）
+pin = "shift+enter"        # 候選窗中：固頂選擇框所在的詞並選它
 
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
@@ -37,6 +39,7 @@ exclusive_fullscreen = true  # 有程式獨佔全螢幕
 
 [candidates]
 per_page = 9               # 每頁候選字數（1–10）
+sort_by_frequency = true   # 候選字依常用程度與個人學習排序
 
 # 自訂標點：覆寫內建的對照，鍵名寫法同快捷鍵
 [punctuation.full]
@@ -111,6 +114,20 @@ App 的執行檔名稱可以在工作管理員的「詳細資料」分頁查到�
 偵測不到的情況：視窗模式的遊戲，而且沒有停用輸入法。這時請用 `apps.toml` 的 `game_mode` 或遊戲模式快捷鍵。
 
 如果某個 App 明明在輸入框卻打不了中文，在 `apps.toml` 對它設 `detect = false`。
+
+## 學習紀錄
+
+| 檔案（資料根目錄下） | 內容 |
+|------|------|
+| `local/learning/user_dict.csv` | 自己加的詞與固頂（純文字） |
+| `local/learning/history_dict.bin` | 自動學習的選字紀錄（會隨時間衰減） |
+| `local/learning/stats.tsv` | 每日統計：日期、送出字數、修正次數 |
+| `local/backup/<日期>/` | 每日自動備份，保留最近 7 天 |
+
+- 所有 App 共用同一份學習紀錄；每 30 秒與 App 關閉時存檔
+- 存檔先寫暫存檔再改名，寫到一半當機也不會弄壞檔案
+- **學習紀錄變亂時**：關閉所有 App（或登出），把 `local/backup/` 裡某一天的檔案複製回 `local/learning/`
+- 檔案損壞時，輸入法會改用空的紀錄繼續運作，原檔另存為 `*.broken`
 
 ## 遊戲模式
 

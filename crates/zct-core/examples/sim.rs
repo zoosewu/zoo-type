@@ -12,9 +12,10 @@ fn main() {
     let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/dict");
     let user = std::env::temp_dir().join("zct-sim");
     let t0 = Instant::now();
+    let engine = zct_core::Engine::open(std::path::Path::new(dict), &user)
+        .expect("需要先執行 scripts/fetch-dict.sh");
     let mut s = Session::new(&SessionOptions {
-        sys_dict_dir: dict.into(),
-        user_dir: user,
+        engine: std::sync::Arc::new(engine),
         config: Config::default(),
         rule: None,
     })

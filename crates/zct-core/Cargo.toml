@@ -9,6 +9,7 @@ rust-version.workspace = true
 chewing.workspace = true
 ferrous-opencc = { version = "0.4.0", default-features = false, features = ["t2s-conversion"] }
 serde.workspace = true
+log.workspace = true
 toml = "1.2.0"
 
 [dev-dependencies]

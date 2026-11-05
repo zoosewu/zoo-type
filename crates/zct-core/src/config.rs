@@ -150,6 +150,10 @@ pub struct HotkeyConfig {
     pub output: Binding,
     /// 開關遊戲模式（全域）
     pub game_mode: Binding,
+    /// 候選窗中：忘記選擇框所在詞的學習紀錄（並取消固頂）
+    pub forget: Binding,
+    /// 候選窗中：固頂選擇框所在的詞並選它
+    pub pin: Binding,
 }
 
 impl Default for HotkeyConfig {
@@ -158,6 +162,8 @@ impl Default for HotkeyConfig {
             width: Binding::key("shift+space"),
             output: Binding(None),
             game_mode: Binding::key("ctrl+shift+f12"),
+            forget: Binding::key("shift+delete"),
+            pin: Binding::key("shift+enter"),
         }
     }
 }
@@ -187,11 +193,16 @@ impl Default for DetectConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct CandidateConfig {
     pub per_page: usize,
+    /// 候選字依常用程度與個人學習排序（P2：常用字排前面）
+    pub sort_by_frequency: bool,
 }
 
 impl Default for CandidateConfig {
     fn default() -> Self {
-        CandidateConfig { per_page: 9 }
+        CandidateConfig {
+            per_page: 9,
+            sort_by_frequency: true,
+        }
     }
 }
 

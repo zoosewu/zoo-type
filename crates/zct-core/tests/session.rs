@@ -3,6 +3,12 @@
 use zct_core::config::{Config, InputMode};
 use zct_core::{Key, KeyEvent, KeyResult, Mods, Session, SessionOptions, Side};
 
+const DICT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/dict");
+
+fn open_engine(dir: &std::path::Path) -> zct_core::Engine {
+    zct_core::Engine::open(std::path::Path::new(DICT), dir).expect("需要先執行 scripts/fetch-dict.sh")
+}
+
 struct Harness {
     s: Session,
     t: u64,
@@ -20,9 +26,18 @@ impl Harness {
 
     fn with_rule(config: Config, rule: Option<zct_core::AppRule>) -> Harness {
         let dir = tempfile::tempdir().unwrap();
+        let engine = std::sync::Arc::new(open_engine(&dir.path().join("learning")));
+        Harness::with_engine(engine, config, rule, dir)
+    }
+
+    fn with_engine(
+        engine: std::sync::Arc<zct_core::Engine>,
+        config: Config,
+        rule: Option<zct_core::AppRule>,
+        dir: tempfile::TempDir,
+    ) -> Harness {
         let opts = SessionOptions {
-            sys_dict_dir: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/dict").into(),
-            user_dir: dir.path().join("user"),
+            engine,
             config,
             rule,
         };
@@ -481,4 +496,144 @@ fn function_keys_pass_through_while_composing() {
     let mut h = Harness::new();
     h.type_str("wu0");
     assert!(!h.press(Key::F(5), Mods::NONE).eaten);
+}
+
+// ---- M4 ----
+
+fn candidates_for_qi(h: &mut Harness) -> Vec<String> {
+    h.press(Key::Esc, Mods::NONE);
+    h.press(Key::Esc, Mods::NONE);
+    h.s.reset();
+    open_candidates_for_qi(h).items
+}
+
+fn highlight_and(h: &mut Harness, target: &str, key: Key, mods: Mods) -> KeyResult {
+    let items = candidates_for_qi(h);
+    let i = items.iter().position(|w| w == target).expect("候選中要有目標字");
+    for _ in 0..i {
+        h.press(Key::Down, Mods::NONE);
+    }
+    h.press(key, mods)
+}
+
+#[test]
+fn frequency_sort_puts_common_char_first() {
+    // P2：「天ㄑㄧˋ」的單字候選，常用的「氣」應排在罕用的「企」之前
+    let mut h = Harness::new();
+    let items = candidates_for_qi(&mut h);
+    let qi = items.iter().position(|w| w == "氣").unwrap();
+    let qi2 = items.iter().position(|w| w == "企").unwrap();
+    assert!(qi < qi2, "{items:?}");
+}
+
+#[test]
+fn pin_moves_word_to_top() {
+    let mut h = Harness::new();
+    let r = highlight_and(&mut h, "汽", Key::Enter, Mods::shift());
+    assert_eq!(r.notice.as_deref(), Some("已固頂：汽"));
+    assert!(h.s.preedit().text.ends_with('汽'));
+    assert_eq!(candidates_for_qi(&mut h)[0], "汽");
+}
+
+#[test]
+fn forget_undoes_pin() {
+    let mut h = Harness::new();
+    let before = candidates_for_qi(&mut h);
+    highlight_and(&mut h, "汽", Key::Enter, Mods::shift());
+    let r = highlight_and(&mut h, "汽", Key::Delete, Mods::shift());
+    assert_eq!(r.notice.as_deref(), Some("已忘記：汽"));
+    assert_eq!(candidates_for_qi(&mut h)[0], before[0]);
+}
+
+#[test]
+fn sessions_share_learning() {
+    // 不同 App（session）共用同一份學習紀錄，不會互相覆蓋
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(open_engine(&dir.path().join("learning")));
+    let mut a = Harness::with_engine(engine.clone(), Config::default(), None, tempfile::tempdir().unwrap());
+    let mut b = Harness::with_engine(engine, Config::default(), None, dir);
+    highlight_and(&mut a, "汽", Key::Enter, Mods::shift());
+    assert_eq!(candidates_for_qi(&mut b)[0], "汽");
+}
+
+#[test]
+fn learning_survives_save_and_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let learning = dir.path().join("learning");
+    let engine = std::sync::Arc::new(open_engine(&learning));
+    let mut h = Harness::with_engine(engine.clone(), Config::default(), None, tempfile::tempdir().unwrap());
+    highlight_and(&mut h, "汽", Key::Enter, Mods::shift());
+    assert!(engine.save().unwrap(), "有變更就要寫檔");
+    assert!(!engine.save().unwrap(), "沒有變更就不寫");
+    drop(h);
+    let reloaded = std::sync::Arc::new(open_engine(&learning));
+    let mut h2 = Harness::with_engine(reloaded, Config::default(), None, dir);
+    assert_eq!(candidates_for_qi(&mut h2)[0], "汽");
+}
+
+#[test]
+fn commit_does_not_write_files_synchronously() {
+    let dir = tempfile::tempdir().unwrap();
+    let learning = dir.path().join("learning");
+    let engine = std::sync::Arc::new(open_engine(&learning));
+    let mut h = Harness::with_engine(engine, Config::default(), None, tempfile::tempdir().unwrap());
+    h.type_str("wu0 fu4");
+    h.press(Key::Enter, Mods::NONE);
+    assert!(!learning.join("history_dict.bin").exists());
+}
+
+#[test]
+fn stats_count_chars_and_corrections() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(open_engine(&dir.path().join("learning")));
+    let mut h = Harness::with_engine(engine.clone(), Config::default(), None, dir);
+    open_candidates_for_qi(&mut h);
+    h.press(Key::Down, Mods::NONE);
+    h.press(Key::Down, Mods::NONE);
+    h.press(Key::Enter, Mods::NONE); // 選第 3 個 → 修正一次
+    h.press(Key::Enter, Mods::NONE); // 送出「天器」
+    let s = engine.stats();
+    assert_eq!((s[0].chars, s[0].corrections), (2, 1));
+}
+
+#[test]
+fn backup_keeps_latest_copies() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = open_engine(&dir.path().join("learning"));
+    let backups = dir.path().join("backup");
+    for old in ["2026-01-01", "2026-01-02", "2026-01-03"] {
+        std::fs::create_dir_all(backups.join(old)).unwrap();
+    }
+    engine.backup(&backups, 2).unwrap();
+    let mut left: Vec<_> = std::fs::read_dir(&backups)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    left.sort();
+    assert_eq!(left.len(), 2);
+    assert_eq!(left[1], zct_core::engine::today());
+}
+
+#[test]
+fn migrate_copies_old_learning_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = (dir.path().join("old"), dir.path().join("new"));
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("user_dict.csv"), "old").unwrap();
+    assert!(zct_core::Engine::migrate_from(&old, &new).unwrap());
+    std::fs::write(old.join("user_dict.csv"), "newer").unwrap();
+    assert!(!zct_core::Engine::migrate_from(&old, &new).unwrap(), "已有資料就不覆蓋");
+    assert_eq!(std::fs::read_to_string(new.join("user_dict.csv")).unwrap(), "old");
+}
+
+#[test]
+fn shift_arrows_mark_range_and_enter_adds_phrase() {
+    let mut h = Harness::new();
+    h.type_str("wu0 fu4"); // 天氣，游標在最後
+    h.press(Key::Left, Mods::shift());
+    h.press(Key::Left, Mods::shift());
+    let r = h.press(Key::Enter, Mods::NONE);
+    let notice = r.notice.expect("要有加詞提示");
+    assert!(notice.contains("天氣"), "{notice}");
+    assert!(h.s.is_composing(), "加詞後仍在組字，不會送出");
 }

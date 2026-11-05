@@ -89,7 +89,7 @@ pub enum UiCmd {
     },
     /// 狀態提示：中 / A / 全形 / 半形
     Hint {
-        text: &'static str,
+        text: String,
         anchor: Option<Rect>,
     },
 }
@@ -276,7 +276,7 @@ impl Ui {
                     }
                     Ok(())
                 }
-                UiCmd::Hint { text, anchor } => self.show_hint(text, anchor),
+                UiCmd::Hint { text, anchor } => self.show_hint(&text, anchor),
             };
             if let Err(e) = r {
                 log::warn!("繪製失敗：{e}");

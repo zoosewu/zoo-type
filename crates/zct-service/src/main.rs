@@ -39,14 +39,15 @@ mod app {
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
     };
     use windows::core::w;
+    use zct_core::Engine;
     use zct_core::paths::DataRoot;
 
     use crate::{conn, logger, settings, ui};
 
     pub struct Shared {
-        pub data: DataRoot,
-        pub sys_dict_dir: PathBuf,
         pub settings: settings::Settings,
+        /// 所有連線共用的詞庫與學習紀錄
+        pub engine: Arc<Engine>,
         /// 手動快捷鍵開啟的全域遊戲模式
         pub game: AtomicBool,
         pub ui: ui::UiHandle,
@@ -64,6 +65,26 @@ mod app {
         } else {
             Err(format!("找不到系統詞庫：{}", dir.display()))
         }
+    }
+
+    /// 背景存檔：學習紀錄只在記憶體中更新，這裡定期寫檔並每日備份
+    fn spawn_saver(engine: Arc<Engine>, backup: PathBuf) -> std::io::Result<()> {
+        const INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+        const KEEP_DAYS: usize = 7;
+        std::thread::Builder::new()
+            .name("saver".into())
+            .spawn(move || {
+                loop {
+                    if let Err(e) = engine.save() {
+                        log::error!("學習紀錄存檔失敗：{e}");
+                    }
+                    if let Err(e) = engine.backup(&backup, KEEP_DAYS) {
+                        log::warn!("備份失敗：{e}");
+                    }
+                    std::thread::sleep(INTERVAL);
+                }
+            })
+            .map(|_| ())
     }
 
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -86,11 +107,18 @@ mod app {
         let sys_dict_dir = find_sys_dict()?;
         log::info!("系統詞庫：{}", sys_dict_dir.display());
 
+        match Engine::migrate_from(&data.legacy_chewing_dir(), &data.learning()) {
+            Ok(true) => log::info!("已從舊位置遷移學習資料"),
+            Ok(false) => {}
+            Err(e) => log::warn!("遷移學習資料失敗：{e}"),
+        }
+        let engine = Arc::new(Engine::open(&sys_dict_dir, &data.learning())?);
+        spawn_saver(engine.clone(), data.backup())?;
+
         let ui = ui::spawn()?;
         let shared = Arc::new(Shared {
-            data,
-            sys_dict_dir,
             settings,
+            engine,
             game: AtomicBool::new(false),
             ui,
         });

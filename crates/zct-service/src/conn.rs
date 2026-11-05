@@ -10,10 +10,17 @@ use crate::app::Shared;
 use crate::ui::UiCmd;
 
 /// 狀態提示文字；同時發生多個變化時，只顯示最重要的一個
-fn hint(r: &KeyResult, game: Option<bool>) -> Option<&'static str> {
+fn hint(r: &KeyResult, game: Option<bool>) -> Option<String> {
     if let Some(on) = game {
-        return Some(if on { "遊戲模式" } else { "一般模式" });
+        return Some(if on { "遊戲模式" } else { "一般模式" }.into());
     }
+    if let Some(n) = &r.notice {
+        return Some(n.clone());
+    }
+    static_hint(r).map(str::to_owned)
+}
+
+fn static_hint(r: &KeyResult) -> Option<&'static str> {
     if let Some(m) = r.mode_changed {
         return Some(match m {
             InputMode::Chinese => "中",
@@ -39,8 +46,7 @@ fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> 
         log::info!("[{id}] 套用 App 規則「{}」", if r.name.is_empty() { exe } else { &r.name });
     }
     Session::new(&SessionOptions {
-        sys_dict_dir: shared.sys_dict_dir.clone(),
-        user_dir: shared.data.chewing_user_dir(),
+        engine: shared.engine.clone(),
         config,
         rule,
     })
@@ -50,7 +56,7 @@ fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> 
 pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let mut session: Option<Session> = None;
     // 最近一次按鍵結果與狀態提示，等 DLL 回報游標位置後再決定候選窗怎麼顯示
-    let mut last: Option<(KeyResult, Option<&'static str>)> = None;
+    let mut last: Option<(KeyResult, Option<String>)> = None;
 
     loop {
         let req = match conn.recv() {
@@ -140,5 +146,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
         }
     }
     shared.ui.send(UiCmd::Hide { owner: id });
+    // App 關閉時順便存檔，縮短當機時遺失學習的時間窗
+    if let Err(e) = shared.engine.save() {
+        log::error!("學習紀錄存檔失敗：{e}");
+    }
     log::debug!("[{id}] 斷線");
 }

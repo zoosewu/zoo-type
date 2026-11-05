@@ -9,8 +9,7 @@
 //! 6. 候選窗選擇框（↑ ↓ Enter）
 //! 7. 其餘交給 chewing
 
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use chewing::editor::{BasicEditor, Editor, EditorKeyBehavior};
 use ferrous_opencc::OpenCC;
@@ -18,6 +17,7 @@ use ferrous_opencc::config::BuiltinConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::apps::{AppRule, Effective};
+use crate::engine::Engine;
 use crate::config::{
     Config, GameMode, HotkeyConfig, InputMode, OnFocus, Output, PunctuationTable, Width,
 };
@@ -57,14 +57,14 @@ pub struct KeyResult {
     pub output_changed: Option<Output>,
     /// 使用者按了遊戲模式快捷鍵；遊戲模式是全域狀態，由服務程序切換並廣播
     pub toggle_game: bool,
+    /// 要顯示給使用者的短訊息（例如「加入：天氣」「已固頂：氣」）
+    pub notice: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SessionOptions {
-    /// 系統詞庫（`static_dict.bin` 等）所在資料夾
-    pub sys_dict_dir: PathBuf,
-    /// 使用者詞庫與學習資料所在資料夾
-    pub user_dir: PathBuf,
+    /// 所有 session 共用的詞庫與學習紀錄
+    pub engine: Arc<Engine>,
     pub config: Config,
     /// 目前 App 的規則（`apps.toml`）
     pub rule: Option<AppRule>,
@@ -90,6 +90,7 @@ fn simplifier() -> Option<&'static OpenCC> {
 
 #[derive(Debug)]
 pub struct Session {
+    engine: Arc<Engine>,
     editor: Editor,
     eff: Effective,
     mode: InputMode,
@@ -106,12 +107,8 @@ pub struct Session {
 
 impl Session {
     pub fn new(opts: &SessionOptions) -> Result<Session, SessionError> {
-        std::fs::create_dir_all(&opts.user_dir).map_err(|e| SessionError(e.to_string()))?;
-        let mut editor = Editor::chewing(
-            Some(opts.sys_dict_dir.to_string_lossy().into_owned()),
-            Some(opts.user_dir.to_string_lossy().into_owned()),
-        )
-        .map_err(|e| SessionError(e.to_string()))?;
+        let mut editor: Editor = opts.engine.editor();
+        let sort = opts.config.candidates.sort_by_frequency;
 
         let per_page = opts.config.candidates.per_page.clamp(1, 10);
         editor.set_editor_options(|o| {
@@ -121,10 +118,12 @@ impl Session {
             o.auto_shift_cursor = true;
             // 全半形切換由 ZCT 自己處理，避免 chewing 吃掉 Shift+Space
             o.enable_fullwidth_toggle_key = false;
+            o.sort_candidates_by_frequency = sort;
         });
 
         let eff = Effective::resolve(&opts.config, opts.rule.as_ref());
         Ok(Session {
+            engine: opts.engine.clone(),
             editor,
             eff,
             mode: eff.default_mode,
@@ -296,7 +295,11 @@ impl Session {
                 // 組字中先送出組字，順序才正確
                 commit.push_str(&self.flush());
                 commit.push_str(&text);
+            } else if let Some(notice) = self.learning_key(ev) {
+                r.notice = Some(notice);
             } else if !self.navigate_candidates(ev) {
+                let was_selecting = self.editor.is_selecting();
+                let picked = self.candidate_index(ev);
                 let key = match ev.key {
                     Key::Numpad(c) => Key::Char(c),
                     k => k,
@@ -306,6 +309,9 @@ impl Session {
                         let was_composing = self.is_composing();
                         let behavior = self.editor.process_keyevent(chewing_ev);
                         r.eaten = was_composing || behavior != EditorKeyBehavior::Ignore;
+                        if was_selecting && !self.editor.is_selecting() {
+                            self.record_pick(picked);
+                        }
                         // 翻頁、重新開啟或關閉候選窗後，選擇框回到第一個
                         self.highlight = 0;
                     }
@@ -315,6 +321,10 @@ impl Session {
             commit.push_str(&self.take_commit());
         }
 
+        let notice = self.editor.notification();
+        if !notice.is_empty() && r.notice.is_none() {
+            r.notice = Some(notice.to_owned());
+        }
         if !commit.is_empty() {
             r.commit = Some(self.convert(&commit));
         }
@@ -349,12 +359,82 @@ impl Session {
                 self.highlight = 0;
             }
             Key::Enter => {
+                let picked = self.page_offset() + self.highlight.min(len - 1);
                 let _ = self.editor.select(self.highlight.min(len - 1));
                 self.highlight = 0;
+                self.record_pick(Some(picked));
             }
             _ => return false,
         }
         true
+    }
+
+    fn page_offset(&self) -> usize {
+        self.editor.current_page_no().unwrap_or(0) * self.per_page
+    }
+
+    /// 數字鍵選字時，選的是第幾個候選（跨頁的絕對位置）
+    fn candidate_index(&self, ev: &KeyEvent) -> Option<usize> {
+        if !self.editor.is_selecting() {
+            return None;
+        }
+        let digit = match ev.key {
+            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() => c - b'0',
+            _ => return None,
+        };
+        let i = if digit == 0 { 9 } else { digit as usize - 1 };
+        Some(self.page_offset() + i)
+    }
+
+    /// 選了第一個以外的候選 = 自動選字錯了一次
+    fn record_pick(&self, picked: Option<usize>) {
+        if picked.is_some_and(|i| i > 0) {
+            self.engine.record(0, 1);
+        }
+        self.engine.mark_dirty();
+    }
+
+    /// 候選窗中的「忘記」「固頂」；回傳提示訊息
+    fn learning_key(&mut self, ev: &KeyEvent) -> Option<String> {
+        if !self.editor.is_selecting() {
+            return None;
+        }
+        let forget = self.hotkeys.forget.matches(ev);
+        let pin = self.hotkeys.pin.matches(ev);
+        if !forget && !pin {
+            return None;
+        }
+        let (syllables, word) = self.highlighted()?;
+        if forget {
+            self.engine.forget(&syllables, &word);
+            Some(format!("已忘記：{}", self.convert(&word)))
+        } else {
+            // 先選字再加權：加權後候選順序會改變，選擇框的索引就不再指向同一個詞
+            let _ = self.editor.select(self.highlight);
+            self.highlight = 0;
+            self.engine.pin(&syllables, &word);
+            Some(format!("已固頂：{}", self.convert(&word)))
+        }
+    }
+
+    /// 選擇框所在的候選詞與它的讀音（候選詞從游標位置開始）
+    fn highlighted(&self) -> Option<(Vec<chewing::zhuyin::Syllable>, String)> {
+        let word = self
+            .editor
+            .paginated_candidates()
+            .ok()?
+            .into_iter()
+            .nth(self.highlight)?;
+        let n = word.chars().count();
+        let start = self.editor.cursor();
+        let syllables: Option<Vec<_>> = self
+            .editor
+            .symbols()
+            .get(start..start + n)?
+            .iter()
+            .map(|s| s.to_syllable())
+            .collect();
+        Some((syllables?, word))
     }
 
     fn chewing_key(&mut self, key: Key) {
@@ -439,6 +519,8 @@ impl Session {
         let text = self.editor.display_commit().to_owned();
         if !text.is_empty() {
             self.editor.ack();
+            // chewing 送出時會更新學習紀錄（記憶體中），存檔交給服務程序
+            self.engine.record(text.chars().count() as u64, 0);
         }
         text
     }

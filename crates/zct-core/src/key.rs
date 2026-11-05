@@ -148,8 +148,13 @@ pub(crate) fn shifted(c: u8) -> u8 {
     }
 }
 
-fn special(code: keycode::Keycode, sym: keysym::Keysym) -> KeyboardEvent {
-    KeyboardEvent::builder().code(code).ksym(sym).build()
+/// 非字元鍵保留 Shift 狀態：chewing 用 Shift + ← / → 選取加詞範圍
+fn special(code: keycode::Keycode, sym: keysym::Keysym, shift: bool) -> KeyboardEvent {
+    KeyboardEvent::builder()
+        .code(code)
+        .ksym(sym)
+        .shift_if(shift)
+        .build()
 }
 
 /// 轉成 chewing 的按鍵事件；修飾鍵本身與 `Other` 回傳 `None`
@@ -164,19 +169,19 @@ pub(crate) fn to_chewing(key: Key, mods: Mods) -> Option<KeyboardEvent> {
             ev
         }
         Key::Space => map_ascii(&QWERTY_MAP, b' '),
-        Key::Enter => special(keycode::KEY_ENTER, keysym::SYM_RETURN),
-        Key::Tab => special(keycode::KEY_TAB, keysym::SYM_TAB),
-        Key::Esc => special(keycode::KEY_ESC, keysym::SYM_ESC),
-        Key::Backspace => special(keycode::KEY_BACKSPACE, keysym::SYM_BACKSPACE),
-        Key::Delete => special(keycode::KEY_DELETE, keysym::SYM_DELETE),
-        Key::Left => special(keycode::KEY_LEFT, keysym::SYM_LEFT),
-        Key::Right => special(keycode::KEY_RIGHT, keysym::SYM_RIGHT),
-        Key::Up => special(keycode::KEY_UP, keysym::SYM_UP),
-        Key::Down => special(keycode::KEY_DOWN, keysym::SYM_DOWN),
-        Key::Home => special(keycode::KEY_HOME, keysym::SYM_HOME),
-        Key::End => special(keycode::KEY_END, keysym::SYM_END),
-        Key::PageUp => special(keycode::KEY_PAGEUP, keysym::SYM_PAGEUP),
-        Key::PageDown => special(keycode::KEY_PAGEDOWN, keysym::SYM_PAGEDOWN),
+        Key::Enter => special(keycode::KEY_ENTER, keysym::SYM_RETURN, mods.shift),
+        Key::Tab => special(keycode::KEY_TAB, keysym::SYM_TAB, mods.shift),
+        Key::Esc => special(keycode::KEY_ESC, keysym::SYM_ESC, mods.shift),
+        Key::Backspace => special(keycode::KEY_BACKSPACE, keysym::SYM_BACKSPACE, mods.shift),
+        Key::Delete => special(keycode::KEY_DELETE, keysym::SYM_DELETE, mods.shift),
+        Key::Left => special(keycode::KEY_LEFT, keysym::SYM_LEFT, mods.shift),
+        Key::Right => special(keycode::KEY_RIGHT, keysym::SYM_RIGHT, mods.shift),
+        Key::Up => special(keycode::KEY_UP, keysym::SYM_UP, mods.shift),
+        Key::Down => special(keycode::KEY_DOWN, keysym::SYM_DOWN, mods.shift),
+        Key::Home => special(keycode::KEY_HOME, keysym::SYM_HOME, mods.shift),
+        Key::End => special(keycode::KEY_END, keysym::SYM_END, mods.shift),
+        Key::PageUp => special(keycode::KEY_PAGEUP, keysym::SYM_PAGEUP, mods.shift),
+        Key::PageDown => special(keycode::KEY_PAGEDOWN, keysym::SYM_PAGEDOWN, mods.shift),
         Key::Shift(_)
         | Key::Ctrl
         | Key::Alt
