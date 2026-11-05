@@ -23,7 +23,8 @@ if (Test-Path $dll) {
 }
 
 Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ZCT' -ErrorAction SilentlyContinue
-Get-Process zct-service -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process zct-service, zct-settings -ErrorAction SilentlyContinue | Stop-Process -Force
+Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'ZCT 設定.lnk') -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 300
 
 # 仍被 App 載入的 DLL 無法刪除：改名，登出或重開機後再手動刪除

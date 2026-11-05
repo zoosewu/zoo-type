@@ -8,7 +8,8 @@
 data_root = "D:/Sync/zct"
 ```
 
-- 設定檔改完後，**切換到其他 App 再切回來**（或重開 App）就會生效
+- 設定檔改完後，**切換到其他 App 再切回來**（或重開 App）就會生效；`[theme]` 1 秒內生效
+- 「ZCT 設定」程式存檔時會重寫整個檔案，手寫的註解不會保留
 - 設定檔寫錯時，輸入法照常運作，改用上一份正確的設定；錯誤會記在 `local/logs/service.log`
 
 ## `config.toml`
@@ -36,6 +37,15 @@ pin = "shift+enter"        # 候選窗中：固頂選擇框所在的詞並選它
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
 exclusive_fullscreen = true  # 有程式獨佔全螢幕
+
+[theme]                    # 候選窗外觀，改完 1 秒內生效
+layout = "vertical"        # "vertical" 直式 | "horizontal" 橫式
+font = "Microsoft JhengHei UI"
+font_size = 16.0           # 8–48
+background = "#FFFFFF"
+text = "#1A1A1A"
+number = "#7A7A7A"
+highlight = "#CCE4F7"      # 選擇框
 
 [candidates]
 per_page = 9               # 每頁候選字數（1–10）

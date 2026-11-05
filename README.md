@@ -7,6 +7,11 @@
 - 技術查證：[docs/research.md](docs/research.md)
 - 設定檔：[docs/config.md](docs/config.md)
 
+## 設定
+
+開始功能表的「ZCT 設定」，或系統匣圖示 → 設定…：一般、快捷鍵、外觀（即時預覽）、App 規則、詞庫、學習統計與備份還原。
+也可以直接編輯設定檔，見 [docs/config.md](docs/config.md)。
+
 ## 使用方式
 
 | 操作 | 按鍵 |

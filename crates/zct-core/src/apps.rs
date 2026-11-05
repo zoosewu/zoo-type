@@ -68,6 +68,14 @@ impl AppRules {
         }
     }
 
+    /// 存回檔案（暫存檔再改名）；設定程式使用
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(tmp, path)
+    }
+
     /// 第一筆符合的規則
     pub fn find(&self, app: &str) -> Option<&AppRule> {
         self.apps.iter().find(|r| r.matches(app))
@@ -155,6 +163,15 @@ detect = false").unwrap();
         off.detect.exclusive_fullscreen = false;
         let e = Effective::resolve(&off, None);
         assert!(e.detect_legacy && !e.detect_fullscreen);
+    }
+
+    #[test]
+    fn save_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("apps.toml");
+        let rules = AppRules::parse(SAMPLE).unwrap();
+        rules.save(&path).unwrap();
+        assert_eq!(AppRules::load(&path).unwrap(), rules);
     }
 
     #[test]

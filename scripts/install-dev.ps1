@@ -18,12 +18,12 @@ $dest = Join-Path $env:ProgramFiles 'ZCT'
 $dll = Join-Path $dest 'zct_tsf.dll'
 $tip = '0404:{68E048CC-2635-4A97-8A2F-1599AF3AFCF5}{D890A24E-551E-4D5F-A0F1-745BE13B6287}'
 
-foreach ($f in @("$release\zct_tsf.dll", "$release\zct-service.exe", "$dict\static_dict.bin")) {
+foreach ($f in @("$release\zct_tsf.dll", "$release\zct-service.exe", "$release\zct-settings.exe", "$dict\static_dict.bin")) {
     if (-not (Test-Path $f)) { throw "找不到 $f；請先 cargo build --release 並執行 scripts/fetch-dict.sh" }
 }
 
-Write-Host '停止服務程序'
-Get-Process zct-service -ErrorAction SilentlyContinue | Stop-Process -Force
+Write-Host '停止服務程序與設定程式'
+Get-Process zct-service, zct-settings -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 300
 
 New-Item -ItemType Directory -Force -Path $dest, "$dest\dict" | Out-Null
@@ -39,11 +39,20 @@ if (Test-Path $dll) {
 
 Copy-Item "$release\zct_tsf.dll" $dest
 Copy-Item "$release\zct-service.exe" $dest -Force
+Copy-Item "$release\zct-settings.exe" $dest -Force
 Copy-Item "$dict\*" "$dest\dict" -Force
 
 Write-Host '註冊 TSF 文字服務'
 $p = Start-Process regsvr32.exe -ArgumentList '/s', "`"$dll`"" -Wait -PassThru
 if ($p.ExitCode -ne 0) { throw "regsvr32 失敗（$($p.ExitCode)）" }
+
+Write-Host '建立開始功能表捷徑'
+$startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'ZCT 設定.lnk'
+$shell = New-Object -ComObject WScript.Shell
+$lnk = $shell.CreateShortcut($startMenu)
+$lnk.TargetPath = "$dest\zct-settings.exe"
+$lnk.WorkingDirectory = $dest
+$lnk.Save()
 
 Write-Host '設定登入時自動啟動服務程序'
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ZCT' -Value "`"$dest\zct-service.exe`""

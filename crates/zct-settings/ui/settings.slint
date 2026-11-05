@@ -1,0 +1,446 @@
+import { Button, ComboBox, LineEdit, Switch, SpinBox, StandardTableView, ListView, ScrollView, Palette } from "std-widgets.slint";
+
+export struct General {
+    default-mode: int,      // 0 中文 1 英文
+    punctuation: int,       // 0 全形 1 半形
+    output: int,            // 0 繁體 1 簡體
+    on-focus: int,          // 0 記住 1 重設
+    shift: int,             // 0 左右 1 左 2 右 3 關
+    tap-ms: int,
+    per-page: int,
+    sort-freq: bool,
+    detect-legacy: bool,
+    detect-fullscreen: bool,
+}
+
+export struct Hotkeys {
+    width: string,
+    output: string,
+    game: string,
+    forget: string,
+    pin: string,
+}
+
+export struct Theme {
+    layout: int,            // 0 直式 1 橫式
+    font: string,
+    size: int,
+    background: string,
+    text: string,
+    number: string,
+    highlight: string,
+}
+
+// 0 = 沿用全域設定
+export struct AppRuleRow {
+    name: string,
+    windows: string,
+    macos: string,
+    default-mode: int,      // 0 / 1 中文 / 2 英文
+    punctuation: int,       // 0 / 1 全形 / 2 半形
+    output: int,            // 0 / 1 繁體 / 2 簡體
+    on-focus: int,          // 0 / 1 記住 / 2 重設
+    game: int,              // 0 關 / 1 鎖定英文 / 2 保留狀態
+    detect: int,            // 0 / 1 開 / 2 關
+}
+
+export struct Phrase {
+    word: string,
+    bopomofo: string,
+    pinned: bool,
+    banned: bool,
+}
+
+export struct Day {
+    label: string,
+    chars: int,
+    corrections: int,
+    accuracy: float,        // 0–1
+}
+
+component Row inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 12px;
+    alignment: start;
+    Text {
+        text: root.label;
+        width: 140px;
+        vertical-alignment: center;
+    }
+    @children
+}
+
+component Section inherits Text {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    height: 36px;
+    border-radius: 6px;
+    background: root.active ? Palette.selection-background : touch.has-hover ? Palette.alternate-background : transparent;
+    Text {
+        x: 14px;
+        text: root.text;
+        vertical-alignment: center;
+        color: root.active ? Palette.selection-foreground : Palette.foreground;
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component Preview inherits Rectangle {
+    in property <Theme> theme;
+    in property <color> bg;
+    in property <color> fg;
+    in property <color> num;
+    in property <color> hl;
+    property <[string]> words: ["天", "添", "田", "填", "甜"];
+    background: root.bg;
+    border-radius: 8px;
+    drop-shadow-blur: 8px;
+    drop-shadow-color: #00000040;
+    width: root.theme.layout == 0 ? vlist.preferred-width : hlist.preferred-width;
+    height: root.theme.layout == 0 ? vlist.preferred-height : hlist.preferred-height;
+
+    vlist := VerticalLayout {
+        visible: root.theme.layout == 0;
+        padding: 4px;
+        for w[i] in root.words: Rectangle {
+            border-radius: 4px;
+            background: i == 1 ? root.hl : transparent;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 10px;
+                padding-top: 2px;
+                padding-bottom: 2px;
+                spacing: 8px;
+                Text { text: i + 1; color: root.num; font-family: root.theme.font; font-size: root.theme.size * 0.75px; vertical-alignment: center; }
+                Text { text: w; color: root.fg; font-family: root.theme.font; font-size: root.theme.size * 1px; }
+            }
+        }
+    }
+    hlist := HorizontalLayout {
+        visible: root.theme.layout == 1;
+        padding: 4px;
+        for w[i] in root.words: Rectangle {
+            border-radius: 4px;
+            background: i == 1 ? root.hl : transparent;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                padding-top: 2px;
+                padding-bottom: 2px;
+                spacing: 4px;
+                Text { text: i + 1; color: root.num; font-family: root.theme.font; font-size: root.theme.size * 0.75px; vertical-alignment: center; }
+                Text { text: w; color: root.fg; font-family: root.theme.font; font-size: root.theme.size * 1px; }
+            }
+        }
+    }
+}
+
+component ColorField inherits HorizontalLayout {
+    in-out property <string> value;
+    in property <color> swatch;
+    spacing: 8px;
+    LineEdit {
+        width: 110px;
+        text <=> root.value;
+    }
+    Rectangle {
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        border-width: 1px;
+        border-color: Palette.border;
+        background: root.swatch;
+    }
+}
+
+export component SettingsWindow inherits Window {
+    title: "ZCT 設定";
+    preferred-width: 820px;
+    preferred-height: 600px;
+    default-font-family: "Microsoft JhengHei UI";
+
+    in-out property <int> page: 0;
+    in-out property <General> general;
+    in-out property <Hotkeys> hotkeys;
+    in-out property <Theme> theme;
+    in property <[AppRuleRow]> apps;
+    in-out property <int> app-index: -1;
+    in-out property <AppRuleRow> app-edit;
+    in property <[Phrase]> phrases;
+    in property <[Day]> days;
+    in property <string> summary;
+    in property <[string]> backups;
+    in-out property <string> restore-pending;
+    in property <string> status;
+    in property <bool> online;
+
+    pure callback parse-color(string) -> color;
+    pure callback hotkey-valid(string) -> bool;
+    callback save();
+    callback select-app(int);
+    callback apply-app();
+    callback add-app();
+    callback remove-app(int);
+    callback filter-phrases(string);
+    callback add-phrase(string, string);
+    callback phrase-action(Phrase, string);
+    callback restore(string);
+    callback refresh();
+
+    HorizontalLayout {
+        // 側邊導覽
+        Rectangle {
+            width: 160px;
+            background: Palette.alternate-background;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 4px;
+                alignment: start;
+                NavItem { text: "一般"; active: root.page == 0; clicked => { root.page = 0; } }
+                NavItem { text: "快捷鍵"; active: root.page == 1; clicked => { root.page = 1; } }
+                NavItem { text: "外觀"; active: root.page == 2; clicked => { root.page = 2; } }
+                NavItem { text: "App 規則"; active: root.page == 3; clicked => { root.page = 3; } }
+                NavItem { text: "詞庫"; active: root.page == 4; clicked => { root.page = 4; root.refresh(); } }
+                NavItem { text: "學習"; active: root.page == 5; clicked => { root.page = 5; root.refresh(); } }
+            }
+        }
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            // ---- 一般 ----
+            if root.page == 0: ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Section { text: "輸入"; }
+                    Row { label: "預設模式"; ComboBox { width: 160px; model: ["中文", "英文"]; current-index <=> root.general.default-mode; } }
+                    Row { label: "標點"; ComboBox { width: 160px; model: ["全形", "半形"]; current-index <=> root.general.punctuation; } }
+                    Row { label: "輸出"; ComboBox { width: 160px; model: ["繁體", "簡體"]; current-index <=> root.general.output; } }
+                    Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設"]; current-index <=> root.general.on-focus; } }
+                    Section { text: "Shift 切換中英"; }
+                    Row { label: "使用的 Shift"; ComboBox { width: 160px; model: ["左右都可", "左 Shift", "右 Shift", "不使用"]; current-index <=> root.general.shift; } }
+                    Row { label: "按住上限（毫秒）"; SpinBox { width: 160px; minimum: 100; maximum: 1000; step-size: 50; value <=> root.general.tap-ms; } }
+                    Section { text: "候選字"; }
+                    Row { label: "每頁字數"; SpinBox { width: 160px; minimum: 1; maximum: 10; value <=> root.general.per-page; } }
+                    Row { label: "依常用程度排序"; Switch { checked <=> root.general.sort-freq; } }
+                    Section { text: "自動偵測不在輸入狀態"; }
+                    Row { label: "舊式程式全螢幕"; Switch { checked <=> root.general.detect-legacy; } }
+                    Row { label: "獨佔全螢幕"; Switch { checked <=> root.general.detect-fullscreen; } }
+                }
+            }
+
+            // ---- 快捷鍵 ----
+            if root.page == 1: VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
+                alignment: start;
+                Section { text: "快捷鍵"; }
+                for item in [
+                    { label: "全形 / 半形", idx: 0 },
+                    { label: "繁體 / 簡體", idx: 1 },
+                    { label: "遊戲模式", idx: 2 },
+                    { label: "忘記學習（候選窗）", idx: 3 },
+                    { label: "固頂（候選窗）", idx: 4 },
+                ]: Row {
+                    label: item.label;
+                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : root.hotkeys.pin;
+                    LineEdit {
+                        width: 220px;
+                        text: parent.value;
+                        placeholder-text: "未設定";
+                        edited(t) => {
+                            if item.idx == 0 { root.hotkeys.width = t; }
+                            if item.idx == 1 { root.hotkeys.output = t; }
+                            if item.idx == 2 { root.hotkeys.game = t; }
+                            if item.idx == 3 { root.hotkeys.forget = t; }
+                            if item.idx == 4 { root.hotkeys.pin = t; }
+                        }
+                    }
+                    Text {
+                        vertical-alignment: center;
+                        color: #d13438;
+                        text: root.hotkey-valid(parent.value) ? "" : "格式錯誤";
+                    }
+                }
+                Text {
+                    text: "例：ctrl+shift+f12、shift+space；留空代表不使用";
+                    color: Palette.foreground.with-alpha(0.6);
+                }
+            }
+
+            // ---- 外觀 ----
+            if root.page == 2: HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 48px;
+                alignment: start;
+                VerticalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Section { text: "候選窗"; }
+                    Row { label: "排列"; ComboBox { width: 160px; model: ["直式", "橫式"]; current-index <=> root.theme.layout; } }
+                    Row { label: "字型"; LineEdit { width: 200px; text <=> root.theme.font; } }
+                    Row { label: "字級"; SpinBox { width: 160px; minimum: 8; maximum: 48; value <=> root.theme.size; } }
+                    Row { label: "背景"; ColorField { value <=> root.theme.background; swatch: root.parse-color(root.theme.background); } }
+                    Row { label: "文字"; ColorField { value <=> root.theme.text; swatch: root.parse-color(root.theme.text); } }
+                    Row { label: "數字"; ColorField { value <=> root.theme.number; swatch: root.parse-color(root.theme.number); } }
+                    Row { label: "選擇框"; ColorField { value <=> root.theme.highlight; swatch: root.parse-color(root.theme.highlight); } }
+                }
+                VerticalLayout {
+                    alignment: start;
+                    padding-top: 40px;
+                    Preview {
+                        theme: root.theme;
+                        bg: root.parse-color(root.theme.background);
+                        fg: root.parse-color(root.theme.text);
+                        num: root.parse-color(root.theme.number);
+                        hl: root.parse-color(root.theme.highlight);
+                    }
+                }
+            }
+
+            // ---- App 規則 ----
+            if root.page == 3: VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
+                StandardTableView {
+                    min-height: 160px;
+                    columns: [{ title: "名稱" }, { title: "Windows" }, { title: "macOS" }];
+                    rows: root.apps-rows;
+                    current-row <=> root.app-index;
+                    current-row-changed(i) => { root.select-app(i); }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Button { text: "新增"; clicked => { root.add-app(); } }
+                    Button { text: "刪除"; enabled: root.app-index >= 0; clicked => { root.remove-app(root.app-index); } }
+                }
+                if root.app-index >= 0: VerticalLayout {
+                    spacing: 8px;
+                    Row { label: "名稱"; LineEdit { width: 220px; text <=> root.app-edit.name; } }
+                    Row { label: "Windows 執行檔"; LineEdit { width: 220px; text <=> root.app-edit.windows; placeholder-text: "Code.exe"; } }
+                    Row { label: "macOS Bundle ID"; LineEdit { width: 220px; text <=> root.app-edit.macos; placeholder-text: "com.microsoft.VSCode"; } }
+                    Row { label: "預設模式"; ComboBox { width: 160px; model: ["沿用全域", "中文", "英文"]; current-index <=> root.app-edit.default-mode; } }
+                    Row { label: "標點"; ComboBox { width: 160px; model: ["沿用全域", "全形", "半形"]; current-index <=> root.app-edit.punctuation; } }
+                    Row { label: "輸出"; ComboBox { width: 160px; model: ["沿用全域", "繁體", "簡體"]; current-index <=> root.app-edit.output; } }
+                    Row { label: "遊戲模式"; ComboBox { width: 160px; model: ["關", "鎖定英文", "保留中英狀態"]; current-index <=> root.app-edit.game; } }
+                    Row { label: "自動偵測"; ComboBox { width: 160px; model: ["沿用全域", "開", "關"]; current-index <=> root.app-edit.detect; } }
+                    HorizontalLayout { alignment: start; Button { text: "套用"; clicked => { root.apply-app(); } } }
+                }
+            }
+
+            // ---- 詞庫 ----
+            if root.page == 4: VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    word := LineEdit { width: 160px; placeholder-text: "詞"; }
+                    reading := LineEdit { width: 220px; placeholder-text: "注音，以空白分隔"; }
+                    Button {
+                        text: "加入";
+                        enabled: root.online && word.text != "" && reading.text != "";
+                        clicked => {
+                            root.add-phrase(word.text, reading.text);
+                            word.text = "";
+                            reading.text = "";
+                        }
+                    }
+                    Rectangle { }
+                    LineEdit { width: 180px; placeholder-text: "搜尋"; edited(t) => { root.filter-phrases(t); } }
+                }
+                ListView {
+                    for p in root.phrases: HorizontalLayout {
+                        height: 38px;
+                        spacing: 12px;
+                        padding-left: 4px;
+                        alignment: start;
+                        Text { width: 120px; text: p.word; vertical-alignment: center; color: p.banned ? Palette.foreground.with-alpha(0.4) : Palette.foreground; }
+                        Text { width: 200px; text: p.bopomofo; vertical-alignment: center; color: Palette.foreground.with-alpha(0.7); }
+                        Text { width: 50px; vertical-alignment: center; text: p.banned ? "封鎖" : p.pinned ? "優先" : ""; }
+                        if p.pinned && !p.banned: Button { width: 96px; text: "取消優先"; clicked => { root.phrase-action(p, "unpin"); } }
+                        if !p.banned: Button { width: 96px; text: "封鎖"; clicked => { root.phrase-action(p, "ban"); } }
+                        if p.banned: Button { width: 96px; text: "解除封鎖"; clicked => { root.phrase-action(p, "unban"); } }
+                    }
+                }
+            }
+
+            // ---- 學習 ----
+            if root.page == 5: VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 12px;
+                alignment: start;
+                Section { text: "首選正確率（近 30 天）"; }
+                Text { text: root.summary; }
+                Rectangle {
+                    height: 160px;
+                    border-width: 1px;
+                    border-color: Palette.border;
+                    border-radius: 6px;
+                    HorizontalLayout {
+                        padding: 10px;
+                        spacing: 4px;
+                        alignment: start;
+                        for d in root.days: VerticalLayout {
+                            width: 14px;
+                            alignment: end;
+                            Rectangle {
+                                height: max(2px, d.accuracy * 130px);
+                                border-radius: 2px;
+                                background: d.accuracy >= 0.95 ? #2b9348 : d.accuracy >= 0.85 ? #e09f3e : #d13438;
+                                TouchArea { }
+                            }
+                        }
+                    }
+                }
+                Section { text: "從備份還原"; }
+                Text {
+                    text: "學習紀錄變亂時，還原到之前某一天的狀態。";
+                    color: Palette.foreground.with-alpha(0.6);
+                }
+                for day in root.backups: HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    Text { width: 120px; text: day; vertical-alignment: center; }
+                    Button {
+                        text: root.restore-pending == day ? "確定還原？" : "還原";
+                        enabled: root.online;
+                        clicked => {
+                            if root.restore-pending == day {
+                                root.restore(day);
+                            } else {
+                                root.restore-pending = day;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 底部狀態列
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: root.online ? root.status : "服務程序未執行：詞庫與學習功能無法使用";
+                    vertical-alignment: center;
+                    color: root.online ? Palette.foreground.with-alpha(0.7) : #d13438;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button { text: "儲存設定"; primary: true; clicked => { root.save(); } }
+            }
+        }
+    }
+
+    // App 規則表格的列（由 apps 推導）
+    in property <[[StandardListViewItem]]> apps-rows;
+}
