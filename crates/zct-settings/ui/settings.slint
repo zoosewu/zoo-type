@@ -11,6 +11,15 @@ export struct General {
     sort-freq: bool,
     detect-legacy: bool,
     detect-fullscreen: bool,
+    auto-english: bool,
+    english-candidate: bool,
+    auto-space: bool,
+}
+
+export struct SyncSettings {
+    enabled: bool,
+    remote: string,
+    interval: int,
 }
 
 export struct Hotkeys {
@@ -19,6 +28,7 @@ export struct Hotkeys {
     game: string,
     forget: string,
     pin: string,
+    emoji: string,
 }
 
 export struct Theme {
@@ -180,6 +190,8 @@ export component SettingsWindow inherits Window {
     in property <[string]> backups;
     in-out property <string> restore-pending;
     in property <string> status;
+    in-out property <SyncSettings> sync;
+    in property <string> sync-status;
     in property <bool> online;
 
     pure callback parse-color(string) -> color;
@@ -194,6 +206,7 @@ export component SettingsWindow inherits Window {
     callback phrase-action(Phrase, string);
     callback restore(string);
     callback refresh();
+    callback sync-now();
 
     HorizontalLayout {
         // 側邊導覽
@@ -210,6 +223,7 @@ export component SettingsWindow inherits Window {
                 NavItem { text: "App 規則"; active: root.page == 3; clicked => { root.page = 3; } }
                 NavItem { text: "詞庫"; active: root.page == 4; clicked => { root.page = 4; root.refresh(); } }
                 NavItem { text: "學習"; active: root.page == 5; clicked => { root.page = 5; root.refresh(); } }
+                NavItem { text: "同步"; active: root.page == 6; clicked => { root.page = 6; root.refresh(); } }
             }
         }
 
@@ -237,6 +251,10 @@ export component SettingsWindow inherits Window {
                     Section { text: "自動偵測不在輸入狀態"; }
                     Row { label: "舊式程式全螢幕"; Switch { checked <=> root.general.detect-legacy; } }
                     Row { label: "獨佔全螢幕"; Switch { checked <=> root.general.detect-fullscreen; } }
+                    Section { text: "中英混打"; }
+                    Row { label: "自動判斷英文單字"; Switch { checked <=> root.general.auto-english; } }
+                    Row { label: "候選窗附上英文"; Switch { checked <=> root.general.english-candidate; } }
+                    Row { label: "中英之間自動空格"; Switch { checked <=> root.general.auto-space; } }
                 }
             }
 
@@ -252,9 +270,10 @@ export component SettingsWindow inherits Window {
                     { label: "遊戲模式", idx: 2 },
                     { label: "忘記學習（候選窗）", idx: 3 },
                     { label: "固頂（候選窗）", idx: 4 },
+                    { label: "Emoji", idx: 5 },
                 ]: Row {
                     label: item.label;
-                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : root.hotkeys.pin;
+                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : item.idx == 4 ? root.hotkeys.pin : root.hotkeys.emoji;
                     LineEdit {
                         width: 220px;
                         text: parent.value;
@@ -265,6 +284,7 @@ export component SettingsWindow inherits Window {
                             if item.idx == 2 { root.hotkeys.game = t; }
                             if item.idx == 3 { root.hotkeys.forget = t; }
                             if item.idx == 4 { root.hotkeys.pin = t; }
+                            if item.idx == 5 { root.hotkeys.emoji = t; }
                         }
                     }
                     Text {
@@ -425,6 +445,29 @@ export component SettingsWindow inherits Window {
                         }
                     }
                 }
+            }
+
+            // ---- 同步 ----
+            if root.page == 6: VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
+                alignment: start;
+                Section { text: "git 同步"; }
+                Text {
+                    text: "同步設定、App 規則、自訂詞與統計；自動學習紀錄與 local/ 不同步。請使用私人 repo。";
+                    color: Palette.foreground.with-alpha(0.6);
+                    wrap: word-wrap;
+                }
+                Row { label: "自動同步"; Switch { checked <=> root.sync.enabled; } }
+                Row { label: "遠端 repo"; LineEdit { width: 360px; text <=> root.sync.remote; placeholder-text: "git@github.com:you/zct-data.git"; } }
+                Row { label: "間隔（分鐘）"; SpinBox { width: 160px; minimum: 1; maximum: 1440; value <=> root.sync.interval; } }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 12px;
+                    Button { text: "立即同步"; enabled: root.online; clicked => { root.sync-now(); } }
+                    Button { text: "重新整理狀態"; clicked => { root.refresh(); } }
+                }
+                Text { text: root.sync-status; wrap: word-wrap; }
             }
 
             // 底部狀態列

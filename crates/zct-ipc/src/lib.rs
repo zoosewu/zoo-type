@@ -7,7 +7,7 @@ use zct_core::{DayStats, KeyEvent, KeyResult, PhraseAction, PhraseEntry};
 pub mod pipe;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -61,6 +61,8 @@ pub enum Request {
     Backups,
     /// 從備份還原；成功後服務程序會結束，下次按鍵時重新啟動並載入 → `Ok` / `Error`
     Restore { day: String },
+    /// 立即在背景同步；結果寫在 `local/sync-status.txt` → `Ok`
+    SyncNow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

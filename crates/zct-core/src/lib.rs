@@ -10,6 +10,7 @@ pub mod mixed;
 pub mod paths;
 pub mod session;
 pub mod shift;
+pub mod sync;
 
 pub use apps::{AppRule, AppRules};
 pub use engine::{DayStats, Engine, PhraseAction, PhraseEntry};

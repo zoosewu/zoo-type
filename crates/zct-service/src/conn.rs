@@ -157,6 +157,10 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 Err(e) => Response::Error(e.to_string()),
             },
+            Request::SyncNow => {
+                let _ = shared.sync.send(());
+                Response::Ok
+            }
             Request::Reset | Request::Focus => {
                 if let Some(s) = session.as_mut() {
                     if req == Request::Focus {

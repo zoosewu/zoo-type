@@ -896,3 +896,44 @@ fn emoji_hotkey_passes_through_in_english_mode() {
     h.tap_shift();
     assert!(!h.press(Key::Char(b'e'), ctrl_alt()).eaten);
 }
+
+// ---- M7：同步 ----
+
+#[test]
+fn sync_export_keeps_timestamps_of_unchanged_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = open_engine(&dir.path().join("learning"));
+    engine.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").unwrap();
+    let first = zct_core::sync::export(&engine, "", 100);
+    assert_eq!(first, "酷音\tㄎㄨˋ ㄧㄣ\tpinned\t100\n");
+    // 沒變動 → 沿用舊時間
+    assert_eq!(zct_core::sync::export(&engine, &first, 200), first);
+    // 變動 → 新時間
+    engine
+        .phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", zct_core::PhraseAction::Ban)
+        .unwrap();
+    assert_eq!(
+        zct_core::sync::export(&engine, &first, 300),
+        "酷音\tㄎㄨˋ ㄧㄣ\tbanned\t300\n"
+    );
+}
+
+#[test]
+fn sync_between_two_machines_newest_wins() {
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = open_engine(da.path());
+    let b = open_engine(db.path());
+    // A 加詞並同步
+    a.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").unwrap();
+    let file = zct_core::sync::export(&a, "", 100);
+    assert_eq!(zct_core::sync::import(&b, &file), 1);
+    assert!(b.phrases().iter().any(|p| p.word == "酷音" && p.is_pinned()));
+    // B 之後封鎖，A 的舊紀錄與 B 的新紀錄被 union 合併
+    b.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", zct_core::PhraseAction::Ban).unwrap();
+    let from_b = zct_core::sync::export(&b, &file, 200);
+    let merged = format!("{file}{from_b}");
+    assert_eq!(zct_core::sync::import(&a, &merged), 1);
+    assert!(a.phrases().iter().any(|p| p.word == "酷音" && p.is_banned()));
+    // 再匯入一次沒有變更
+    assert_eq!(zct_core::sync::import(&a, &merged), 0);
+}

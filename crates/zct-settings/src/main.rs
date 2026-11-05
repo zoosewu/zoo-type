@@ -38,6 +38,9 @@ fn general_from(c: &Config) -> General {
         sort_freq: c.candidates.sort_by_frequency,
         detect_legacy: c.detect.legacy_fullscreen,
         detect_fullscreen: c.detect.exclusive_fullscreen,
+        auto_english: c.mixed.auto_english,
+        english_candidate: c.mixed.english_candidate,
+        auto_space: c.mixed.auto_space,
     }
 }
 
@@ -57,6 +60,23 @@ fn apply_general(c: &mut Config, g: &General) {
     c.candidates.sort_by_frequency = g.sort_freq;
     c.detect.legacy_fullscreen = g.detect_legacy;
     c.detect.exclusive_fullscreen = g.detect_fullscreen;
+    c.mixed.auto_english = g.auto_english;
+    c.mixed.english_candidate = g.english_candidate;
+    c.mixed.auto_space = g.auto_space;
+}
+
+fn sync_from(c: &Config) -> SyncSettings {
+    SyncSettings {
+        enabled: c.sync.enabled,
+        remote: c.sync.remote.clone().into(),
+        interval: c.sync.interval_minutes as i32,
+    }
+}
+
+fn apply_sync(c: &mut Config, s: &SyncSettings) {
+    c.sync.enabled = s.enabled;
+    c.sync.remote = s.remote.trim().to_string();
+    c.sync.interval_minutes = s.interval.max(1) as u64;
 }
 
 fn binding_text(b: &Binding) -> SharedString {
@@ -79,6 +99,7 @@ fn hotkeys_from(c: &Config) -> Hotkeys {
         game: binding_text(&h.game_mode),
         forget: binding_text(&h.forget),
         pin: binding_text(&h.pin),
+        emoji: binding_text(&h.emoji),
     }
 }
 
@@ -88,6 +109,7 @@ fn apply_hotkeys(c: &mut Config, h: &Hotkeys) -> Result<(), String> {
     c.hotkeys.game_mode = parse_binding(&h.game)?;
     c.hotkeys.forget = parse_binding(&h.forget)?;
     c.hotkeys.pin = parse_binding(&h.pin)?;
+    c.hotkeys.emoji = parse_binding(&h.emoji)?;
     Ok(())
 }
 
@@ -276,6 +298,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_general(general_from(&config));
     ui.set_hotkeys(hotkeys_from(&config));
     ui.set_theme(theme_from(&config));
+    ui.set_sync(sync_from(&config));
     let apps = Rc::new(VecModel::from(rules.apps.iter().map(row_from).collect::<Vec<_>>()));
     ui.set_apps(ModelRc::from(apps.clone()));
     ui.set_apps_rows(table_rows(&apps));
@@ -316,6 +339,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut st = state.borrow_mut();
             let mut config = st.config.clone();
             apply_general(&mut config, &ui.get_general());
+            apply_sync(&mut config, &ui.get_sync());
             let result = apply_hotkeys(&mut config, &ui.get_hotkeys())
                 .and_then(|_| apply_theme(&mut config, &ui.get_theme()))
                 .and_then(|_| {
@@ -447,12 +471,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_backups(ModelRc::new(VecModel::from(b)));
             }
             ui.set_online(st.service.client.is_some());
+            let sync_status = std::fs::read_to_string(st.data.local().join("sync-status.txt"))
+                .unwrap_or_else(|_| "尚未同步".into());
+            ui.set_sync_status(sync_status.into());
             if let Some(e) = error {
                 ui.set_status(e.into());
             }
         }
     };
     ui.on_refresh(refresh.clone());
+    {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        ui.on_sync_now(move || {
+            let r = state.borrow_mut().service.call(Request::SyncNow);
+            ui_weak.unwrap().set_sync_status(
+                match r {
+                    Ok(_) => "同步中…（完成後按「重新整理狀態」）".to_string(),
+                    Err(e) => e,
+                }
+                .into(),
+            );
+        });
+    }
     refresh();
     {
         let (state, show_phrases) = (state.clone(), show_phrases.clone());
@@ -540,9 +580,15 @@ mod tests {
         c.hotkeys.pin = Binding(None);
         c.theme.layout = Layout::Horizontal;
         c.theme.background = Color(0x202020);
+        c.mixed.auto_space = false;
+        c.hotkeys.emoji = Binding(None);
+        c.sync.enabled = true;
+        c.sync.remote = "git@example.com:me/zct.git".into();
+        c.sync.interval_minutes = 30;
 
         let mut back = Config::default();
         apply_general(&mut back, &general_from(&c));
+        apply_sync(&mut back, &sync_from(&c));
         apply_hotkeys(&mut back, &hotkeys_from(&c)).unwrap();
         apply_theme(&mut back, &theme_from(&c)).unwrap();
         assert_eq!(back, c);

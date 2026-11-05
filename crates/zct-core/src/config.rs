@@ -192,6 +192,27 @@ impl Default for DetectConfig {
     }
 }
 
+/// git 同步（需求 4.8）：資料根目錄本身就是 git repo
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SyncConfig {
+    pub enabled: bool,
+    /// 遠端 repo（請用私人 repo：使用者詞庫等同打字內容的摘要）；空字串代表只在本機 commit
+    pub remote: String,
+    /// 自動同步間隔（分鐘）
+    pub interval_minutes: u64,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        SyncConfig {
+            enabled: false,
+            remote: String::new(),
+            interval_minutes: 10,
+        }
+    }
+}
+
 /// 中英混打（需求 4.5：B + C + E）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -355,6 +376,7 @@ pub struct Config {
     pub hotkeys: HotkeyConfig,
     pub detect: DetectConfig,
     pub mixed: MixedConfig,
+    pub sync: SyncConfig,
     pub candidates: CandidateConfig,
     pub punctuation: PunctuationConfig,
     pub theme: ThemeConfig,

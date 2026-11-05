@@ -11,6 +11,8 @@ mod logger;
 #[cfg(windows)]
 mod settings;
 #[cfg(windows)]
+mod sync;
+#[cfg(windows)]
 mod tray;
 #[cfg(windows)]
 mod ui;
@@ -44,10 +46,12 @@ mod app {
     use zct_core::Engine;
     use zct_core::paths::DataRoot;
 
-    use crate::{conn, logger, settings, tray, ui};
+    use crate::{conn, logger, settings, sync, tray, ui};
 
     pub struct Shared {
-        pub settings: settings::Settings,
+        pub settings: Arc<settings::Settings>,
+        /// 觸發「立即同步」
+        pub sync: std::sync::mpsc::Sender<()>,
         /// 所有連線共用的詞庫與學習紀錄
         pub engine: Arc<Engine>,
         /// 每日備份資料夾
@@ -126,7 +130,7 @@ mod app {
         log::info!("啟動，資料根目錄：{}", data.root().display());
 
         // 設定檔寫錯時仍要能打字：settings 會記錄錯誤並改用上一份正確的設定或預設值
-        let settings = settings::Settings::new(&data);
+        let settings = Arc::new(settings::Settings::new(&data));
         let theme = settings.current().0.theme;
         let sys_dict_dir = find_sys_dict()?;
         log::info!("系統詞庫：{}", sys_dict_dir.display());
@@ -138,6 +142,7 @@ mod app {
         }
         let engine = Arc::new(Engine::open(&sys_dict_dir, &data.learning())?);
         spawn_saver(engine.clone(), data.backup())?;
+        let sync = sync::spawn(data.clone(), settings.clone(), engine.clone())?;
 
         let game = Arc::new(AtomicBool::new(false));
         let ui = ui::spawn(
@@ -149,6 +154,7 @@ mod app {
         )?;
         let shared = Arc::new(Shared {
             settings,
+            sync,
             engine,
             backup: data.backup(),
             game,

@@ -28,6 +28,8 @@
 | 固頂（以後都排第一） | 候選窗中 Shift + Enter |
 | 忘記學習紀錄 | 候選窗中 Shift + Delete |
 | 加詞 | 組字區 Shift + ← / → 選範圍，再按 Enter |
+| Emoji | 打出關鍵字（例如「開心」）再按 Ctrl + Alt + E；沒有組字時列出常用 Emoji |
+| 中英混打 | 直接打英文單字再按空白（例如 hello），中英之間自動加空格 |
 | 送出 | Enter |
 | 取消 | Esc |
 

@@ -33,10 +33,21 @@ output = ""                # 切換繁體 / 簡體（預設不綁定）
 game_mode = "ctrl+shift+f12"  # 開關遊戲模式（所有 App 一起）
 forget = "shift+delete"    # 候選窗中：忘記選擇框所在詞的學習紀錄（並取消固頂）
 pin = "shift+enter"        # 候選窗中：固頂選擇框所在的詞並選它
+emoji = "ctrl+alt+e"       # Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
 
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
 exclusive_fullscreen = true  # 有程式獨佔全螢幕
+
+[mixed]                    # 中英混打
+auto_english = true        # 按空白時，剛打的按鍵是英文單字且不是合法注音 → 送出英文（例：hello）
+english_candidate = true   # 剛完成的音節也是英文單字時，候選窗附上英文（例：fu → 七 / fu）
+auto_space = true          # 中英文之間自動加空格（盤古之白）
+
+[sync]                     # git 同步，見下方說明
+enabled = false
+remote = ""                # 例：git@github.com:you/zct-data.git（請用私人 repo）
+interval_minutes = 10
 
 [theme]                    # 候選窗外觀，改完 1 秒內生效
 layout = "vertical"        # "vertical" 直式 | "horizontal" 橫式
@@ -138,6 +149,22 @@ App 的執行檔名稱可以在工作管理員的「詳細資料」分頁查到�
 - 存檔先寫暫存檔再改名，寫到一半當機也不會弄壞檔案
 - **學習紀錄變亂時**：關閉所有 App（或登出），把 `local/backup/` 裡某一天的檔案複製回 `local/learning/`
 - 檔案損壞時，輸入法會改用空的紀錄繼續運作，原檔另存為 `*.broken`
+
+## git 同步
+
+資料根目錄本身就是 git repo。需要先安裝 Git，並設定好遠端的 SSH 金鑰或憑證（ZCT 沿用你既有的 git 設定）。
+
+| 同步 | 不同步 |
+|------|--------|
+| `config.toml`、`apps.toml` | `local/`（學習紀錄、備份、log） |
+| `dict/user.tsv`（自訂詞、固頂、封鎖） | |
+| `stats/<電腦名稱>.tsv`（每日統計） | |
+
+- 兩台電腦改了同一個詞時，以較新的修改為準
+- **新電腦第一次同步時會採用遠端的設定與 App 規則**；本機的自訂詞會合併進去
+- 設定檔兩邊同時修改而衝突時，同步會中止並在設定程式的「同步」頁顯示錯誤，需手動處理
+- **自動學習紀錄不同步**：libchewing 的學習紀錄是二進位格式、沒有可逐筆合併的介面
+- 同步結果記在 `local/sync-status.txt`
 
 ## 遊戲模式
 

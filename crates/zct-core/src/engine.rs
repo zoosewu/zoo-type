@@ -371,6 +371,30 @@ impl Engine {
         Ok(())
     }
 
+    /// 同步匯入：把一個詞設成指定狀態（`current` 是本機目前狀態，None 表示不在詞庫）
+    pub(crate) fn set_phrase_state(
+        &self,
+        word: &str,
+        bopomofo: &str,
+        target: crate::sync::PhraseState,
+        current: Option<crate::sync::PhraseState>,
+    ) -> Result<(), String> {
+        use crate::sync::PhraseState;
+        let syl = Self::parse(word, bopomofo)?;
+        match (target, current) {
+            (PhraseState::Banned, _) => {
+                self.user_dict.ban(syl.as_ref(), word);
+                self.history.remove(syl.as_ref(), word);
+            }
+            (PhraseState::Pinned, _) => self.pin(syl.as_ref(), word),
+            (PhraseState::Normal, Some(PhraseState::Pinned)) => self.forget(syl.as_ref(), word),
+            // 不在詞庫或被封鎖 → 一般自訂詞
+            (PhraseState::Normal, _) => self.user_dict.insert(syl.as_ref(), word),
+        }
+        self.mark_dirty();
+        Ok(())
+    }
+
     /// 備份清單（新的在前）
     pub fn backups(backup_dir: &Path) -> Vec<String> {
         let mut days: Vec<String> = std::fs::read_dir(backup_dir)
