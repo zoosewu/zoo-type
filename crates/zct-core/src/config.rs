@@ -1,0 +1,155 @@
+//! `config.toml`：兩平台共用、會被 git 同步的使用者設定
+
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum InputMode {
+    #[default]
+    Chinese,
+    English,
+}
+
+impl InputMode {
+    pub fn toggled(self) -> InputMode {
+        match self {
+            InputMode::Chinese => InputMode::English,
+            InputMode::English => InputMode::Chinese,
+        }
+    }
+}
+
+/// 哪一側的 Shift 可以切換中英
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ShiftToggle {
+    #[default]
+    Both,
+    Left,
+    Right,
+    Off,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct InputConfig {
+    /// 新的輸入 context 預設的中英狀態
+    pub default_mode: InputMode,
+}
+
+impl Default for InputConfig {
+    fn default() -> Self {
+        InputConfig {
+            default_mode: InputMode::Chinese,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToggleConfig {
+    pub shift: ShiftToggle,
+    /// 按住 Shift 超過這個時間才放開，不算單按
+    pub shift_tap_max_ms: u64,
+}
+
+impl Default for ToggleConfig {
+    fn default() -> Self {
+        ToggleConfig {
+            shift: ShiftToggle::Both,
+            shift_tap_max_ms: 300,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CandidateConfig {
+    pub per_page: usize,
+}
+
+impl Default for CandidateConfig {
+    fn default() -> Self {
+        CandidateConfig { per_page: 9 }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    pub input: InputConfig,
+    pub toggle: ToggleConfig,
+    pub candidates: CandidateConfig,
+}
+
+#[derive(Debug)]
+pub enum ConfigError {
+    Io(std::io::Error),
+    Parse(toml::de::Error),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::Io(e) => write!(f, "無法讀取設定檔：{e}"),
+            ConfigError::Parse(e) => write!(f, "設定檔格式錯誤：{e}"),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
+impl Config {
+    pub fn parse(text: &str) -> Result<Config, ConfigError> {
+        toml::from_str(text).map_err(ConfigError::Parse)
+    }
+
+    /// 檔案不存在時使用預設值；格式錯誤則回報錯誤（不默默忽略使用者的設定）
+    pub fn load(path: &Path) -> Result<Config, ConfigError> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Config::parse(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+            Err(e) => Err(ConfigError::Io(e)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_file_gives_defaults() {
+        assert_eq!(Config::parse("").unwrap(), Config::default());
+    }
+
+    #[test]
+    fn partial_override() {
+        let c = Config::parse(
+            r#"
+            [input]
+            default_mode = "english"
+            [toggle]
+            shift = "left"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(c.input.default_mode, InputMode::English);
+        assert_eq!(c.toggle.shift, ShiftToggle::Left);
+        assert_eq!(c.toggle.shift_tap_max_ms, 300);
+    }
+
+    #[test]
+    fn unknown_key_is_an_error() {
+        assert!(Config::parse("[toggle]\nshfit = \"left\"").is_err());
+    }
+
+    #[test]
+    fn missing_file_gives_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = Config::load(&dir.path().join("config.toml")).unwrap();
+        assert_eq!(c, Config::default());
+    }
+}
