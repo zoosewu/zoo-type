@@ -11,6 +11,7 @@ ferrous-opencc = { version = "0.4.0", default-features = false, features = ["t2s
 serde.workspace = true
 log.workspace = true
 toml = "1.2.0"
+serde_json = "1.0.154"
 
 [dev-dependencies]
 tempfile = "3.27.0"

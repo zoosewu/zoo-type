@@ -19,6 +19,11 @@ echo "$VERSION" > "$DEST/VERSION"
 # 英文單字表（中英混打用）：dwyl/english-words，Unlicense（公眾領域）
 WORDS="https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"
 echo "下載 $WORDS"
-curl -fsSL -A "zct-dev" "$WORDS" | tr -d '' | awk 'length($0) >= 2 && length($0) <= 20' | LC_ALL=C sort -u > "$DEST/english.txt"
+curl -fsSL -A "zct-dev" "$WORDS" | tr -d '\r' | awk 'length($0) >= 2 && length($0) <= 20' | LC_ALL=C sort -u > "$DEST/english.txt"
+
+# Emoji 繁中關鍵字：Unicode CLDR annotations，Unicode-3.0 授權
+EMOJI="https://raw.githubusercontent.com/unicode-org/cldr-json/main/cldr-json/cldr-annotations-full/annotations/zh-Hant/annotations.json"
+echo "下載 $EMOJI"
+curl -fsSL -A "zct-dev" -o "$DEST/emoji-zh-Hant.json" "$EMOJI"
 echo "完成：$DEST"
 ls -la "$DEST"

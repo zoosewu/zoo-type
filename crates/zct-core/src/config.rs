@@ -154,6 +154,8 @@ pub struct HotkeyConfig {
     pub forget: Binding,
     /// 候選窗中：固頂選擇框所在的詞並選它
     pub pin: Binding,
+    /// Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
+    pub emoji: Binding,
 }
 
 impl Default for HotkeyConfig {
@@ -164,6 +166,7 @@ impl Default for HotkeyConfig {
             game_mode: Binding::key("ctrl+shift+f12"),
             forget: Binding::key("shift+delete"),
             pin: Binding::key("shift+enter"),
+            emoji: Binding::key("ctrl+alt+e"),
         }
     }
 }

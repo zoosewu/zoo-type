@@ -93,6 +93,8 @@ pub struct Engine {
     history: HistoryDict,
     /// 英文單字表（中英混打）；沒有 `english.txt` 時為空，功能自動停用
     words: crate::mixed::WordList,
+    /// Emoji 關鍵字（CLDR 繁中註解）；沒有檔案時只能用常用 Emoji
+    emoji: crate::emoji::EmojiIndex,
     dir: PathBuf,
     dirty: AtomicBool,
     /// 還原備份後停止存檔，避免記憶體中的舊資料蓋掉剛還原的檔案
@@ -184,8 +186,15 @@ impl Engine {
             crate::mixed::WordList::default()
         });
 
+        let emoji = crate::emoji::EmojiIndex::load(&sys_dir.join("emoji-zh-Hant.json"))
+            .unwrap_or_else(|e| {
+                log::warn!("沒有 Emoji 關鍵字資料，只能使用常用 Emoji：{e}");
+                crate::emoji::EmojiIndex::default()
+            });
+
         Ok(Engine {
             words,
+            emoji,
             string_table,
             static_dict,
             rare_dict,
@@ -211,6 +220,10 @@ impl Engine {
             .static_lm(self.lm.clone())
             .symbol_selector(self.symbols.clone())
             .build()
+    }
+
+    pub(crate) fn emoji(&self) -> &crate::emoji::EmojiIndex {
+        &self.emoji
     }
 
     pub(crate) fn words(&self) -> &crate::mixed::WordList {

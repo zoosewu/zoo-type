@@ -90,6 +90,14 @@ fn simplifier() -> Option<&'static OpenCC> {
         .as_ref()
 }
 
+/// Emoji 選擇中的狀態
+#[derive(Debug)]
+struct EmojiPick {
+    items: Vec<String>,
+    page: usize,
+    highlight: usize,
+}
+
 #[derive(Debug)]
 pub struct Session {
     engine: Arc<Engine>,
@@ -112,6 +120,7 @@ pub struct Session {
     english_alt: Option<String>,
     /// E：游標前最後一個字（本輸入法送出的，或交給 App 的按鍵）；未知時為 None
     last_char: Option<char>,
+    emoji: Option<EmojiPick>,
 }
 
 impl Session {
@@ -148,6 +157,7 @@ impl Session {
             raw: String::new(),
             english_alt: None,
             last_char: None,
+            emoji: None,
         })
     }
 
@@ -182,13 +192,18 @@ impl Session {
     }
 
     pub fn is_composing(&self) -> bool {
-        !self.editor.is_empty() || self.editor.entering_syllable() || self.editor.is_selecting()
+        !self.editor.is_empty()
+            || self.editor.entering_syllable()
+            || self.editor.is_selecting()
+            || self.emoji.is_some()
     }
 
     fn chinese_hotkey(&self, ev: &KeyEvent) -> bool {
         self.mode == InputMode::Chinese
             && self.game_mode() != GameMode::English
-            && (self.hotkeys.width.matches(ev) || self.hotkeys.output.matches(ev))
+            && (self.hotkeys.width.matches(ev)
+                || self.hotkeys.output.matches(ev)
+                || self.hotkeys.emoji.matches(ev))
     }
 
     /// 由輸入法直接送出的文字（不經過 chewing）
@@ -243,6 +258,10 @@ impl Session {
     pub fn test_key(&self, ev: &KeyEvent) -> bool {
         if ev.released || ev.key.is_modifier() || ev.key == Key::Other {
             return false;
+        }
+        // Emoji 選擇中：除了組合鍵，按鍵都由 Emoji 選擇處理
+        if self.emoji.is_some() {
+            return !ev.mods.has_command_modifier();
         }
         if self.hotkeys.game_mode.matches(ev) || self.chinese_hotkey(ev) {
             return true;
@@ -382,6 +401,67 @@ impl Session {
         true
     }
 
+    /// 以目前組字內容（不含還在打的注音）當關鍵字開啟 Emoji 選擇；找不到時回傳提示
+    fn open_emoji(&mut self) -> Option<String> {
+        let keyword = self.editor.display();
+        let items = self.engine.emoji().search(&keyword);
+        if items.is_empty() {
+            return Some(format!("找不到「{keyword}」的 Emoji"));
+        }
+        self.emoji = Some(EmojiPick {
+            items,
+            page: 0,
+            highlight: 0,
+        });
+        None
+    }
+
+    fn emoji_key(&mut self, ev: &KeyEvent, commit: &mut String) {
+        let per_page = self.per_page;
+        let Some(pick) = self.emoji.as_mut() else { return };
+        let pages = pick.items.len().div_ceil(per_page).max(1);
+        let page_len = |page: usize| (pick.items.len() - page * per_page).min(per_page);
+        let mut chosen = None;
+        match ev.key {
+            Key::Esc => {
+                self.emoji = None;
+                return;
+            }
+            Key::Down if pick.highlight + 1 < page_len(pick.page) => pick.highlight += 1,
+            Key::Down | Key::Right | Key::PageDown | Key::Space => {
+                pick.page = (pick.page + 1) % pages;
+                pick.highlight = 0;
+            }
+            Key::Up if pick.highlight > 0 => pick.highlight -= 1,
+            Key::Up | Key::Left | Key::PageUp => {
+                pick.page = (pick.page + pages - 1) % pages;
+                pick.highlight = if ev.key == Key::Up {
+                    page_len(pick.page) - 1
+                } else {
+                    0
+                };
+            }
+            Key::Enter => chosen = Some(pick.highlight),
+            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() => {
+                let d = (c - b'0') as usize;
+                let i = if d == 0 { 9 } else { d - 1 };
+                if i < page_len(pick.page) {
+                    chosen = Some(i);
+                }
+            }
+            _ => {}
+        }
+        if let Some(i) = chosen {
+            let emoji = pick.items[pick.page * per_page + i].clone();
+            // 關鍵字（組字內容）由 Emoji 取代
+            self.emoji = None;
+            self.editor.clear();
+            self.raw.clear();
+            self.english_alt = None;
+            commit.push_str(&emoji);
+        }
+    }
+
     /// 送給 chewing 之前，依按鍵更新目前音節的原始按鍵；回傳這個鍵是否完成一個音節
     fn track_raw(&mut self, ev: &KeyEvent, was_selecting: bool) -> bool {
         match ev.key {
@@ -434,7 +514,11 @@ impl Session {
 
         if self.test_key(ev) {
             r.eaten = true;
-            if self.hotkeys.game_mode.matches(ev) {
+            if self.emoji.is_some() {
+                self.emoji_key(ev, &mut commit);
+            } else if self.hotkeys.emoji.matches(ev) && self.chinese_hotkey(ev) {
+                r.notice = self.open_emoji();
+            } else if self.hotkeys.game_mode.matches(ev) {
                 let text = self.flush();
                 self.join(&mut commit, &text);
                 r.toggle_game = true;
@@ -657,6 +741,7 @@ impl Session {
         self.raw.clear();
         self.english_alt = None;
         self.last_char = None;
+        self.emoji = None;
     }
 
     /// 輸入焦點回到這個 context：依 `on_focus` 決定是否重設中英狀態
@@ -683,6 +768,15 @@ impl Session {
     }
 
     pub fn candidates(&self) -> Option<CandidatePage> {
+        if let Some(pick) = &self.emoji {
+            let start = pick.page * self.per_page;
+            return Some(CandidatePage {
+                items: pick.items[start..(start + self.per_page).min(pick.items.len())].to_vec(),
+                page: pick.page,
+                total_pages: pick.items.len().div_ceil(self.per_page).max(1),
+                highlight: pick.highlight,
+            });
+        }
         if !self.editor.is_selecting() {
             return None;
         }

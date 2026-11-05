@@ -6012,6 +6012,7 @@ dependencies = [
  "ferrous-opencc",
  "log",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
 ]

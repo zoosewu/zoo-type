@@ -2,6 +2,7 @@
 
 pub mod apps;
 pub mod config;
+pub mod emoji;
 pub mod engine;
 pub mod hotkey;
 pub mod key;

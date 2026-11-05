@@ -846,3 +846,53 @@ fn e_cursor_movement_forgets_context() {
     h.type_str("ji3");
     assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("我"));
 }
+
+// ---- M7：Emoji ----
+
+fn ctrl_alt() -> Mods {
+    Mods { ctrl: true, alt: true, ..Mods::NONE }
+}
+
+#[test]
+fn emoji_from_composed_keyword() {
+    let mut h = Harness::new();
+    h.type_str("d9 vup "); // ㄎㄞ ㄒㄧㄣ → 開心
+    assert_eq!(h.s.preedit().text, "開心");
+    let r = h.press(Key::Char(b'e'), ctrl_alt());
+    let page = r.candidates.expect("Emoji 候選");
+    assert!(!page.items.is_empty());
+    let first = page.items[0].clone();
+    let r = h.press(Key::Char(b'1'), Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some(first.as_str()), "Emoji 取代關鍵字");
+    assert!(!h.s.is_composing());
+}
+
+#[test]
+fn emoji_without_composition_lists_common_and_esc_closes() {
+    let mut h = Harness::new();
+    let page = h.press(Key::Char(b'e'), ctrl_alt()).candidates.expect("常用 Emoji");
+    assert_eq!(page.items[0], zct_core::emoji::COMMON[0]);
+    assert!(page.total_pages > 1);
+    let r = h.press(Key::Right, Mods::NONE);
+    assert_eq!(r.candidates.unwrap().page, 1);
+    let r = h.press(Key::Esc, Mods::NONE);
+    assert!(r.candidates.is_none());
+    assert!(!h.s.is_composing());
+}
+
+#[test]
+fn emoji_not_found_shows_notice() {
+    let mut h = Harness::new();
+    h.type_str("sk7"); // ㄋㄜ˙ → 呢（不在任何 Emoji 關鍵字中）
+    let r = h.press(Key::Char(b'e'), ctrl_alt());
+    assert!(r.candidates.is_none());
+    assert!(r.notice.unwrap().contains("找不到"));
+    assert!(h.s.is_composing(), "找不到時保留原本的組字");
+}
+
+#[test]
+fn emoji_hotkey_passes_through_in_english_mode() {
+    let mut h = Harness::new();
+    h.tap_shift();
+    assert!(!h.press(Key::Char(b'e'), ctrl_alt()).eaten);
+}
