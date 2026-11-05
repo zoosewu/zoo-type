@@ -19,8 +19,10 @@ use serde::{Deserialize, Serialize};
 use crate::apps::{AppRule, Effective};
 use crate::engine::Engine;
 use crate::config::{
-    Config, GameMode, HotkeyConfig, InputMode, OnFocus, Output, PunctuationTable, Width,
+    Config, GameMode, HotkeyConfig, InputMode, MixedConfig, OnFocus, Output, PunctuationTable,
+    Width,
 };
+use crate::mixed::{is_cjk, is_latin, is_tone};
 use crate::key::{Key, KeyEvent, Mods, shifted, to_chewing};
 use crate::shift::ShiftTap;
 
@@ -103,6 +105,13 @@ pub struct Session {
     punct: PunctuationTable,
     per_page: usize,
     highlight: usize,
+    mixed: MixedConfig,
+    /// 目前這個音節的原始按鍵（中英混打判斷用）
+    raw: String,
+    /// B：剛完成的音節按鍵也是英文單字 → 候選窗附上的英文
+    english_alt: Option<String>,
+    /// E：游標前最後一個字（本輸入法送出的，或交給 App 的按鍵）；未知時為 None
+    last_char: Option<char>,
 }
 
 impl Session {
@@ -135,6 +144,10 @@ impl Session {
             punct: opts.config.punctuation.compile().map_err(SessionError)?,
             per_page,
             highlight: 0,
+            mixed: opts.config.mixed.clone(),
+            raw: String::new(),
+            english_alt: None,
+            last_char: None,
         })
     }
 
@@ -242,7 +255,8 @@ impl Session {
             return false;
         }
         if self.mode == InputMode::English {
-            return false;
+            // E：英文模式下，緊接在中文後的第一個英數字要由輸入法補空格
+            return self.space_before_latin(ev).is_some();
         }
         if self.is_composing() {
             return !matches!(ev.key, Key::F(_));
@@ -265,8 +279,145 @@ impl Session {
         let eat = self.test_key(ev);
         if !eat {
             self.shift.observe(ev);
+            self.observe_passthrough(ev);
         }
         eat
+    }
+
+    /// 交給 App 的按鍵：記下游標前的字，供盤古之白判斷；移動游標的鍵讓前文變成未知
+    fn observe_passthrough(&mut self, ev: &KeyEvent) {
+        if ev.released || ev.mods.has_command_modifier() {
+            return;
+        }
+        match ev.key {
+            Key::Char(c) => {
+                self.last_char = Some(if ev.mods.shift { shifted(c) } else { c } as char);
+            }
+            Key::Numpad(c) => self.last_char = Some(c as char),
+            Key::Space => self.last_char = Some(' '),
+            Key::Shift(_) | Key::Ctrl | Key::Alt | Key::Meta | Key::CapsLock | Key::F(_) => {}
+            _ => self.last_char = None,
+        }
+    }
+
+    /// E：英文模式下，前一個字是中文時要補空格的英數字
+    fn space_before_latin(&self, ev: &KeyEvent) -> Option<char> {
+        if !self.mixed.auto_space || ev.released || ev.mods.has_command_modifier() {
+            return None;
+        }
+        if !self.last_char.is_some_and(is_cjk) {
+            return None;
+        }
+        match ev.key {
+            Key::Char(c) if c.is_ascii_alphabetic() => {
+                let upper = ev.mods.shift ^ ev.mods.caps_lock;
+                Some(if upper { c.to_ascii_uppercase() } else { c } as char)
+            }
+            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() && !ev.mods.shift => Some(c as char),
+            _ => None,
+        }
+    }
+
+    /// 把一段文字接到送出內容後面；中英文交界依設定補空格（E：盤古之白）
+    fn join(&self, out: &mut String, piece: &str) {
+        let Some(first) = piece.chars().next() else { return };
+        let prev = out.chars().last().or(self.last_char);
+        if self.mixed.auto_space
+            && let Some(prev) = prev
+            && ((is_cjk(prev) && is_latin(first)) || (is_latin(prev) && is_cjk(first)))
+        {
+            out.push(' ');
+        }
+        out.push_str(piece);
+    }
+
+    /// C：按空白時，剛打的按鍵若是英文單字且不是合法注音 → 回傳該單字
+    fn auto_english(&self, ev: &KeyEvent) -> Option<String> {
+        let ok = self.mixed.auto_english
+            && ev.key == Key::Space
+            && !ev.mods.shift
+            && !self.editor.is_selecting()
+            && self.editor.entering_syllable()
+            && self.engine.words().auto_english(&self.raw);
+        ok.then(|| self.raw.clone())
+    }
+
+    /// B：候選窗中英文選項的位置（本頁索引）
+    fn english_index(&self) -> Option<usize> {
+        if !self.mixed.english_candidate
+            || self.english_alt.is_none()
+            || !self.editor.is_selecting()
+            || self.editor.current_page_no().unwrap_or(0) != 0
+            // 英文對應的是最後一個音節；候選窗必須正在選最後一個字
+            || self.editor.cursor() + 1 != self.editor.len()
+        {
+            return None;
+        }
+        let n = self.editor.paginated_candidates().ok()?.len().min(self.per_page);
+        Some(n)
+    }
+
+    /// B：選了英文選項 → 最後一個音節換成英文送出
+    fn pick_english(&mut self, ev: &KeyEvent, commit: &mut String) -> bool {
+        let Some(i) = self.english_index() else { return false };
+        let chosen = match ev.key {
+            Key::Enter => self.highlight == i,
+            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() => {
+                let d = (c - b'0') as usize;
+                (if d == 0 { 9 } else { d - 1 }) == i
+            }
+            _ => false,
+        };
+        if !chosen || ev.mods.shift {
+            return false;
+        }
+        let word = self.english_alt.take().unwrap_or_default();
+        let text = self.editor.display();
+        let n = text.chars().count();
+        let prefix: String = text.chars().take(n.saturating_sub(1)).collect();
+        self.editor.clear();
+        self.highlight = 0;
+        self.join(commit, &prefix);
+        self.join(commit, &word);
+        true
+    }
+
+    /// 送給 chewing 之前，依按鍵更新目前音節的原始按鍵；回傳這個鍵是否完成一個音節
+    fn track_raw(&mut self, ev: &KeyEvent, was_selecting: bool) -> bool {
+        match ev.key {
+            Key::Char(c) if !ev.mods.shift && !was_selecting => {
+                if is_tone(c) {
+                    self.complete_segment();
+                    return true;
+                } else {
+                    self.raw.push(c as char);
+                    self.english_alt = None;
+                }
+            }
+            // 有音節在組時空白 = 一聲，音節完成；否則空白是開候選窗，保留英文選項
+            Key::Space if !was_selecting && self.editor.entering_syllable() => {
+                self.complete_segment();
+                return true;
+            }
+            Key::Space => {}
+            Key::Backspace => {
+                self.raw.pop();
+                self.english_alt = None;
+            }
+            // 候選窗中的操作（翻頁、選擇框移動）不影響英文選項
+            _ if was_selecting => {}
+            _ => {
+                self.raw.clear();
+                self.english_alt = None;
+            }
+        }
+        false
+    }
+
+    fn complete_segment(&mut self) {
+        let raw = std::mem::take(&mut self.raw);
+        self.english_alt =
+            (self.mixed.english_candidate && self.engine.words().candidate(&raw)).then_some(raw);
     }
 
     pub fn process_key(&mut self, ev: &KeyEvent) -> KeyResult {
@@ -275,7 +426,8 @@ impl Session {
 
         // 遊戲模式下 Shift 不切換中英
         if self.shift.observe(ev) && self.game_mode() == GameMode::Off {
-            commit.push_str(&self.flush());
+            let text = self.flush();
+            self.join(&mut commit, &text);
             self.mode = self.mode.toggled();
             r.mode_changed = Some(self.mode);
         }
@@ -283,18 +435,35 @@ impl Session {
         if self.test_key(ev) {
             r.eaten = true;
             if self.hotkeys.game_mode.matches(ev) {
-                commit.push_str(&self.flush());
+                let text = self.flush();
+                self.join(&mut commit, &text);
                 r.toggle_game = true;
+            } else if self.mode == InputMode::English {
+                // 只有 E（盤古之白）會走到這裡
+                if let Some(c) = self.space_before_latin(ev) {
+                    commit.push(' ');
+                    commit.push(c);
+                }
             } else if self.hotkeys.width.matches(ev) && self.chinese_hotkey(ev) {
                 self.width = self.width.toggled();
                 r.width_changed = Some(self.width);
             } else if self.hotkeys.output.matches(ev) && self.chinese_hotkey(ev) {
                 self.output = self.output.toggled();
                 r.output_changed = Some(self.output);
+            } else if let Some(word) = self.auto_english(ev) {
+                // C：送出前面的中文與這個英文單字，空白鍵本身也送出
+                self.editor.cancel_entering_syllable();
+                self.raw.clear();
+                let chinese = self.flush();
+                self.join(&mut commit, &chinese);
+                self.join(&mut commit, &word);
+                commit.push(' ');
+            } else if self.pick_english(ev, &mut commit) {
             } else if let Some(text) = self.direct_text(ev) {
                 // 組字中先送出組字，順序才正確
-                commit.push_str(&self.flush());
-                commit.push_str(&text);
+                let composed = self.flush();
+                self.join(&mut commit, &composed);
+                self.join(&mut commit, &text);
             } else if let Some(notice) = self.learning_key(ev) {
                 r.notice = Some(notice);
             } else if !self.navigate_candidates(ev) {
@@ -304,10 +473,16 @@ impl Session {
                     Key::Numpad(c) => Key::Char(c),
                     k => k,
                 };
+                let len_before = self.editor.len();
+                let completed = self.track_raw(ev, was_selecting);
                 match to_chewing(key, ev.mods) {
                     Some(chewing_ev) => {
                         let was_composing = self.is_composing();
                         let behavior = self.editor.process_keyevent(chewing_ev);
+                        // 音節沒有真的組成字（例如 ㄕㄟ 沒有一聲）：英文選項不能對應到前一個字
+                        if completed && self.editor.len() != len_before + 1 {
+                            self.english_alt = None;
+                        }
                         r.eaten = was_composing || behavior != EditorKeyBehavior::Ignore;
                         if was_selecting && !self.editor.is_selecting() {
                             self.record_pick(picked);
@@ -318,7 +493,15 @@ impl Session {
                     None => r.eaten = false,
                 }
             }
-            commit.push_str(&self.take_commit());
+            let text = self.take_commit();
+            self.join(&mut commit, &text);
+            if !self.is_composing() {
+                self.raw.clear();
+                self.english_alt = None;
+            }
+        }
+        if !r.eaten {
+            self.observe_passthrough(ev);
         }
 
         let notice = self.editor.notification();
@@ -326,6 +509,7 @@ impl Session {
             r.notice = Some(notice.to_owned());
         }
         if !commit.is_empty() {
+            self.last_char = commit.chars().last();
             r.commit = Some(self.convert(&commit));
         }
         r.preedit = self.preedit();
@@ -470,6 +654,9 @@ impl Session {
         self.editor.clear();
         self.shift.reset();
         self.highlight = 0;
+        self.raw.clear();
+        self.english_alt = None;
+        self.last_char = None;
     }
 
     /// 輸入焦點回到這個 context：依 `on_focus` 決定是否重設中英狀態
@@ -506,7 +693,13 @@ impl Session {
             .into_iter()
             .take(self.per_page)
             .map(|c| self.convert(&c))
-            .collect();
+            .collect::<Vec<_>>();
+        let mut items = items;
+        if self.english_index().is_some()
+            && let Some(w) = &self.english_alt
+        {
+            items.push(w.clone());
+        }
         Some(CandidatePage {
             items,
             page: self.editor.current_page_no().unwrap_or(0),

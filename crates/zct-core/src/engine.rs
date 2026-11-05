@@ -91,6 +91,8 @@ pub struct Engine {
     symbols: SymbolSelector,
     user_dict: UserDict,
     history: HistoryDict,
+    /// 英文單字表（中英混打）；沒有 `english.txt` 時為空，功能自動停用
+    words: crate::mixed::WordList,
     dir: PathBuf,
     dirty: AtomicBool,
     /// 還原備份後停止存檔，避免記憶體中的舊資料蓋掉剛還原的檔案
@@ -177,7 +179,13 @@ impl Engine {
             HistoryDict::new(string_table.clone())
         };
 
+        let words = crate::mixed::WordList::load(&sys_dir.join("english.txt")).unwrap_or_else(|e| {
+            log::warn!("沒有英文單字表，中英混打停用：{e}");
+            crate::mixed::WordList::default()
+        });
+
         Ok(Engine {
+            words,
             string_table,
             static_dict,
             rare_dict,
@@ -203,6 +211,10 @@ impl Engine {
             .static_lm(self.lm.clone())
             .symbol_selector(self.symbols.clone())
             .build()
+    }
+
+    pub(crate) fn words(&self) -> &crate::mixed::WordList {
+        &self.words
     }
 
     pub fn dir(&self) -> &Path {

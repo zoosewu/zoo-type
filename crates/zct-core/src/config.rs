@@ -189,6 +189,28 @@ impl Default for DetectConfig {
     }
 }
 
+/// 中英混打（需求 4.5：B + C + E）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MixedConfig {
+    /// C：按空白時，剛打的按鍵是英文單字且不是合法注音 → 送出英文
+    pub auto_english: bool,
+    /// B：剛完成的音節按鍵也是英文單字時，候選窗附上英文
+    pub english_candidate: bool,
+    /// E：中英文之間自動加空格（盤古之白）
+    pub auto_space: bool,
+}
+
+impl Default for MixedConfig {
+    fn default() -> Self {
+        MixedConfig {
+            auto_english: true,
+            english_candidate: true,
+            auto_space: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CandidateConfig {
@@ -329,6 +351,7 @@ pub struct Config {
     pub toggle: ToggleConfig,
     pub hotkeys: HotkeyConfig,
     pub detect: DetectConfig,
+    pub mixed: MixedConfig,
     pub candidates: CandidateConfig,
     pub punctuation: PunctuationConfig,
     pub theme: ThemeConfig,

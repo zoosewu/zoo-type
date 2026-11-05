@@ -5,6 +5,7 @@ pub mod config;
 pub mod engine;
 pub mod hotkey;
 pub mod key;
+pub mod mixed;
 pub mod paths;
 pub mod session;
 pub mod shift;

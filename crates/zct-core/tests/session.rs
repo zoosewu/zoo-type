@@ -447,7 +447,7 @@ fn custom_punctuation_overrides_default() {
 
 #[test]
 fn numpad_digits_pass_through_when_idle_and_commit_when_composing() {
-    let mut h = Harness::new();
+    let mut h = Harness::with_config(no_auto_space());
     assert!(!h.press(Key::Numpad(b'5'), Mods::NONE).eaten);
     h.type_str("wu0 "); // 天
     let r = h.press(Key::Numpad(b'5'), Mods::NONE);
@@ -464,7 +464,7 @@ fn numpad_digit_selects_candidate() {
 
 #[test]
 fn caps_lock_letters_are_english() {
-    let mut h = Harness::new();
+    let mut h = Harness::with_config(no_auto_space());
     let caps = Mods { caps_lock: true, ..Mods::NONE };
     assert!(!h.press(Key::Char(b'a'), caps).eaten, "沒有組字時交給 App");
     h.type_str("wu0 "); // 天
@@ -708,4 +708,141 @@ fn no_backup_without_data() {
     engine.save().unwrap();
     engine.backup(&backups, 7).unwrap();
     assert_eq!(zct_core::Engine::backups(&backups).len(), 1);
+}
+
+// ---- M7：中英混打 ----
+
+fn no_auto_space() -> Config {
+    let mut c = Config::default();
+    c.mixed.auto_space = false;
+    c
+}
+
+fn english_commit(h: &mut Harness, keys: &str) -> Option<String> {
+    let mut last = None;
+    for b in keys.bytes() {
+        let r = match b {
+            b' ' => h.press(Key::Space, Mods::NONE),
+            c => h.press(Key::Char(c), Mods::NONE),
+        };
+        if r.commit.is_some() {
+            last = r.commit;
+        }
+    }
+    last
+}
+
+#[test]
+fn c_invalid_bopomofo_english_word_becomes_english() {
+    let mut h = Harness::with_config(no_auto_space());
+    assert_eq!(english_commit(&mut h, "hello ").as_deref(), Some("hello "));
+    assert!(!h.s.is_composing());
+}
+
+#[test]
+fn c_mixed_sentence_with_pangu_spacing() {
+    // ㄨㄛˇ（我）+ hello + 空白
+    let mut h = Harness::new();
+    let out = english_commit(&mut h, "ji3hello ");
+    assert_eq!(out.as_deref(), Some("我 hello "));
+}
+
+#[test]
+fn c_does_not_trigger_on_valid_syllable_or_non_word() {
+    let mut h = Harness::new();
+    // fu = ㄑㄧ 合法音節 → 照常組成中文（七）
+    h.type_str("fu ");
+    assert!(h.s.is_composing());
+    h.press(Key::Esc, Mods::NONE);
+    h.s.reset();
+    // hellx 不是英文單字 → 不送出英文
+    assert_eq!(english_commit(&mut h, "hellx "), None);
+}
+
+#[test]
+fn c_can_be_disabled() {
+    let mut c = no_auto_space();
+    c.mixed.auto_english = false;
+    let mut h = Harness::with_config(c);
+    assert_eq!(english_commit(&mut h, "hello "), None);
+}
+
+#[test]
+fn b_english_option_in_candidates() {
+    let mut h = Harness::with_config(no_auto_space());
+    h.type_str("fu "); // ㄑㄧ 一聲（七）
+    let page = h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    assert_eq!(page.items.last().map(String::as_str), Some("fu"));
+    let n = page.items.len();
+    // 用數字鍵選英文選項
+    let digit = b'0' + (n % 10) as u8;
+    let r = h.press(Key::Char(digit), Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some("fu"));
+    assert!(!h.s.is_composing());
+}
+
+#[test]
+fn b_english_option_keeps_previous_chinese() {
+    let mut h = Harness::new();
+    h.type_str("ji3fu "); // 我 + ㄑㄧ（七）
+    let page = h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    let n = page.items.len();
+    for _ in 0..n - 1 {
+        h.press(Key::Down, Mods::NONE);
+    }
+    let r = h.press(Key::Enter, Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some("我 fu"));
+}
+
+#[test]
+fn b_failed_syllable_does_not_leave_english_option() {
+    // go = ㄕㄟ 沒有一聲，不會組成字；之後開「我」的候選窗不能出現 go，選了會把「我」刪掉
+    let mut h = Harness::new();
+    h.type_str("ji3go ");
+    let page = h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    assert!(!page.items.contains(&"go".to_string()), "{:?}", page.items);
+}
+
+#[test]
+fn b_no_english_option_when_not_a_word() {
+    let mut h = Harness::new();
+    h.type_str("su3"); // ㄋㄧˇ（你）— 有聲調鍵，不是英文
+    let page = h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    assert!(page.items.iter().all(|w| w != "su3"));
+}
+
+#[test]
+fn e_space_before_english_in_english_mode() {
+    let mut h = Harness::new();
+    h.type_str("ji3");
+    h.press(Key::Enter, Mods::NONE); // 送出「我」
+    h.tap_shift(); // 切到英文
+    let r = h.press(Key::Char(b'o'), Mods::NONE);
+    assert!(r.eaten);
+    assert_eq!(r.commit.as_deref(), Some(" o"));
+    // 之後的英文照常交給 App
+    assert!(!h.press(Key::Char(b'k'), Mods::NONE).eaten);
+}
+
+#[test]
+fn e_space_before_chinese_after_english_passthrough() {
+    let mut h = Harness::new();
+    h.tap_shift(); // 英文
+    h.press(Key::Char(b'o'), Mods::NONE);
+    h.press(Key::Char(b'k'), Mods::NONE);
+    h.tap_shift(); // 中文
+    h.type_str("ji3");
+    let r = h.press(Key::Enter, Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some(" 我"));
+}
+
+#[test]
+fn e_cursor_movement_forgets_context() {
+    let mut h = Harness::new();
+    h.tap_shift();
+    h.press(Key::Char(b'o'), Mods::NONE);
+    h.press(Key::Left, Mods::NONE); // 游標移動後前文未知
+    h.tap_shift();
+    h.type_str("ji3");
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("我"));
 }
