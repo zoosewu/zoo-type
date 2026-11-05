@@ -1,6 +1,10 @@
 //! 一條 DLL 連線 = 一個 App 執行緒 = 一個輸入 session
 
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use zct_core::CandidatePage;
 
 use zct_core::{InputMode, KeyResult, Output, Session, SessionOptions, Width};
 use zct_ipc::pipe::ServerConn;
@@ -53,8 +57,53 @@ fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> 
     .map_err(|e| e.to_string())
 }
 
+/// 背景 AI 請求的結果：（原文, 修正結果或錯誤）
+type AiMailbox = Arc<Mutex<Option<(String, Result<String, String>)>>>;
+
+/// 在背景呼叫 AI；結果放進信箱，並直接更新候選窗（不必等下一次按鍵）
+fn spawn_ai(id: u64, original: String, shared: &Shared, mailbox: AiMailbox) {
+    let cfg = shared.settings.current().0.ai;
+    let ui = shared.ui.clone();
+    let endpoint = zct_ai::Endpoint {
+        base_url: cfg.endpoint.clone(),
+        model: cfg.model.clone(),
+        api_key: zct_ipc::secret::read(zct_ipc::secret::AI_API_KEY),
+        timeout: Duration::from_secs(cfg.timeout_seconds.max(1)),
+    };
+    std::thread::spawn(move || {
+        let result = zct_ai::correct(&endpoint, &original).map_err(|e| e.to_string());
+        match &result {
+            Ok(fixed) if *fixed != original => ui.send(UiCmd::Show {
+                owner: id,
+                page: CandidatePage {
+                    items: vec![fixed.clone()],
+                    page: 0,
+                    total_pages: 1,
+                    highlight: 0,
+                },
+                anchor: None,
+            }),
+            Ok(_) => ui.send(UiCmd::Hint {
+                text: "AI：沒有發現錯字".into(),
+                anchor: None,
+            }),
+            Err(e) => {
+                log::warn!("[{id}] {e}");
+                ui.send(UiCmd::Hint {
+                    text: "AI 修正失敗".into(),
+                    anchor: None,
+                });
+            }
+        }
+        if let Ok(mut m) = mailbox.lock() {
+            *m = Some((original, result));
+        }
+    });
+}
+
 pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let mut session: Option<Session> = None;
+    let mailbox: AiMailbox = Arc::new(Mutex::new(None));
     // 最近一次按鍵結果與狀態提示，等 DLL 回報游標位置後再決定候選窗怎麼顯示
     let mut last: Option<(KeyResult, Option<String>)> = None;
 
@@ -69,6 +118,10 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
         };
         if let Some(s) = session.as_mut() {
             s.set_global_game(shared.game.load(Ordering::Relaxed));
+            // AI 結果回來了：交給 session，接下來的 Enter / 1 就能採用
+            if let Some((original, Ok(fixed))) = mailbox.lock().ok().and_then(|mut m| m.take()) {
+                s.set_ai_suggestion(&original, fixed);
+            }
         }
         let resp = match req {
             Request::Hello { version, pid, exe } => {
@@ -100,6 +153,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             Request::Key(ev) => match session.as_mut() {
                 Some(s) => {
                     let r = s.process_key(&ev);
+                    if let Some(text) = &r.ai_request {
+                        spawn_ai(id, text.clone(), shared, mailbox.clone());
+                    }
                     let game = r.toggle_game.then(|| {
                         let on = !shared.game.fetch_xor(true, Ordering::Relaxed);
                         s.set_global_game(on);

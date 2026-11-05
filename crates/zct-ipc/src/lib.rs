@@ -5,6 +5,8 @@ use zct_core::{DayStats, KeyEvent, KeyResult, PhraseAction, PhraseEntry};
 
 #[cfg(windows)]
 pub mod pipe;
+#[cfg(windows)]
+pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
 pub const PROTOCOL_VERSION: u32 = 6;

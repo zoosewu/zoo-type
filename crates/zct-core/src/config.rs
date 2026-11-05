@@ -156,6 +156,8 @@ pub struct HotkeyConfig {
     pub pin: Binding,
     /// Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
     pub emoji: Binding,
+    /// AI 修正組字內容中的同音錯字
+    pub ai: Binding,
 }
 
 impl Default for HotkeyConfig {
@@ -167,6 +169,7 @@ impl Default for HotkeyConfig {
             forget: Binding::key("shift+delete"),
             pin: Binding::key("shift+enter"),
             emoji: Binding::key("ctrl+alt+e"),
+            ai: Binding::key("ctrl+alt+r"),
         }
     }
 }
@@ -188,6 +191,28 @@ impl Default for DetectConfig {
         DetectConfig {
             legacy_fullscreen: true,
             exclusive_fullscreen: true,
+        }
+    }
+}
+
+/// AI 同音字修正（需求 4.13）：OpenAI 相容 API；API Key 存在 Windows 認證管理員，不在設定檔
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AiConfig {
+    pub enabled: bool,
+    /// 例如 Ollama `http://localhost:11434/v1`、LM Studio `http://localhost:1234/v1`
+    pub endpoint: String,
+    pub model: String,
+    pub timeout_seconds: u64,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        AiConfig {
+            enabled: false,
+            endpoint: "http://localhost:11434/v1".into(),
+            model: String::new(),
+            timeout_seconds: 15,
         }
     }
 }
@@ -377,6 +402,7 @@ pub struct Config {
     pub detect: DetectConfig,
     pub mixed: MixedConfig,
     pub sync: SyncConfig,
+    pub ai: AiConfig,
     pub candidates: CandidateConfig,
     pub punctuation: PunctuationConfig,
     pub theme: ThemeConfig,

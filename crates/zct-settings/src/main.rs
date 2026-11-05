@@ -65,6 +65,22 @@ fn apply_general(c: &mut Config, g: &General) {
     c.mixed.auto_space = g.auto_space;
 }
 
+fn ai_from(c: &Config) -> AiSettings {
+    AiSettings {
+        enabled: c.ai.enabled,
+        endpoint: c.ai.endpoint.clone().into(),
+        model: c.ai.model.clone().into(),
+        timeout: c.ai.timeout_seconds as i32,
+    }
+}
+
+fn apply_ai(c: &mut Config, a: &AiSettings) {
+    c.ai.enabled = a.enabled;
+    c.ai.endpoint = a.endpoint.trim().to_string();
+    c.ai.model = a.model.trim().to_string();
+    c.ai.timeout_seconds = a.timeout.max(1) as u64;
+}
+
 fn sync_from(c: &Config) -> SyncSettings {
     SyncSettings {
         enabled: c.sync.enabled,
@@ -100,6 +116,7 @@ fn hotkeys_from(c: &Config) -> Hotkeys {
         forget: binding_text(&h.forget),
         pin: binding_text(&h.pin),
         emoji: binding_text(&h.emoji),
+        ai: binding_text(&h.ai),
     }
 }
 
@@ -110,6 +127,7 @@ fn apply_hotkeys(c: &mut Config, h: &Hotkeys) -> Result<(), String> {
     c.hotkeys.forget = parse_binding(&h.forget)?;
     c.hotkeys.pin = parse_binding(&h.pin)?;
     c.hotkeys.emoji = parse_binding(&h.emoji)?;
+    c.hotkeys.ai = parse_binding(&h.ai)?;
     Ok(())
 }
 
@@ -299,6 +317,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_hotkeys(hotkeys_from(&config));
     ui.set_theme(theme_from(&config));
     ui.set_sync(sync_from(&config));
+    ui.set_ai(ai_from(&config));
+    ui.set_has_api_key(zct_ipc::secret::read(zct_ipc::secret::AI_API_KEY).is_some());
     let apps = Rc::new(VecModel::from(rules.apps.iter().map(row_from).collect::<Vec<_>>()));
     ui.set_apps(ModelRc::from(apps.clone()));
     ui.set_apps_rows(table_rows(&apps));
@@ -340,6 +360,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut config = st.config.clone();
             apply_general(&mut config, &ui.get_general());
             apply_sync(&mut config, &ui.get_sync());
+            apply_ai(&mut config, &ui.get_ai());
             let result = apply_hotkeys(&mut config, &ui.get_hotkeys())
                 .and_then(|_| apply_theme(&mut config, &ui.get_theme()))
                 .and_then(|_| {
@@ -481,6 +502,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     ui.on_refresh(refresh.clone());
     {
+        let ui_weak = ui.as_weak();
+        ui.on_save_api_key(move |key| {
+            let ui = ui_weak.unwrap();
+            let target = zct_ipc::secret::AI_API_KEY;
+            let msg = if key.is_empty() {
+                zct_ipc::secret::delete(target);
+                "已清除 API Key".to_string()
+            } else {
+                match zct_ipc::secret::write(target, key.trim()) {
+                    Ok(()) => "API Key 已存入 Windows 認證管理員".to_string(),
+                    Err(e) => format!("無法儲存 API Key：{e}"),
+                }
+            };
+            ui.set_has_api_key(zct_ipc::secret::read(target).is_some());
+            ui.set_ai_status(msg.into());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        ui.on_test_ai(move || {
+            let ui = ui_weak.unwrap();
+            let a = ui.get_ai();
+            let ep = zct_ai::Endpoint {
+                base_url: a.endpoint.to_string(),
+                model: a.model.to_string(),
+                api_key: zct_ipc::secret::read(zct_ipc::secret::AI_API_KEY),
+                timeout: Duration::from_secs(a.timeout.max(1) as u64),
+            };
+            let msg = match zct_ai::ping(&ep) {
+                Ok(reply) => format!("連線成功，模型回應：{reply}"),
+                Err(e) => e.to_string(),
+            };
+            ui.set_ai_status(msg.into());
+        });
+    }
+    {
         let (ui_weak, state) = (ui.as_weak(), state.clone());
         ui.on_sync_now(move || {
             let r = state.borrow_mut().service.call(Request::SyncNow);
@@ -585,10 +642,14 @@ mod tests {
         c.sync.enabled = true;
         c.sync.remote = "git@example.com:me/zct.git".into();
         c.sync.interval_minutes = 30;
+        c.ai.enabled = true;
+        c.ai.model = "qwen3.5:2b".into();
+        c.hotkeys.ai = Binding(None);
 
         let mut back = Config::default();
         apply_general(&mut back, &general_from(&c));
         apply_sync(&mut back, &sync_from(&c));
+        apply_ai(&mut back, &ai_from(&c));
         apply_hotkeys(&mut back, &hotkeys_from(&c)).unwrap();
         apply_theme(&mut back, &theme_from(&c)).unwrap();
         assert_eq!(back, c);

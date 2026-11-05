@@ -937,3 +937,69 @@ fn sync_between_two_machines_newest_wins() {
     // 再匯入一次沒有變更
     assert_eq!(zct_core::sync::import(&a, &merged), 0);
 }
+
+// ---- M8：AI 修正 ----
+
+fn ai_on() -> Config {
+    let mut c = no_auto_space();
+    c.ai.enabled = true;
+    c
+}
+
+fn type_zai(h: &mut Harness) -> String {
+    // ㄎㄜˇ ㄧˇ ㄗㄞˋ（可以在）
+    h.type_str("dk3u3y94");
+    h.s.preedit().text
+}
+
+#[test]
+fn ai_request_then_accept_suggestion() {
+    let mut h = Harness::with_config(ai_on());
+    let original = type_zai(&mut h);
+    let r = h.press(Key::Char(b'r'), ctrl_alt());
+    assert_eq!(r.ai_request.as_deref(), Some(original.as_str()));
+    assert_eq!(r.notice.as_deref(), Some("AI 修正中…"));
+    assert!(h.s.set_ai_suggestion(&original, "可以再".into()));
+    assert_eq!(h.s.candidates().unwrap().items, vec!["可以再"]);
+    let r = h.press(Key::Enter, Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some("可以再"));
+    assert!(!h.s.is_composing());
+}
+
+#[test]
+fn ai_suggestion_can_be_dismissed() {
+    let mut h = Harness::with_config(ai_on());
+    let original = type_zai(&mut h);
+    h.press(Key::Char(b'r'), ctrl_alt());
+    h.s.set_ai_suggestion(&original, "可以再".into());
+    let r = h.press(Key::Esc, Mods::NONE);
+    assert!(r.candidates.is_none());
+    assert_eq!(h.s.preedit().text, original, "放棄建議後保留原本的組字");
+}
+
+#[test]
+fn stale_ai_result_is_ignored() {
+    let mut h = Harness::with_config(ai_on());
+    let original = type_zai(&mut h);
+    h.press(Key::Char(b'r'), ctrl_alt());
+    h.type_str("1j4"); // 結果回來前繼續打字
+    assert!(!h.s.set_ai_suggestion(&original, "可以再".into()));
+    assert!(h.s.candidates().is_none());
+}
+
+#[test]
+fn ai_same_as_original_is_not_shown() {
+    let mut h = Harness::with_config(ai_on());
+    let original = type_zai(&mut h);
+    h.press(Key::Char(b'r'), ctrl_alt());
+    assert!(!h.s.set_ai_suggestion(&original, original.clone()));
+}
+
+#[test]
+fn ai_disabled_shows_notice() {
+    let mut h = Harness::new();
+    type_zai(&mut h);
+    let r = h.press(Key::Char(b'r'), ctrl_alt());
+    assert!(r.ai_request.is_none());
+    assert!(r.notice.unwrap().contains("未啟用"));
+}

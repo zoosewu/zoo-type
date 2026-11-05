@@ -16,6 +16,13 @@ export struct General {
     auto-space: bool,
 }
 
+export struct AiSettings {
+    enabled: bool,
+    endpoint: string,
+    model: string,
+    timeout: int,
+}
+
 export struct SyncSettings {
     enabled: bool,
     remote: string,
@@ -29,6 +36,7 @@ export struct Hotkeys {
     forget: string,
     pin: string,
     emoji: string,
+    ai: string,
 }
 
 export struct Theme {
@@ -191,6 +199,9 @@ export component SettingsWindow inherits Window {
     in-out property <string> restore-pending;
     in property <string> status;
     in-out property <SyncSettings> sync;
+    in-out property <AiSettings> ai;
+    in property <bool> has-api-key;
+    in property <string> ai-status;
     in property <string> sync-status;
     in property <bool> online;
 
@@ -207,6 +218,8 @@ export component SettingsWindow inherits Window {
     callback restore(string);
     callback refresh();
     callback sync-now();
+    callback save-api-key(string);
+    callback test-ai();
 
     HorizontalLayout {
         // 側邊導覽
@@ -224,6 +237,7 @@ export component SettingsWindow inherits Window {
                 NavItem { text: "詞庫"; active: root.page == 4; clicked => { root.page = 4; root.refresh(); } }
                 NavItem { text: "學習"; active: root.page == 5; clicked => { root.page = 5; root.refresh(); } }
                 NavItem { text: "同步"; active: root.page == 6; clicked => { root.page = 6; root.refresh(); } }
+                NavItem { text: "AI"; active: root.page == 7; clicked => { root.page = 7; } }
             }
         }
 
@@ -271,9 +285,10 @@ export component SettingsWindow inherits Window {
                     { label: "忘記學習（候選窗）", idx: 3 },
                     { label: "固頂（候選窗）", idx: 4 },
                     { label: "Emoji", idx: 5 },
+                    { label: "AI 修正", idx: 6 },
                 ]: Row {
                     label: item.label;
-                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : item.idx == 4 ? root.hotkeys.pin : root.hotkeys.emoji;
+                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : item.idx == 4 ? root.hotkeys.pin : item.idx == 5 ? root.hotkeys.emoji : root.hotkeys.ai;
                     LineEdit {
                         width: 220px;
                         text: parent.value;
@@ -285,6 +300,7 @@ export component SettingsWindow inherits Window {
                             if item.idx == 3 { root.hotkeys.forget = t; }
                             if item.idx == 4 { root.hotkeys.pin = t; }
                             if item.idx == 5 { root.hotkeys.emoji = t; }
+                            if item.idx == 6 { root.hotkeys.ai = t; }
                         }
                     }
                     Text {
@@ -468,6 +484,35 @@ export component SettingsWindow inherits Window {
                     Button { text: "重新整理狀態"; clicked => { root.refresh(); } }
                 }
                 Text { text: root.sync-status; wrap: word-wrap; }
+            }
+
+            // ---- AI ----
+            if root.page == 7: VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
+                alignment: start;
+                Section { text: "AI 同音字修正"; }
+                Text {
+                    text: "組字中按快捷鍵（預設 Ctrl+Alt+R），把組字內容送去修正「在／再」這類錯字，結果以候選顯示，按 Enter 採用。\n只在按下快捷鍵時才傳送；送往非本機的端點代表打字內容會離開這台電腦。";
+                    color: Palette.foreground.with-alpha(0.6);
+                    wrap: word-wrap;
+                }
+                Row { label: "啟用"; Switch { checked <=> root.ai.enabled; } }
+                Row { label: "端點（OpenAI 相容）"; LineEdit { width: 360px; text <=> root.ai.endpoint; placeholder-text: "http://localhost:11434/v1"; } }
+                Row { label: "模型"; LineEdit { width: 240px; text <=> root.ai.model; placeholder-text: "qwen3.5:2b"; } }
+                Row { label: "逾時（秒）"; SpinBox { width: 160px; minimum: 1; maximum: 120; value <=> root.ai.timeout; } }
+                Row {
+                    label: "API Key";
+                    key := LineEdit { width: 240px; input-type: password; placeholder-text: root.has-api-key ? "已儲存（輸入新的會取代）" : "本機服務可以留空"; }
+                    Button { text: "儲存金鑰"; enabled: key.text != ""; clicked => { root.save-api-key(key.text); key.text = ""; } }
+                    Button { text: "清除"; enabled: root.has-api-key; clicked => { root.save-api-key(""); } }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 12px;
+                    Button { text: "測試連線"; clicked => { root.test-ai(); } }
+                }
+                Text { text: root.ai-status; wrap: word-wrap; }
             }
 
             // 底部狀態列

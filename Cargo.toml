@@ -21,3 +21,7 @@ zct-ipc = { path = "crates/zct-ipc" }
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# 開發建置也最佳化相依套件（chewing 未最佳化時評測測試要 48 秒）；自己的程式碼維持好除錯
+[profile.dev.package."*"]
+opt-level = 2

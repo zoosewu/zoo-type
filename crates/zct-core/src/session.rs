@@ -61,6 +61,8 @@ pub struct KeyResult {
     pub toggle_game: bool,
     /// 要顯示給使用者的短訊息（例如「加入：天氣」「已固頂：氣」）
     pub notice: Option<String>,
+    /// 要送去 AI 修正的句子（服務程序在背景呼叫，結果用 [`Session::set_ai_suggestion`] 交回）
+    pub ai_request: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +90,13 @@ fn simplifier() -> Option<&'static OpenCC> {
     static CC: OnceLock<Option<OpenCC>> = OnceLock::new();
     CC.get_or_init(|| OpenCC::from_config(BuiltinConfig::Tw2sp).ok())
         .as_ref()
+}
+
+/// AI 修正：等待中（suggestion = None）或已有建議
+#[derive(Debug)]
+struct AiPick {
+    original: String,
+    suggestion: Option<String>,
 }
 
 /// Emoji 選擇中的狀態
@@ -121,6 +130,8 @@ pub struct Session {
     /// E：游標前最後一個字（本輸入法送出的，或交給 App 的按鍵）；未知時為 None
     last_char: Option<char>,
     emoji: Option<EmojiPick>,
+    ai: Option<AiPick>,
+    ai_enabled: bool,
 }
 
 impl Session {
@@ -158,6 +169,8 @@ impl Session {
             english_alt: None,
             last_char: None,
             emoji: None,
+            ai: None,
+            ai_enabled: opts.config.ai.enabled,
         })
     }
 
@@ -203,7 +216,8 @@ impl Session {
             && self.game_mode() != GameMode::English
             && (self.hotkeys.width.matches(ev)
                 || self.hotkeys.output.matches(ev)
-                || self.hotkeys.emoji.matches(ev))
+                || self.hotkeys.emoji.matches(ev)
+                || self.hotkeys.ai.matches(ev))
     }
 
     /// 由輸入法直接送出的文字（不經過 chewing）
@@ -258,6 +272,12 @@ impl Session {
     pub fn test_key(&self, ev: &KeyEvent) -> bool {
         if ev.released || ev.key.is_modifier() || ev.key == Key::Other {
             return false;
+        }
+        // AI 建議顯示中：Enter / 1 採用、Esc 放棄，其他鍵照常（並放棄建議）
+        if self.ai_suggestion().is_some()
+            && matches!(ev.key, Key::Enter | Key::Esc | Key::Char(b'1') | Key::Numpad(b'1'))
+        {
+            return true;
         }
         // Emoji 選擇中：除了組合鍵，按鍵都由 Emoji 選擇處理
         if self.emoji.is_some() {
@@ -401,6 +421,71 @@ impl Session {
         true
     }
 
+    fn ai_suggestion(&self) -> Option<&str> {
+        self.ai.as_ref()?.suggestion.as_deref()
+    }
+
+    /// 送出 AI 修正請求；回傳提示訊息
+    fn request_ai(&mut self, request: &mut Option<String>) -> String {
+        if !self.ai_enabled {
+            return "AI 修正未啟用（設定 → AI）".into();
+        }
+        let text = self.editor.display();
+        if text.is_empty() {
+            return "先打出要修正的句子".into();
+        }
+        self.ai = Some(AiPick {
+            original: text.clone(),
+            suggestion: None,
+        });
+        *request = Some(text);
+        "AI 修正中…".into()
+    }
+
+    /// 服務程序交回 AI 結果；組字內容已經改變（使用者繼續打字）時忽略。回傳是否採用為候選
+    pub fn set_ai_suggestion(&mut self, original: &str, suggestion: String) -> bool {
+        let current = self.editor.display();
+        let valid = self
+            .ai
+            .as_ref()
+            .is_some_and(|a| a.original == original && current == original && suggestion != original);
+        if valid {
+            self.ai = Some(AiPick {
+                original: original.to_owned(),
+                suggestion: Some(suggestion),
+            });
+        } else {
+            self.ai = None;
+        }
+        valid
+    }
+
+    /// AI 建議顯示中的按鍵；回傳是否已處理
+    fn ai_key(&mut self, ev: &KeyEvent, commit: &mut String) -> bool {
+        let Some(suggestion) = self.ai_suggestion().map(str::to_owned) else {
+            // 等待中按了其他鍵：組字內容會改變，等結果回來時自然失效
+            return false;
+        };
+        match ev.key {
+            Key::Enter | Key::Char(b'1') | Key::Numpad(b'1') if !ev.mods.shift => {
+                self.ai = None;
+                self.editor.clear();
+                self.raw.clear();
+                self.english_alt = None;
+                self.join(commit, &suggestion);
+                true
+            }
+            Key::Esc => {
+                self.ai = None;
+                true
+            }
+            _ => {
+                self.ai = None;
+                false
+            }
+        }
+    }
+
     /// 以目前組字內容（不含還在打的注音）當關鍵字開啟 Emoji 選擇；找不到時回傳提示
     fn open_emoji(&mut self) -> Option<String> {
         let keyword = self.editor.display();
@@ -514,8 +599,11 @@ impl Session {
 
         if self.test_key(ev) {
             r.eaten = true;
-            if self.emoji.is_some() {
+            if self.ai_key(ev, &mut commit) {
+            } else if self.emoji.is_some() {
                 self.emoji_key(ev, &mut commit);
+            } else if self.hotkeys.ai.matches(ev) && self.chinese_hotkey(ev) {
+                r.notice = Some(self.request_ai(&mut r.ai_request));
             } else if self.hotkeys.emoji.matches(ev) && self.chinese_hotkey(ev) {
                 r.notice = self.open_emoji();
             } else if self.hotkeys.game_mode.matches(ev) {
@@ -742,6 +830,7 @@ impl Session {
         self.english_alt = None;
         self.last_char = None;
         self.emoji = None;
+        self.ai = None;
     }
 
     /// 輸入焦點回到這個 context：依 `on_focus` 決定是否重設中英狀態
@@ -768,6 +857,14 @@ impl Session {
     }
 
     pub fn candidates(&self) -> Option<CandidatePage> {
+        if let Some(s) = self.ai_suggestion() {
+            return Some(CandidatePage {
+                items: vec![self.convert(s)],
+                page: 0,
+                total_pages: 1,
+                highlight: 0,
+            });
+        }
         if let Some(pick) = &self.emoji {
             let start = pick.page * self.per_page;
             return Some(CandidatePage {

@@ -34,6 +34,7 @@ game_mode = "ctrl+shift+f12"  # 開關遊戲模式（所有 App 一起）
 forget = "shift+delete"    # 候選窗中：忘記選擇框所在詞的學習紀錄（並取消固頂）
 pin = "shift+enter"        # 候選窗中：固頂選擇框所在的詞並選它
 emoji = "ctrl+alt+e"       # Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
+ai = "ctrl+alt+r"          # AI 修正組字內容中的同音錯字
 
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
@@ -48,6 +49,12 @@ auto_space = true          # 中英文之間自動加空格（盤古之白）
 enabled = false
 remote = ""                # 例：git@github.com:you/zct-data.git（請用私人 repo）
 interval_minutes = 10
+
+[ai]                       # AI 同音字修正（OpenAI 相容 API）；API Key 在設定程式輸入，存在 Windows 認證管理員
+enabled = false
+endpoint = "http://localhost:11434/v1"   # Ollama；LM Studio 為 http://localhost:1234/v1
+model = ""                 # 例：qwen3.5:2b
+timeout_seconds = 15
 
 [theme]                    # 候選窗外觀，改完 1 秒內生效
 layout = "vertical"        # "vertical" 直式 | "horizontal" 橫式
