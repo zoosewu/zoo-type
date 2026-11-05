@@ -21,6 +21,26 @@ impl InputMode {
     }
 }
 
+/// 中文模式下標點符號的寬度
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Width {
+    /// 全形：，。？「」
+    #[default]
+    Full,
+    /// 半形：,.?[]
+    Half,
+}
+
+impl Width {
+    pub fn toggled(self) -> Width {
+        match self {
+            Width::Full => Width::Half,
+            Width::Half => Width::Full,
+        }
+    }
+}
+
 /// 哪一側的 Shift 可以切換中英
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -37,12 +57,15 @@ pub enum ShiftToggle {
 pub struct InputConfig {
     /// 新的輸入 context 預設的中英狀態
     pub default_mode: InputMode,
+    /// 中文模式下標點的預設寬度（Shift + 空白鍵切換）
+    pub punctuation: Width,
 }
 
 impl Default for InputConfig {
     fn default() -> Self {
         InputConfig {
             default_mode: InputMode::Chinese,
+            punctuation: Width::Full,
         }
     }
 }

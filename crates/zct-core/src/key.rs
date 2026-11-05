@@ -1,16 +1,17 @@
 //! 平台無關的按鍵事件。平台層（TSF / IMK）負責把系統按鍵轉成這裡的型別。
 
 use chewing::input::KeyboardEvent;
+use serde::{Deserialize, Serialize};
 use chewing::input::keymap::{QWERTY_MAP, map_ascii};
 use chewing::input::{keycode, keysym};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
     Left,
     Right,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Key {
     /// 實體按鍵在美式鍵盤上「未按 Shift」時的字元，例如 `a`、`,`、`1`
     Char(u8),
@@ -46,7 +47,7 @@ impl Key {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Mods {
     pub shift: bool,
     pub ctrl: bool,
@@ -85,7 +86,7 @@ impl Mods {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyEvent {
     pub key: Key,
     pub mods: Mods,
@@ -115,7 +116,7 @@ impl KeyEvent {
 }
 
 /// 美式鍵盤按住 Shift 後的字元
-fn shifted(c: u8) -> u8 {
+pub(crate) fn shifted(c: u8) -> u8 {
     match c {
         b'a'..=b'z' => c.to_ascii_uppercase(),
         b'1' => b'!',

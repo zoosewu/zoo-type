@@ -3,27 +3,30 @@
 use std::path::PathBuf;
 
 use chewing::editor::{BasicEditor, Editor, EditorKeyBehavior};
+use serde::{Deserialize, Serialize};
 
-use crate::config::{Config, InputMode};
-use crate::key::{Key, KeyEvent, to_chewing};
+use crate::config::{Width, Config, InputMode};
+use crate::key::{Key, KeyEvent, shifted, to_chewing};
 use crate::shift::ShiftTap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Preedit {
     pub text: String,
     /// 游標位置（以字元計）
     pub cursor: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CandidatePage {
     pub items: Vec<String>,
     /// 從 0 開始
     pub page: usize,
     pub total_pages: usize,
+    /// 目前選擇框所在的項目（本頁內的索引），Enter 選它
+    pub highlight: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct KeyResult {
     /// `false` → 平台層要把按鍵交還給 App
     pub eaten: bool,
@@ -33,6 +36,8 @@ pub struct KeyResult {
     pub candidates: Option<CandidatePage>,
     /// 這次按鍵切換了中英狀態（平台層顯示「中 / A」提示）
     pub mode_changed: Option<InputMode>,
+    /// 這次按鍵切換了標點全半形（平台層顯示「全 / 半」提示）
+    pub width_changed: Option<Width>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,8 +64,10 @@ impl std::error::Error for SessionError {}
 pub struct Session {
     editor: Editor,
     mode: InputMode,
+    width: Width,
     shift: ShiftTap,
     per_page: usize,
+    highlight: usize,
 }
 
 impl Session {
@@ -76,6 +83,8 @@ impl Session {
         editor.set_editor_options(|o| {
             o.candidates_per_page = per_page;
             o.space_is_select_key = true;
+            // 選完字後游標跳到該詞後面（今天|天氣很好 → 今天天氣|很好）
+            o.auto_shift_cursor = true;
             // 全半形切換由 ZCT 自己處理（M3），避免 chewing 吃掉 Shift+Space
             o.enable_fullwidth_toggle_key = false;
         });
@@ -83,13 +92,37 @@ impl Session {
         Ok(Session {
             editor,
             mode: opts.config.input.default_mode,
+            width: opts.config.input.punctuation,
             shift: ShiftTap::new(opts.config.toggle.shift, opts.config.toggle.shift_tap_max_ms),
             per_page,
+            highlight: 0,
         })
     }
 
     pub fn mode(&self) -> InputMode {
         self.mode
+    }
+
+    pub fn width(&self) -> Width {
+        self.width
+    }
+
+    /// Shift + 空白鍵：切換標點全半形（與微軟新注音相同）
+    fn is_width_toggle(ev: &KeyEvent) -> bool {
+        ev.key == Key::Space && ev.mods.shift
+    }
+
+    /// 半形模式下，這個鍵要輸出的 ASCII 標點；字母、注音鍵與 ` 符號選單不受影響
+    fn halfwidth_symbol(&self, ev: &KeyEvent) -> Option<u8> {
+        if self.width != Width::Half {
+            return None;
+        }
+        match ev.key {
+            Key::Char(c) if ev.mods.shift && !c.is_ascii_alphabetic() => Some(shifted(c)),
+            // 大千排列中不是注音的鍵
+            Key::Char(c @ (b'[' | b']' | b'\\' | b'\'' | b'=')) if !ev.mods.shift => Some(c),
+            _ => None,
+        }
     }
 
     pub fn is_composing(&self) -> bool {
@@ -110,11 +143,26 @@ impl Session {
         if self.mode == InputMode::English {
             return false;
         }
+        if Self::is_width_toggle(ev) {
+            return true;
+        }
         if self.is_composing() {
             return true;
         }
         // 沒有組字時，只有字元鍵會開始組字；Enter、空白、方向鍵等交給 App
         matches!(ev.key, Key::Char(_))
+    }
+
+    /// 給 TSF `OnTestKeyDown` 用：判斷是否會吃掉；不吃的鍵仍要讓 Shift 判定看到
+    ///
+    /// TSF 對不吃的鍵不會再呼叫 `OnKeyDown`，若不在這裡觀察，
+    /// 英文模式下「按住 Shift 打字母」放開後會被誤判成單按 Shift。重複呼叫是安全的。
+    pub fn test_key_down(&mut self, ev: &KeyEvent) -> bool {
+        let eat = self.test_key(ev);
+        if !eat {
+            self.shift.observe(ev);
+        }
+        eat
     }
 
     pub fn process_key(&mut self, ev: &KeyEvent) -> KeyResult {
@@ -128,16 +176,72 @@ impl Session {
         }
 
         let mut eaten = false;
-        if self.test_key(ev)
-            && let Some(chewing_ev) = to_chewing(ev.key, ev.mods)
-        {
-            let was_composing = self.is_composing();
-            let behavior = self.editor.process_keyevent(chewing_ev);
-            eaten = was_composing || behavior != EditorKeyBehavior::Ignore;
+        let mut width_changed = None;
+        if self.test_key(ev) {
+            if Self::is_width_toggle(ev) {
+                self.width = self.width.toggled();
+                width_changed = Some(self.width);
+                eaten = true;
+            } else if let Some(c) = self.halfwidth_symbol(ev) {
+                // 由輸入法送出半形標點；組字中則先送出組字，順序才正確
+                commit.push_str(&self.flush());
+                commit.push(c as char);
+                eaten = true;
+            } else if self.navigate_candidates(ev) {
+                eaten = true;
+            } else if let Some(chewing_ev) = to_chewing(ev.key, ev.mods) {
+                let was_composing = self.is_composing();
+                let behavior = self.editor.process_keyevent(chewing_ev);
+                eaten = was_composing || behavior != EditorKeyBehavior::Ignore;
+                // 翻頁、重新開啟或關閉候選窗後，選擇框回到第一個
+                self.highlight = 0;
+            }
             commit.push_str(&self.take_commit());
         }
 
-        self.result(eaten, commit, mode_changed)
+        let mut r = self.result(eaten, commit, mode_changed);
+        r.width_changed = width_changed;
+        r
+    }
+
+    /// 候選窗開啟時的選擇框操作（chewing 本身沒有選擇框）
+    ///
+    /// - ↑ / ↓：移動選擇框，超出本頁就翻頁
+    /// - Enter：選擇框所在的項目
+    /// - 其他鍵（← → 翻頁、數字直接選、Esc 取消…）交給 chewing
+    fn navigate_candidates(&mut self, ev: &KeyEvent) -> bool {
+        if !self.editor.is_selecting() || ev.mods.shift {
+            return false;
+        }
+        let len = self.candidates().map(|p| p.items.len()).unwrap_or(0);
+        if len == 0 {
+            return false;
+        }
+        match ev.key {
+            Key::Up if self.highlight > 0 => self.highlight -= 1,
+            Key::Up => {
+                self.chewing_key(Key::Left);
+                let len = self.candidates().map(|p| p.items.len()).unwrap_or(1);
+                self.highlight = len.saturating_sub(1);
+            }
+            Key::Down if self.highlight + 1 < len => self.highlight += 1,
+            Key::Down => {
+                self.chewing_key(Key::Down);
+                self.highlight = 0;
+            }
+            Key::Enter => {
+                let _ = self.editor.select(self.highlight.min(len - 1));
+                self.highlight = 0;
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn chewing_key(&mut self, key: Key) {
+        if let Some(ev) = to_chewing(key, crate::key::Mods::NONE) {
+            self.editor.process_keyevent(ev);
+        }
     }
 
     /// 送出目前所有組字內容（失焦、切換中英時使用）
@@ -188,6 +292,7 @@ impl Session {
             items,
             page: self.editor.current_page_no().unwrap_or(0),
             total_pages: self.editor.total_page().unwrap_or(1),
+            highlight: self.highlight,
         })
     }
 
@@ -206,6 +311,7 @@ impl Session {
             preedit: self.preedit(),
             candidates: self.candidates(),
             mode_changed,
+            width_changed: None,
         }
     }
 }

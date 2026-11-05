@@ -16,11 +16,14 @@
 - [x] 單元測試 + `process_key` 效能基準
 
 ## M2 Windows 最小可用
-- [ ] `zct-ipc`：訊息格式 + pipe 用戶端 / 伺服器
-- [ ] `zct-service`：session 管理
-- [ ] `zct-tsf`：TSF DLL（註冊、按鍵 sink、composition、commit）
-- [ ] 候選窗（Direct2D，常駐、不搶焦點）
-- [ ] 實機驗證：記事本、VS Code `Ctrl+,`、Windows Terminal、Claude Code
+- [x] `zct-ipc`：訊息格式 + pipe 用戶端 / 伺服器
+- [x] `zct-service`：session 管理
+- [x] `zct-tsf`：TSF DLL（註冊、按鍵 sink、composition、commit）
+- [x] 候選窗（Direct2D，常駐、不搶焦點）
+- [x] 安裝 / 解除安裝腳本（`scripts/install-dev.ps1`、`uninstall-dev.ps1`）
+- [x] 實機驗證：記事本、VS Code `Ctrl+,`、Windows Terminal、Claude Code（使用者回報行為正常）
+- [x] 使用者回饋：候選窗縮小 + 直式 + 選擇框（↑↓ 移動、Enter 選字）；選字後游標跳到詞後
+- [ ] x86 / ARM64 DLL 建置
 
 ## 之後（依需求文件 MoSCoW 排序）
 - M3 App 規則表、遊戲模式、全半形標點、簡體輸出
@@ -41,3 +44,9 @@
   - 單字候選排序是靜態的（例如「ㄑㄧˋ」第一個是「企」）→ M4 評估 `sort_candidates_by_frequency` 與自訂排序（P2）
   - 每個 session 各自載入詞庫（約 9ms、數 MB）→ M2 服務程序改為共用詞庫
   - Shift+, 輸出「，」進入組字區（與微軟新注音一致）
+
+### M2 程式碼（2026-11-05，實機驗證前）
+- IPC：named pipe 往返平均約 10µs；逾時測試通過（50ms 逾時在 200ms 內返回）
+- 服務程序：以模擬用戶端驅動，組字 / 候選窗 / 送出 / Shift 切換正確；候選窗截圖確認繪製正常
+- 修正：候選窗寬度計算少算結尾（頁碼被截掉）
+- 已知未做：數字鍵盤、Caps Lock、顯示屬性（組字底線）、輸入模式圖示、開始選單 UILess 模式

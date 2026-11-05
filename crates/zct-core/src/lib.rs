@@ -6,6 +6,6 @@ pub mod paths;
 pub mod session;
 pub mod shift;
 
-pub use config::{Config, InputMode};
+pub use config::{Config, InputMode, Width};
 pub use key::{Key, KeyEvent, Mods, Side};
 pub use session::{CandidatePage, KeyResult, Preedit, Session, SessionOptions};
