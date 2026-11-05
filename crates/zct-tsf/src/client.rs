@@ -12,6 +12,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use zct_ipc::pipe::Client;
 use zct_ipc::{PROTOCOL_VERSION, Request, Response};
 
+use crate::detect::Heuristics;
 use crate::dll_instance;
 
 /// 單次呼叫上限：超過就放行按鍵，絕不讓 App 卡住
@@ -27,6 +28,8 @@ const DETACHED_PROCESS: u32 = 0x0000_0008;
 #[derive(Default)]
 pub struct Ipc {
     client: Option<Client>,
+    /// 服務程序在 Hello 時告知（依設定與 App 規則）
+    heuristics: Heuristics,
     retry_at: Option<Instant>,
     spawned_at: Option<Instant>,
 }
@@ -47,6 +50,14 @@ impl Ipc {
         }
     }
 
+    /// 這個 App 要做的啟發式偵測；尚未連線時先嘗試連線，連不上就都不做
+    pub fn heuristics(&mut self) -> Heuristics {
+        if self.client.is_none() && !self.connect() {
+            return Heuristics::default();
+        }
+        self.heuristics
+    }
+
     pub fn disconnect(&mut self) {
         self.client = None;
     }
@@ -55,6 +66,7 @@ impl Ipc {
         if self.retry_at.is_some_and(|t| Instant::now() < t) {
             return false;
         }
+        let mut heuristics = Heuristics::default();
         let client = Client::connect().ok().and_then(|mut c| {
             let hello = Request::Hello {
                 version: PROTOCOL_VERSION,
@@ -62,13 +74,23 @@ impl Ipc {
                 exe: exe_name(),
             };
             match c.call(&hello, Duration::from_millis(500)) {
-                Ok(Response::Ok) => Some(c),
+                Ok(Response::Welcome {
+                    detect_legacy,
+                    detect_fullscreen,
+                }) => {
+                    heuristics = Heuristics {
+                        legacy_fullscreen: detect_legacy,
+                        exclusive_fullscreen: detect_fullscreen,
+                    };
+                    Some(c)
+                }
                 _ => None,
             }
         });
         match client {
             Some(c) => {
                 self.client = Some(c);
+                self.heuristics = heuristics;
                 self.retry_at = None;
                 true
             }

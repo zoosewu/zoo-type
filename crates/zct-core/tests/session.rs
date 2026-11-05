@@ -15,11 +15,16 @@ impl Harness {
     }
 
     fn with_config(config: Config) -> Harness {
+        Harness::with_rule(config, None)
+    }
+
+    fn with_rule(config: Config, rule: Option<zct_core::AppRule>) -> Harness {
         let dir = tempfile::tempdir().unwrap();
         let opts = SessionOptions {
             sys_dict_dir: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/dict").into(),
             user_dir: dir.path().join("user"),
             config,
+            rule,
         };
         Harness {
             s: Session::new(&opts).expect("需要先執行 scripts/fetch-dict.sh"),
@@ -335,4 +340,145 @@ fn shift_space_passes_through_in_english_mode() {
     let mut h = Harness::new();
     h.tap_shift();
     assert!(!h.press(Key::Space, Mods::shift()).eaten);
+}
+
+// ---- M3 ----
+
+use zct_core::{AppRule, GameMode, Output};
+
+fn rule(f: impl FnOnce(&mut AppRule)) -> Option<AppRule> {
+    let mut r = AppRule::default();
+    f(&mut r);
+    Some(r)
+}
+
+#[test]
+fn app_rule_sets_default_mode_and_width() {
+    let h = Harness::with_rule(
+        Config::default(),
+        rule(|r| {
+            r.default_mode = Some(InputMode::English);
+            r.punctuation = Some(zct_core::Width::Half);
+        }),
+    );
+    assert_eq!(h.s.mode(), InputMode::English);
+    assert_eq!(h.s.width(), zct_core::Width::Half);
+}
+
+#[test]
+fn game_mode_english_passes_everything_and_ignores_shift() {
+    let mut h = Harness::with_rule(Config::default(), rule(|r| r.game_mode = Some(GameMode::English)));
+    assert!(!h.press(Key::Char(b'w'), Mods::NONE).eaten);
+    assert!(!h.press(Key::Space, Mods::shift()).eaten);
+    assert_eq!(h.tap_shift().mode_changed, None);
+}
+
+#[test]
+fn game_mode_keep_allows_chinese_but_shift_does_not_toggle() {
+    let mut h = Harness::with_rule(Config::default(), rule(|r| r.game_mode = Some(GameMode::Keep)));
+    assert_eq!(h.tap_shift().mode_changed, None);
+    assert!(h.press(Key::Char(b'w'), Mods::NONE).eaten);
+}
+
+#[test]
+fn game_hotkey_requests_toggle_in_any_mode() {
+    let mut h = Harness::new();
+    let ctrl_shift = Mods { ctrl: true, shift: true, ..Mods::NONE };
+    let r = h.press(Key::F(12), ctrl_shift);
+    assert!(r.eaten && r.toggle_game);
+    // 進入全域遊戲模式後，快捷鍵仍然有效（才能關掉）
+    h.s.set_global_game(true);
+    assert!(!h.press(Key::Char(b'w'), Mods::NONE).eaten);
+    assert!(h.press(Key::F(12), ctrl_shift).toggle_game);
+}
+
+#[test]
+fn simplified_output_converts_commit_preedit_and_candidates() {
+    let mut c = Config::default();
+    c.input.output = Output::Simplified;
+    let mut h = Harness::with_config(c);
+    h.type_str("wu0 fu4");
+    assert_eq!(h.s.preedit().text, "天气");
+    let page = {
+        h.press(Key::Left, Mods::NONE);
+        h.press(Key::Space, Mods::NONE).candidates.unwrap()
+    };
+    assert!(page.items.contains(&"气".to_string()), "{:?}", page.items);
+    h.press(Key::Esc, Mods::NONE);
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("天气"));
+}
+
+#[test]
+fn output_hotkey_toggles_when_bound() {
+    let mut c = Config::default();
+    c.hotkeys.output = zct_core::hotkey::Binding::key("ctrl+alt+s");
+    let mut h = Harness::with_config(c);
+    let r = h.press(Key::Char(b's'), Mods { ctrl: true, alt: true, ..Mods::NONE });
+    assert_eq!(r.output_changed, Some(Output::Simplified));
+}
+
+#[test]
+fn custom_punctuation_overrides_default() {
+    let mut c = Config::default();
+    c.punctuation.full.insert("shift+,".into(), "《".into());
+    let mut h = Harness::with_config(c);
+    let r = h.press(Key::Char(b','), Mods::shift());
+    assert!(r.eaten);
+    assert_eq!(r.commit.as_deref(), Some("《"));
+    // 沒有覆寫的鍵維持原本行為
+    h.press(Key::Char(b'.'), Mods::shift());
+    assert_eq!(h.s.preedit().text, "。");
+}
+
+#[test]
+fn numpad_digits_pass_through_when_idle_and_commit_when_composing() {
+    let mut h = Harness::new();
+    assert!(!h.press(Key::Numpad(b'5'), Mods::NONE).eaten);
+    h.type_str("wu0 "); // 天
+    let r = h.press(Key::Numpad(b'5'), Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some("天5"));
+}
+
+#[test]
+fn numpad_digit_selects_candidate() {
+    let mut h = Harness::new();
+    let page = open_candidates_for_qi(&mut h);
+    h.press(Key::Numpad(b'3'), Mods::NONE);
+    assert_eq!(h.s.preedit().text, format!("天{}", page.items[2]));
+}
+
+#[test]
+fn caps_lock_letters_are_english() {
+    let mut h = Harness::new();
+    let caps = Mods { caps_lock: true, ..Mods::NONE };
+    assert!(!h.press(Key::Char(b'a'), caps).eaten, "沒有組字時交給 App");
+    h.type_str("wu0 "); // 天
+    let r = h.press(Key::Char(b'a'), caps);
+    assert_eq!(r.commit.as_deref(), Some("天A"));
+    // Caps Lock 下注音鍵中的數字與標點不受影響
+    assert!(h.press(Key::Char(b','), caps).eaten);
+}
+
+#[test]
+fn on_focus_reset_restores_default_mode() {
+    let mut h = Harness::with_rule(Config::default(), rule(|r| r.on_focus = Some(zct_core::config::OnFocus::Reset)));
+    h.tap_shift();
+    assert_eq!(h.s.mode(), InputMode::English);
+    h.s.focus();
+    assert_eq!(h.s.mode(), InputMode::Chinese);
+}
+
+#[test]
+fn on_focus_remember_keeps_mode() {
+    let mut h = Harness::new();
+    h.tap_shift();
+    h.s.focus();
+    assert_eq!(h.s.mode(), InputMode::English);
+}
+
+#[test]
+fn function_keys_pass_through_while_composing() {
+    let mut h = Harness::new();
+    h.type_str("wu0");
+    assert!(!h.press(Key::F(5), Mods::NONE).eaten);
 }

@@ -16,6 +16,7 @@ fn main() {
         sys_dict_dir: dict.into(),
         user_dir: user,
         config: Config::default(),
+        rule: None,
     })
     .expect("需要先執行 scripts/fetch-dict.sh");
     println!("建立 session：{:?}", t0.elapsed());

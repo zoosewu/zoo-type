@@ -9,6 +9,8 @@ mod conn;
 #[cfg(windows)]
 mod logger;
 #[cfg(windows)]
+mod settings;
+#[cfg(windows)]
 mod ui;
 
 #[cfg(windows)]
@@ -29,6 +31,7 @@ fn main() {
 mod app {
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
     use windows::Win32::System::Threading::CreateMutexW;
@@ -36,15 +39,16 @@ mod app {
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
     };
     use windows::core::w;
-    use zct_core::Config;
     use zct_core::paths::DataRoot;
 
-    use crate::{conn, logger, ui};
+    use crate::{conn, logger, settings, ui};
 
     pub struct Shared {
         pub data: DataRoot,
         pub sys_dict_dir: PathBuf,
-        pub config: Config,
+        pub settings: settings::Settings,
+        /// 手動快捷鍵開啟的全域遊戲模式
+        pub game: AtomicBool,
         pub ui: ui::UiHandle,
     }
 
@@ -76,14 +80,9 @@ mod app {
         logger::init(&data.local().join("logs").join("service.log"));
         log::info!("啟動，資料根目錄：{}", data.root().display());
 
-        let config = match Config::load(&data.config()) {
-            Ok(c) => c,
-            Err(e) => {
-                // 設定檔寫錯時仍要能打字：用預設值並記錄錯誤
-                log::error!("{e}，改用預設設定");
-                Config::default()
-            }
-        };
+        // 設定檔寫錯時仍要能打字：settings 會記錄錯誤並改用上一份正確的設定或預設值
+        let settings = settings::Settings::new(&data);
+        settings.current();
         let sys_dict_dir = find_sys_dict()?;
         log::info!("系統詞庫：{}", sys_dict_dir.display());
 
@@ -91,7 +90,8 @@ mod app {
         let shared = Arc::new(Shared {
             data,
             sys_dict_dir,
-            config,
+            settings,
+            game: AtomicBool::new(false),
             ui,
         });
 

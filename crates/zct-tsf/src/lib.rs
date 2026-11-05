@@ -6,6 +6,7 @@
 #![cfg(windows)]
 
 mod client;
+mod detect;
 mod edit;
 mod factory;
 mod keys;

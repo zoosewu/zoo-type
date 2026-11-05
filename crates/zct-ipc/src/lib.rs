@@ -7,7 +7,7 @@ use zct_core::{KeyEvent, KeyResult};
 pub mod pipe;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// 單一訊息上限（候選字頁面遠小於此）
 pub const MAX_MESSAGE: usize = 64 * 1024;
@@ -38,11 +38,20 @@ pub enum Request {
     Caret(Option<Rect>),
     /// 失焦、組字被 App 中止：丟棄組字狀態並隱藏候選窗
     Reset,
+    /// 輸入焦點換到另一個文件：同 Reset，並依 `on_focus` 設定重設中英狀態
+    Focus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Response {
     Ok,
+    /// 回應 `Hello`：告訴 DLL 這個 App 要做哪些啟發式偵測
+    Welcome {
+        /// 舊式程式（TSF transitory context）+ 沒有系統游標 + 視窗蓋滿螢幕 → 視為不在輸入狀態
+        detect_legacy: bool,
+        /// 有程式獨佔全螢幕 → 視為不在輸入狀態
+        detect_fullscreen: bool,
+    },
     Eat(bool),
     Key(KeyResult),
     Error(String),

@@ -1,16 +1,56 @@
 //! 一條 DLL 連線 = 一個 App 執行緒 = 一個輸入 session
 
-use zct_core::{InputMode, KeyResult, Session, SessionOptions, Width};
+use std::sync::atomic::Ordering;
+
+use zct_core::{InputMode, KeyResult, Output, Session, SessionOptions, Width};
 use zct_ipc::pipe::ServerConn;
 use zct_ipc::{PROTOCOL_VERSION, Request, Response};
 
 use crate::app::Shared;
 use crate::ui::UiCmd;
 
+/// 狀態提示文字；同時發生多個變化時，只顯示最重要的一個
+fn hint(r: &KeyResult, game: Option<bool>) -> Option<&'static str> {
+    if let Some(on) = game {
+        return Some(if on { "遊戲模式" } else { "一般模式" });
+    }
+    if let Some(m) = r.mode_changed {
+        return Some(match m {
+            InputMode::Chinese => "中",
+            InputMode::English => "A",
+        });
+    }
+    if let Some(w) = r.width_changed {
+        return Some(match w {
+            Width::Full => "全形",
+            Width::Half => "半形",
+        });
+    }
+    r.output_changed.map(|o| match o {
+        Output::Traditional => "繁",
+        Output::Simplified => "简",
+    })
+}
+
+fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> {
+    let (config, apps) = shared.settings.current();
+    let rule = apps.find(exe).cloned();
+    if let Some(r) = &rule {
+        log::info!("[{id}] 套用 App 規則「{}」", if r.name.is_empty() { exe } else { &r.name });
+    }
+    Session::new(&SessionOptions {
+        sys_dict_dir: shared.sys_dict_dir.clone(),
+        user_dir: shared.data.chewing_user_dir(),
+        config,
+        rule,
+    })
+    .map_err(|e| e.to_string())
+}
+
 pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let mut session: Option<Session> = None;
-    // 最近一次按鍵結果，等 DLL 回報游標位置後再決定候選窗怎麼顯示
-    let mut last: Option<KeyResult> = None;
+    // 最近一次按鍵結果與狀態提示，等 DLL 回報游標位置後再決定候選窗怎麼顯示
+    let mut last: Option<(KeyResult, Option<&'static str>)> = None;
 
     loop {
         let req = match conn.recv() {
@@ -21,6 +61,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 break;
             }
         };
+        if let Some(s) = session.as_mut() {
+            s.set_global_game(shared.game.load(Ordering::Relaxed));
+        }
         let resp = match req {
             Request::Hello { version, pid, exe } => {
                 if version != PROTOCOL_VERSION {
@@ -28,18 +71,18 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     Response::Error(format!("protocol {PROTOCOL_VERSION} expected"))
                 } else {
                     log::info!("[{id}] 連線：{exe}（pid {pid}）");
-                    match Session::new(&SessionOptions {
-                        sys_dict_dir: shared.sys_dict_dir.clone(),
-                        user_dir: shared.data.chewing_user_dir(),
-                        config: shared.config.clone(),
-                    }) {
+                    match open_session(id, &exe, shared) {
                         Ok(s) => {
+                            let (detect_legacy, detect_fullscreen) = s.detection();
                             session = Some(s);
-                            Response::Ok
+                            Response::Welcome {
+                                detect_legacy,
+                                detect_fullscreen,
+                            }
                         }
                         Err(e) => {
                             log::error!("[{id}] {e}");
-                            Response::Error(e.to_string())
+                            Response::Error(e)
                         }
                     }
                 }
@@ -51,13 +94,19 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             Request::Key(ev) => match session.as_mut() {
                 Some(s) => {
                     let r = s.process_key(&ev);
-                    last = Some(r.clone());
+                    let game = r.toggle_game.then(|| {
+                        let on = !shared.game.fetch_xor(true, Ordering::Relaxed);
+                        s.set_global_game(on);
+                        log::info!("[{id}] 遊戲模式：{}", if on { "開" } else { "關" });
+                        on
+                    });
+                    last = Some((r.clone(), hint(&r, game)));
                     Response::Key(r)
                 }
                 None => Response::Key(KeyResult::default()),
             },
             Request::Caret(rect) => {
-                if let Some(r) = last.take() {
+                if let Some((r, hint)) = last.take() {
                     match r.candidates {
                         Some(page) => shared.ui.send(UiCmd::Show {
                             owner: id,
@@ -66,22 +115,19 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                         }),
                         None => shared.ui.send(UiCmd::Hide { owner: id }),
                     }
-                    let hint = match (r.mode_changed, r.width_changed) {
-                        (Some(InputMode::Chinese), _) => Some("中"),
-                        (Some(InputMode::English), _) => Some("A"),
-                        (None, Some(Width::Full)) => Some("全形"),
-                        (None, Some(Width::Half)) => Some("半形"),
-                        (None, None) => None,
-                    };
                     if let Some(text) = hint {
                         shared.ui.send(UiCmd::Hint { text, anchor: rect });
                     }
                 }
                 Response::Ok
             }
-            Request::Reset => {
+            Request::Reset | Request::Focus => {
                 if let Some(s) = session.as_mut() {
-                    s.reset();
+                    if req == Request::Focus {
+                        s.focus();
+                    } else {
+                        s.reset();
+                    }
                 }
                 last = None;
                 shared.ui.send(UiCmd::Hide { owner: id });

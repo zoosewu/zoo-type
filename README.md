@@ -5,6 +5,7 @@
 - 需求：[docs/requirements.md](docs/requirements.md)
 - 架構：[docs/architecture.md](docs/architecture.md)
 - 技術查證：[docs/research.md](docs/research.md)
+- 設定檔：[docs/config.md](docs/config.md)
 
 ## 使用方式
 
@@ -12,6 +13,10 @@
 |------|------|
 | 切換中 / 英 | 單按 Shift |
 | 切換標點全形 / 半形 | Shift + 空白鍵 |
+| 切換繁體 / 簡體 | 預設不綁定，見 [設定檔](docs/config.md) |
+| 開關遊戲模式 | Ctrl + Shift + F12 |
+| Caps Lock 開啟 | 字母直接輸出英文 |
+| 數字鍵盤 | 一律輸出半形數字；候選窗開啟時可選字 |
 | 開啟候選窗 | 組字後按空白（游標前移可選其他位置的字） |
 | 移動選擇框 / 翻頁 | ↑ ↓ / ← → |
 | 選字 | Enter（選擇框）或數字鍵 |

@@ -1,0 +1,122 @@
+# 設定檔
+
+設定檔放在**資料根目錄**，Windows 預設是 `%APPDATA%\zct\`。
+
+要放到自訂資料夾（例如要用 git 同步），在 `%APPDATA%\zct\location.toml` 寫：
+
+```toml
+data_root = "D:/Sync/zct"
+```
+
+- 設定檔改完後，**切換到其他 App 再切回來**（或重開 App）就會生效
+- 設定檔寫錯時，輸入法照常運作，改用上一份正確的設定；錯誤會記在 `local/logs/service.log`
+
+## `config.toml`
+
+所有欄位都可以省略，省略的欄位使用預設值。
+
+```toml
+[input]
+default_mode = "chinese"   # 新開啟的輸入欄位預設中文 / 英文："chinese" | "english"
+punctuation = "full"       # 中文模式的標點："full" 全形 | "half" 半形
+output = "traditional"     # 送出的字："traditional" 繁體 | "simplified" 簡體
+on_focus = "remember"      # 切回 App 時："remember" 保留上次中英狀態 | "reset" 重設為預設
+
+[toggle]
+shift = "both"             # 哪個 Shift 切換中英："both" | "left" | "right" | "off"
+shift_tap_max_ms = 300     # 按住 Shift 超過這個時間才放開，不算切換
+
+[hotkeys]                  # 留空字串代表不使用
+width = "shift+space"      # 切換全形 / 半形
+output = ""                # 切換繁體 / 簡體（預設不綁定）
+game_mode = "ctrl+shift+f12"  # 開關遊戲模式（所有 App 一起）
+
+[detect]                   # 自動偵測「不在輸入狀態」，見下方說明
+legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
+exclusive_fullscreen = true  # 有程式獨佔全螢幕
+
+[candidates]
+per_page = 9               # 每頁候選字數（1–10）
+
+# 自訂標點：覆寫內建的對照，鍵名寫法同快捷鍵
+[punctuation.full]
+"shift+," = "《"
+"shift+." = "》"
+
+[punctuation.half]
+"'" = "'"
+```
+
+### 快捷鍵寫法
+
+`修飾鍵+主鍵`，不分大小寫：
+
+- 修飾鍵：`ctrl`、`alt`、`shift`、`win`（macOS 上是 `cmd`）
+- 主鍵：字母、數字、符號（例如 `,`）、`space`、`enter`、`tab`、`esc`、`f1`–`f24`、方向鍵（`left` 等）
+
+範例：`ctrl+shift+f12`、`shift+space`、`ctrl+alt+s`。
+
+修飾鍵必須完全一致：設定 `shift+space` 時，按 `ctrl+shift+space` 不會觸發。
+
+**沒有綁定的 Ctrl / Alt / Win 組合鍵一律交給 App**，所以 VS Code 的 `Ctrl+,` 這類快捷鍵不會被輸入法攔截。設定繁簡切換時，避免使用 App 常用的組合，例如 `Ctrl+Shift+F` 是 VS Code 的全域搜尋。
+
+## `apps.toml`
+
+依 App 覆寫設定。同一筆規則可以同時寫 Windows 執行檔名和 macOS Bundle ID，兩個平台共用一份檔案。
+
+```toml
+[[app]]
+name = "VS Code"
+windows = "Code.exe"
+macos = "com.microsoft.VSCode"
+default_mode = "english"
+punctuation = "half"
+
+[[app]]
+name = "Windows Terminal"
+windows = "WindowsTerminal.exe"
+default_mode = "english"
+on_focus = "reset"
+
+[[app]]
+name = "Elden Ring"
+windows = "eldenring.exe"
+game_mode = "english"
+```
+
+| 欄位 | 說明 |
+|------|------|
+| `name` | 顯示用名稱 |
+| `windows` | 執行檔名稱，不分大小寫 |
+| `macos` | Bundle ID |
+| `default_mode` | 同 `[input]` |
+| `punctuation` | 同 `[input]` |
+| `output` | 同 `[input]` |
+| `on_focus` | 同 `[input]` |
+| `detect` | `false`：這個 App 不做自動偵測（見下方說明；例如遊戲聊天框是自己畫的，被誤判成不能打字） |
+| `game_mode` | `"off"` 不啟用；`"english"` 鎖定英文，按鍵全部交給 App；`"keep"` 保留中英狀態但 Shift 不切換（例如在遊戲聊天室打中文） |
+
+App 的執行檔名稱可以在工作管理員的「詳細資料」分頁查到。
+
+## 自動偵測「不在輸入狀態」
+
+偵測到時，按鍵全部直接交給 App，**Shift 也不會切換中英**。
+
+| 偵測 | 情況 | 能否關閉 |
+|------|------|---------|
+| 系統訊號 | 焦點不在輸入欄位（桌面、按鈕、清單）、App 主動停用輸入法（很多遊戲會這樣做） | 不能，這是系統明確告知的狀態 |
+| `legacy_fullscreen` | 不支援 TSF 的舊式程式 + 畫面上沒有系統游標 + 視窗蓋滿整個螢幕：無邊框全螢幕的 DirectX 遊戲 | 可以 |
+| `exclusive_fullscreen` | 有程式獨佔全螢幕：老式全螢幕遊戲 | 可以 |
+
+偵測不到的情況：視窗模式的遊戲，而且沒有停用輸入法。這時請用 `apps.toml` 的 `game_mode` 或遊戲模式快捷鍵。
+
+如果某個 App 明明在輸入框卻打不了中文，在 `apps.toml` 對它設 `detect = false`。
+
+## 遊戲模式
+
+| 方式 | 範圍 |
+|------|------|
+| `apps.toml` 的 `game_mode` | 只影響該 App |
+| 快捷鍵 `ctrl+shift+f12` | 所有 App 一起開關，行為等同 `"english"` |
+
+遊戲模式下，Shift 不會切換中英，所有組合鍵都交給 App。開關時游標旁會顯示「遊戲模式」或「一般模式」。

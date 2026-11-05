@@ -34,7 +34,11 @@ pub enum Key {
     Alt,
     Meta,
     CapsLock,
-    /// 其他輸入法不處理的鍵（F1–F12 等），一律放行
+    /// F1–F24
+    F(u8),
+    /// 數字鍵盤：`0`–`9`、`.`、`+`、`-`、`*`、`/`
+    Numpad(u8),
+    /// 其他輸入法不處理的鍵，一律放行
     Other,
 }
 
@@ -173,7 +177,14 @@ pub(crate) fn to_chewing(key: Key, mods: Mods) -> Option<KeyboardEvent> {
         Key::End => special(keycode::KEY_END, keysym::SYM_END),
         Key::PageUp => special(keycode::KEY_PAGEUP, keysym::SYM_PAGEUP),
         Key::PageDown => special(keycode::KEY_PAGEDOWN, keysym::SYM_PAGEDOWN),
-        Key::Shift(_) | Key::Ctrl | Key::Alt | Key::Meta | Key::CapsLock | Key::Other => {
+        Key::Shift(_)
+        | Key::Ctrl
+        | Key::Alt
+        | Key::Meta
+        | Key::CapsLock
+        | Key::F(_)
+        | Key::Numpad(_)
+        | Key::Other => {
             return None;
         }
     };

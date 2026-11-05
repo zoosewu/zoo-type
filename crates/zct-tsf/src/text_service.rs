@@ -22,6 +22,7 @@ use zct_core::KeyResult;
 use zct_ipc::{Rect, Request, Response};
 
 use crate::client::Ipc;
+use crate::detect::{self, FullscreenCache};
 use crate::edit::EditSession;
 use crate::{guard, keys};
 
@@ -39,6 +40,7 @@ pub struct TextService {
     /// `OnTestKeyUp` 已處理、等 `OnKeyUp` 套用到文件的結果
     pending_up: RefCell<Option<KeyResult>>,
     ipc: RefCell<Ipc>,
+    fullscreen: FullscreenCache,
 }
 
 impl TextService {
@@ -48,6 +50,7 @@ impl TextService {
             composition: RefCell::default(),
             pending_up: RefCell::default(),
             ipc: RefCell::default(),
+            fullscreen: FullscreenCache::default(),
         }
     }
 
@@ -57,6 +60,23 @@ impl TextService {
 
     fn client_id(&self) -> u32 {
         self.tsf.borrow().client_id
+    }
+
+    /// 不在輸入狀態：按鍵全部交給 App，也不通知服務程序（Shift 不會切換中英）
+    ///
+    /// 組字中一律視為輸入狀態，避免組字卡在半途
+    fn not_input(&self) -> bool {
+        if self.composition.borrow().is_some() {
+            return false;
+        }
+        let Some(tm) = self.tsf.borrow().thread_mgr.clone() else {
+            return true;
+        };
+        let heuristics = match self.ipc.try_borrow_mut() {
+            Ok(mut ipc) => ipc.heuristics(),
+            Err(_) => return true,
+        };
+        detect::not_input(&detect::gather(&tm, heuristics, &self.fullscreen), heuristics)
     }
 }
 
@@ -153,7 +173,9 @@ impl TextService_Impl {
         let needs_caret = touches_doc
             || r.candidates.is_some()
             || r.mode_changed.is_some()
-            || r.width_changed.is_some();
+            || r.width_changed.is_some()
+            || r.output_changed.is_some()
+            || r.toggle_game;
 
         let rect = Cell::new(None);
         if needs_caret {
@@ -180,10 +202,10 @@ impl TextService_Impl {
         self.call(&Request::Caret(rect.get()));
     }
 
-    fn reset(&self) {
+    fn reset(&self, req: Request) {
         self.composition.borrow_mut().take();
         self.pending_up.borrow_mut().take();
-        self.call(&Request::Reset);
+        self.call(&req);
     }
 }
 
@@ -316,6 +338,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnTestKeyDown(&self, _pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
+            if self.not_input() {
+                return Ok(false.into());
+            }
             let ev = keys::event(w, l, false);
             let eat = matches!(self.call(&Request::TestKeyDown(ev)), Some(Response::Eat(true)));
             Ok(eat.into())
@@ -324,6 +349,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnKeyDown(&self, pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
+            if self.not_input() {
+                return Ok(false.into());
+            }
             let ev = keys::event(w, l, false);
             let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
                 return Ok(false.into());
@@ -338,6 +366,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnTestKeyUp(&self, _pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
+            if self.not_input() {
+                return Ok(false.into());
+            }
             let ev = keys::event(w, l, true);
             let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
                 return Ok(false.into());
@@ -377,10 +408,11 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
         Ok(())
     }
 
-    /// 焦點換到別的文件：丟棄組字狀態、隱藏候選窗
-    fn OnSetFocus(&self, _focus: Ref<ITfDocumentMgr>, _prev: Ref<ITfDocumentMgr>) -> Result<()> {
+    /// 焦點換到別的文件：丟棄組字狀態、隱藏候選窗，依設定重設中英狀態
+    fn OnSetFocus(&self, focus: Ref<ITfDocumentMgr>, _prev: Ref<ITfDocumentMgr>) -> Result<()> {
         guard(|| {
-            self.reset();
+            let req = if focus.is_some() { Request::Focus } else { Request::Reset };
+            self.reset(req);
             Ok(())
         })
     }
@@ -398,7 +430,7 @@ impl ITfCompositionSink_Impl for TextService_Impl {
     /// App 主動結束組字（例如滑鼠點到別處）：文字已留在文件中，只需同步狀態
     fn OnCompositionTerminated(&self, _ec: u32, _comp: Ref<ITfComposition>) -> Result<()> {
         guard(|| {
-            self.reset();
+            self.reset(Request::Reset);
             Ok(())
         })
     }

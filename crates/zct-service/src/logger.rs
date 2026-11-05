@@ -11,8 +11,12 @@ struct FileLogger {
 }
 
 impl log::Log for FileLogger {
+    /// 只記錄 ZCT 自己的訊息；第三方套件只留警告以上
+    ///
+    /// chewing 的 info 等級會記下每一次按鍵，等於把打字內容寫進硬碟，絕不能開
     fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-        m.level() <= log::max_level()
+        let ours = m.target().starts_with("zct");
+        m.level() <= log::max_level() && (ours || m.level() <= log::Level::Warn)
     }
 
     fn log(&self, r: &log::Record<'_>) {
@@ -56,5 +60,31 @@ pub fn init(path: &Path) {
             log::LevelFilter::Info
         };
         log::set_max_level(level);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use log::{Level, Log, Metadata};
+
+    use super::FileLogger;
+
+    #[test]
+    fn third_party_info_is_never_logged() {
+        log::set_max_level(log::LevelFilter::Debug);
+        let file = tempfile_file();
+        let l = FileLogger {
+            file: std::sync::Mutex::new(file),
+        };
+        let meta = |target, level| Metadata::builder().target(target).level(level).build();
+        // chewing 的 info 會記下每一次按鍵
+        assert!(!l.enabled(&meta("chewing::editor", Level::Info)));
+        assert!(l.enabled(&meta("chewing::editor", Level::Warn)));
+        assert!(l.enabled(&meta("zct_service::conn", Level::Info)));
+    }
+
+    fn tempfile_file() -> std::fs::File {
+        let p = std::env::temp_dir().join(format!("zct-logger-test-{}", std::process::id()));
+        std::fs::File::create(p).unwrap()
     }
 }

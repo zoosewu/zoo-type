@@ -1,11 +1,14 @@
 //! ZCT 輸入法核心：所有「判斷」都在這裡，平台層（TSF / IMK）只做轉譯。
 
+pub mod apps;
 pub mod config;
+pub mod hotkey;
 pub mod key;
 pub mod paths;
 pub mod session;
 pub mod shift;
 
-pub use config::{Config, InputMode, Width};
+pub use apps::{AppRule, AppRules};
+pub use config::{Config, GameMode, InputMode, Output, Width};
 pub use key::{Key, KeyEvent, Mods, Side};
 pub use session::{CandidatePage, KeyResult, Preedit, Session, SessionOptions};

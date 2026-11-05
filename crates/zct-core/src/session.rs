@@ -1,12 +1,27 @@
 //! 一個輸入 context 的輸入狀態：中英模式、Shift 判定、chewing 組字
+//!
+//! 按下事件的處理順序（第一個符合的生效）：
+//! 1. 快捷鍵（遊戲模式任何時候都有效；全半形、繁簡只在中文模式有效）
+//! 2. 遊戲模式「鎖定英文」→ 放行
+//! 3. Ctrl / Alt / Win 組合鍵 → 放行（P3）
+//! 4. 英文模式 → 放行
+//! 5. 數字鍵盤、Caps Lock 字母、自訂標點、半形標點 → 由輸入法直接送出
+//! 6. 候選窗選擇框（↑ ↓ Enter）
+//! 7. 其餘交給 chewing
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use chewing::editor::{BasicEditor, Editor, EditorKeyBehavior};
+use ferrous_opencc::OpenCC;
+use ferrous_opencc::config::BuiltinConfig;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Width, Config, InputMode};
-use crate::key::{Key, KeyEvent, shifted, to_chewing};
+use crate::apps::{AppRule, Effective};
+use crate::config::{
+    Config, GameMode, HotkeyConfig, InputMode, OnFocus, Output, PunctuationTable, Width,
+};
+use crate::key::{Key, KeyEvent, Mods, shifted, to_chewing};
 use crate::shift::ShiftTap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -36,8 +51,12 @@ pub struct KeyResult {
     pub candidates: Option<CandidatePage>,
     /// 這次按鍵切換了中英狀態（平台層顯示「中 / A」提示）
     pub mode_changed: Option<InputMode>,
-    /// 這次按鍵切換了標點全半形（平台層顯示「全 / 半」提示）
+    /// 這次按鍵切換了標點全半形（平台層顯示「全形 / 半形」提示）
     pub width_changed: Option<Width>,
+    /// 這次按鍵切換了繁簡輸出（平台層顯示「繁 / 简」提示）
+    pub output_changed: Option<Output>,
+    /// 使用者按了遊戲模式快捷鍵；遊戲模式是全域狀態，由服務程序切換並廣播
+    pub toggle_game: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +66,8 @@ pub struct SessionOptions {
     /// 使用者詞庫與學習資料所在資料夾
     pub user_dir: PathBuf,
     pub config: Config,
+    /// 目前 App 的規則（`apps.toml`）
+    pub rule: Option<AppRule>,
 }
 
 #[derive(Debug)]
@@ -60,12 +81,25 @@ impl std::fmt::Display for SessionError {
 
 impl std::error::Error for SessionError {}
 
+/// 繁→簡轉換器：第一次使用時載入，所有 session 共用
+fn simplifier() -> Option<&'static OpenCC> {
+    static CC: OnceLock<Option<OpenCC>> = OnceLock::new();
+    CC.get_or_init(|| OpenCC::from_config(BuiltinConfig::Tw2sp).ok())
+        .as_ref()
+}
+
 #[derive(Debug)]
 pub struct Session {
     editor: Editor,
+    eff: Effective,
     mode: InputMode,
     width: Width,
+    output: Output,
+    /// 手動快捷鍵開啟的全域遊戲模式（由服務程序設定）
+    global_game: bool,
     shift: ShiftTap,
+    hotkeys: HotkeyConfig,
+    punct: PunctuationTable,
     per_page: usize,
     highlight: usize,
 }
@@ -85,15 +119,21 @@ impl Session {
             o.space_is_select_key = true;
             // 選完字後游標跳到該詞後面（今天|天氣很好 → 今天天氣|很好）
             o.auto_shift_cursor = true;
-            // 全半形切換由 ZCT 自己處理（M3），避免 chewing 吃掉 Shift+Space
+            // 全半形切換由 ZCT 自己處理，避免 chewing 吃掉 Shift+Space
             o.enable_fullwidth_toggle_key = false;
         });
 
+        let eff = Effective::resolve(&opts.config, opts.rule.as_ref());
         Ok(Session {
             editor,
-            mode: opts.config.input.default_mode,
-            width: opts.config.input.punctuation,
+            eff,
+            mode: eff.default_mode,
+            width: eff.width,
+            output: eff.output,
+            global_game: false,
             shift: ShiftTap::new(opts.config.toggle.shift, opts.config.toggle.shift_tap_max_ms),
+            hotkeys: opts.config.hotkeys.clone(),
+            punct: opts.config.punctuation.compile().map_err(SessionError)?,
             per_page,
             highlight: 0,
         })
@@ -107,9 +147,69 @@ impl Session {
         self.width
     }
 
-    /// Shift + 空白鍵：切換標點全半形（與微軟新注音相同）
-    fn is_width_toggle(ev: &KeyEvent) -> bool {
-        ev.key == Key::Space && ev.mods.shift
+    pub fn output(&self) -> Output {
+        self.output
+    }
+
+    /// 目前生效的遊戲模式：手動開啟時一律鎖定英文，否則看 App 規則
+    pub fn game_mode(&self) -> GameMode {
+        if self.global_game {
+            GameMode::English
+        } else {
+            self.eff.game_mode
+        }
+    }
+
+    /// 平台層要做的啟發式偵測：（舊式程式 + 沒有游標，獨佔全螢幕）
+    pub fn detection(&self) -> (bool, bool) {
+        (self.eff.detect_legacy, self.eff.detect_fullscreen)
+    }
+
+    pub fn set_global_game(&mut self, on: bool) {
+        self.global_game = on;
+    }
+
+    pub fn is_composing(&self) -> bool {
+        !self.editor.is_empty() || self.editor.entering_syllable() || self.editor.is_selecting()
+    }
+
+    fn chinese_hotkey(&self, ev: &KeyEvent) -> bool {
+        self.mode == InputMode::Chinese
+            && self.game_mode() != GameMode::English
+            && (self.hotkeys.width.matches(ev) || self.hotkeys.output.matches(ev))
+    }
+
+    /// 由輸入法直接送出的文字（不經過 chewing）
+    fn direct_text(&self, ev: &KeyEvent) -> Option<String> {
+        if let Key::Numpad(c) = ev.key {
+            // 選字時數字鍵盤也能選字，交給 chewing
+            if self.editor.is_selecting() && c.is_ascii_digit() {
+                return None;
+            }
+            return Some((c as char).to_string());
+        }
+        let Key::Char(c) = ev.key else { return None };
+        // Caps Lock：字母直接輸出英文（與微軟新注音相同）
+        if ev.mods.caps_lock && c.is_ascii_alphabetic() {
+            let upper = !ev.mods.shift;
+            let c = if upper { c.to_ascii_uppercase() } else { c };
+            return Some((c as char).to_string());
+        }
+        let table = match self.width {
+            Width::Full => &self.punct.full,
+            Width::Half => &self.punct.half,
+        };
+        let plain = KeyEvent {
+            mods: Mods {
+                caps_lock: false,
+                ..ev.mods
+            },
+            ..*ev
+        };
+        if let Some((_, out)) = table.iter().find(|(hk, _)| hk.matches(&plain)) {
+            return Some(out.clone());
+        }
+        self.halfwidth_symbol(ev).map(|c| (c as char).to_string())
     }
 
     /// 半形模式下，這個鍵要輸出的 ASCII 標點；字母、注音鍵與 ` 符號選單不受影響
@@ -125,10 +225,6 @@ impl Session {
         }
     }
 
-    pub fn is_composing(&self) -> bool {
-        !self.editor.is_empty() || self.editor.entering_syllable() || self.editor.is_selecting()
-    }
-
     /// 只判斷「按下」事件是否會被吃掉，不改變任何狀態（給 TSF `OnTestKeyDown` 用）
     ///
     /// 放開事件請直接呼叫 [`Session::process_key`]：放開事件從不被吃掉，但 Shift 判定需要它。
@@ -136,21 +232,30 @@ impl Session {
         if ev.released || ev.key.is_modifier() || ev.key == Key::Other {
             return false;
         }
-        // P3：Ctrl / Alt / Meta 組合鍵一律交給 App
+        if self.hotkeys.game_mode.matches(ev) || self.chinese_hotkey(ev) {
+            return true;
+        }
+        if self.game_mode() == GameMode::English {
+            return false;
+        }
+        // P3：沒有綁定的 Ctrl / Alt / Meta 組合鍵一律交給 App
         if ev.mods.has_command_modifier() {
             return false;
         }
         if self.mode == InputMode::English {
             return false;
         }
-        if Self::is_width_toggle(ev) {
-            return true;
-        }
         if self.is_composing() {
-            return true;
+            return !matches!(ev.key, Key::F(_));
         }
-        // 沒有組字時，只有字元鍵會開始組字；Enter、空白、方向鍵等交給 App
-        matches!(ev.key, Key::Char(_))
+        match ev.key {
+            // 沒在組字時，數字鍵盤與 Caps Lock 字母由 App 自己處理
+            Key::Numpad(_) => false,
+            Key::Char(c) if ev.mods.caps_lock && c.is_ascii_alphabetic() => false,
+            // 只有字元鍵會開始組字；Enter、空白、方向鍵等交給 App
+            Key::Char(_) => true,
+            _ => false,
+        }
     }
 
     /// 給 TSF `OnTestKeyDown` 用：判斷是否會吃掉；不吃的鍵仍要讓 Shift 判定看到
@@ -166,41 +271,55 @@ impl Session {
     }
 
     pub fn process_key(&mut self, ev: &KeyEvent) -> KeyResult {
+        let mut r = KeyResult::default();
         let mut commit = String::new();
-        let mut mode_changed = None;
 
-        if self.shift.observe(ev) {
+        // 遊戲模式下 Shift 不切換中英
+        if self.shift.observe(ev) && self.game_mode() == GameMode::Off {
             commit.push_str(&self.flush());
             self.mode = self.mode.toggled();
-            mode_changed = Some(self.mode);
+            r.mode_changed = Some(self.mode);
         }
 
-        let mut eaten = false;
-        let mut width_changed = None;
         if self.test_key(ev) {
-            if Self::is_width_toggle(ev) {
-                self.width = self.width.toggled();
-                width_changed = Some(self.width);
-                eaten = true;
-            } else if let Some(c) = self.halfwidth_symbol(ev) {
-                // 由輸入法送出半形標點；組字中則先送出組字，順序才正確
+            r.eaten = true;
+            if self.hotkeys.game_mode.matches(ev) {
                 commit.push_str(&self.flush());
-                commit.push(c as char);
-                eaten = true;
-            } else if self.navigate_candidates(ev) {
-                eaten = true;
-            } else if let Some(chewing_ev) = to_chewing(ev.key, ev.mods) {
-                let was_composing = self.is_composing();
-                let behavior = self.editor.process_keyevent(chewing_ev);
-                eaten = was_composing || behavior != EditorKeyBehavior::Ignore;
-                // 翻頁、重新開啟或關閉候選窗後，選擇框回到第一個
-                self.highlight = 0;
+                r.toggle_game = true;
+            } else if self.hotkeys.width.matches(ev) && self.chinese_hotkey(ev) {
+                self.width = self.width.toggled();
+                r.width_changed = Some(self.width);
+            } else if self.hotkeys.output.matches(ev) && self.chinese_hotkey(ev) {
+                self.output = self.output.toggled();
+                r.output_changed = Some(self.output);
+            } else if let Some(text) = self.direct_text(ev) {
+                // 組字中先送出組字，順序才正確
+                commit.push_str(&self.flush());
+                commit.push_str(&text);
+            } else if !self.navigate_candidates(ev) {
+                let key = match ev.key {
+                    Key::Numpad(c) => Key::Char(c),
+                    k => k,
+                };
+                match to_chewing(key, ev.mods) {
+                    Some(chewing_ev) => {
+                        let was_composing = self.is_composing();
+                        let behavior = self.editor.process_keyevent(chewing_ev);
+                        r.eaten = was_composing || behavior != EditorKeyBehavior::Ignore;
+                        // 翻頁、重新開啟或關閉候選窗後，選擇框回到第一個
+                        self.highlight = 0;
+                    }
+                    None => r.eaten = false,
+                }
             }
             commit.push_str(&self.take_commit());
         }
 
-        let mut r = self.result(eaten, commit, mode_changed);
-        r.width_changed = width_changed;
+        if !commit.is_empty() {
+            r.commit = Some(self.convert(&commit));
+        }
+        r.preedit = self.preedit();
+        r.candidates = self.candidates();
         r
     }
 
@@ -239,12 +358,20 @@ impl Session {
     }
 
     fn chewing_key(&mut self, key: Key) {
-        if let Some(ev) = to_chewing(key, crate::key::Mods::NONE) {
+        if let Some(ev) = to_chewing(key, Mods::NONE) {
             self.editor.process_keyevent(ev);
         }
     }
 
-    /// 送出目前所有組字內容（失焦、切換中英時使用）
+    /// 依目前輸出字集轉換顯示與送出的文字
+    fn convert(&self, text: &str) -> String {
+        match (self.output, simplifier()) {
+            (Output::Simplified, Some(cc)) => cc.convert(text),
+            _ => text.to_owned(),
+        }
+    }
+
+    /// 送出目前所有組字內容（失焦、切換中英時使用）；回傳的是 chewing 原始（繁體）文字
     pub fn flush(&mut self) -> String {
         if self.editor.is_selecting() {
             let _ = self.editor.cancel_selecting();
@@ -258,22 +385,33 @@ impl Session {
         text
     }
 
-    /// 丟棄組字內容與 Shift 狀態
+    /// 丟棄組字內容與 Shift 狀態（App 中止組字時）
     pub fn reset(&mut self) {
         self.editor.clear();
         self.shift.reset();
+        self.highlight = 0;
+    }
+
+    /// 輸入焦點回到這個 context：依 `on_focus` 決定是否重設中英狀態
+    pub fn focus(&mut self) {
+        self.reset();
+        if self.eff.on_focus == OnFocus::Reset {
+            self.mode = self.eff.default_mode;
+            self.width = self.eff.width;
+        }
     }
 
     pub fn preedit(&self) -> Preedit {
         let converted: Vec<char> = self.editor.display().chars().collect();
         let syllable = self.editor.syllable_buffer_display();
         let cursor = self.editor.cursor().min(converted.len());
-        let mut text: String = converted[..cursor].iter().collect();
-        text.push_str(&syllable);
-        text.extend(&converted[cursor..]);
+        let before: String = converted[..cursor].iter().collect();
+        let after: String = converted[cursor..].iter().collect();
+        let before = self.convert(&before);
+        let after = self.convert(&after);
         Preedit {
-            text,
-            cursor: cursor + syllable.chars().count(),
+            cursor: before.chars().count() + syllable.chars().count(),
+            text: format!("{before}{syllable}{after}"),
         }
     }
 
@@ -287,6 +425,7 @@ impl Session {
             .ok()?
             .into_iter()
             .take(self.per_page)
+            .map(|c| self.convert(&c))
             .collect();
         Some(CandidatePage {
             items,
@@ -302,16 +441,5 @@ impl Session {
             self.editor.ack();
         }
         text
-    }
-
-    fn result(&self, eaten: bool, commit: String, mode_changed: Option<InputMode>) -> KeyResult {
-        KeyResult {
-            eaten,
-            commit: (!commit.is_empty()).then_some(commit),
-            preedit: self.preedit(),
-            candidates: self.candidates(),
-            mode_changed,
-            width_changed: None,
-        }
     }
 }
