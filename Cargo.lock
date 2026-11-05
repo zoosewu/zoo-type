@@ -6018,6 +6018,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zct-eval"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "zct-core",
+]
+
+[[package]]
 name = "zct-ipc"
 version = "0.1.0"
 dependencies = [

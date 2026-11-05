@@ -1,0 +1,12 @@
+[package]
+name = "zct-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zct-core.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
