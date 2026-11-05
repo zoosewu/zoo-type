@@ -14,7 +14,8 @@ use chewing::dictionary::{LookupStrategy, StringTable};
 use chewing::editor::{Editor, EditorBuilder, SymbolSelector};
 use chewing::lm::{LoadMode, StaticDict, StaticLm};
 use chewing::user::{HistoryDict, UserDict};
-use chewing::zhuyin::Syllable;
+use chewing::zhuyin::{Syllable, SyllableVec};
+use serde::{Deserialize, Serialize};
 
 const USER_DICT: &str = "user_dict.csv";
 const HISTORY: &str = "history_dict.bin";
@@ -35,8 +36,43 @@ fn err(e: impl std::fmt::Display) -> EngineError {
     EngineError(e.to_string())
 }
 
+/// 使用者詞庫中的一筆
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhraseEntry {
+    pub word: String,
+    /// 注音，字與字之間以空白分隔，例如 `ㄊㄧㄢ ㄑㄧˋ`
+    pub bopomofo: String,
+    /// 加權：`10` 一般自訂詞、大於 10 固頂、`-100` 封鎖（不出現在候選）
+    pub boost: i8,
+}
+
+impl PhraseEntry {
+    pub const BANNED: i8 = UserDict::MIN;
+    /// chewing 新加入的自訂詞的加權
+    pub const NORMAL: i8 = 10;
+
+    pub fn is_pinned(&self) -> bool {
+        self.boost > Self::NORMAL
+    }
+
+    pub fn is_banned(&self) -> bool {
+        self.boost == Self::BANNED
+    }
+}
+
+/// 對使用者詞庫中一筆詞的操作
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PhraseAction {
+    /// 封鎖：不再出現在候選
+    Ban,
+    /// 解除封鎖
+    Unban,
+    /// 取消固頂並清除學習紀錄
+    Unpin,
+}
+
 /// 每日選字統計（需求 4.14：個人首選正確率）
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DayStats {
     /// UTC 日期 `YYYY-MM-DD`
     pub day: String,
@@ -57,6 +93,8 @@ pub struct Engine {
     history: HistoryDict,
     dir: PathBuf,
     dirty: AtomicBool,
+    /// 還原備份後停止存檔，避免記憶體中的舊資料蓋掉剛還原的檔案
+    frozen: AtomicBool,
     stats: Mutex<Vec<DayStats>>,
 }
 
@@ -149,6 +187,7 @@ impl Engine {
             history,
             dir: dir.to_path_buf(),
             dirty: AtomicBool::new(false),
+            frozen: AtomicBool::new(false),
             stats: Mutex::new(load_stats(&dir.join(STATS))),
         })
     }
@@ -199,13 +238,14 @@ impl Engine {
         self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// 忘記一個詞的學習紀錄，並取消固頂
+    /// 忘記一個詞的學習紀錄，並取消固頂（自訂詞仍保留，加權回到一般值）
     pub(crate) fn forget(&self, syllables: &[Syllable], word: &str) {
         self.history.remove(syllables, word);
         if let Some(boost) = self.boost_of(syllables, word)
-            && boost > 0
+            && boost > PhraseEntry::NORMAL
         {
-            for _ in 0..(boost as i32 + 9) / 10 {
+            // deboost 每次 -10
+            for _ in 0..(boost - PhraseEntry::NORMAL) / 10 {
                 self.user_dict.deboost(syllables, word);
             }
         }
@@ -214,24 +254,136 @@ impl Engine {
 
     /// 固頂：在使用者詞庫中大幅加權
     pub(crate) fn pin(&self, syllables: &[Syllable], word: &str) {
-        if self.boost_of(syllables, word).is_none() {
-            // 新條目第一次 boost 只有 +10
-            self.user_dict.boost(syllables, word);
+        // insert：新詞或被封鎖的詞 → 一般自訂詞（10）；再 boost +100（上限 100）
+        if matches!(self.boost_of(syllables, word), None | Some(PhraseEntry::BANNED)) {
+            self.user_dict.insert(syllables, word);
         }
         self.user_dict.boost(syllables, word);
         self.mark_dirty();
     }
 
+    /// 這個詞在使用者詞庫中的加權；不在詞庫中回傳 None，被封鎖回傳 `PhraseEntry::BANNED`
     pub fn boost_of(&self, syllables: &[Syllable], word: &str) -> Option<i8> {
-        self.user_dict
+        let is = |wid| self.user_dict.get_text(wid).as_deref() == Some(word);
+        if let Some((_, b)) = self
+            .user_dict
             .lookup(syllables, LookupStrategy::Standard)
             .into_iter()
-            .find(|(wid, _)| self.user_dict.get_text(*wid).as_deref() == Some(word))
-            .map(|(_, b)| b)
+            .find(|(wid, _)| is(*wid))
+        {
+            return Some(b);
+        }
+        // 一般查詢會略過被封鎖的詞
+        self.user_dict
+            .lookup_banned(syllables, LookupStrategy::Standard)
+            .into_iter()
+            .any(is)
+            .then_some(PhraseEntry::BANNED)
+    }
+
+    /// 使用者詞庫內容（設定程式的詞庫頁）
+    pub fn phrases(&self) -> Vec<PhraseEntry> {
+        let mut list: Vec<PhraseEntry> = self
+            .user_dict
+            .entries()
+            .map(|(syl, word)| {
+                let boost = self.boost_of(syl.as_ref(), &word).unwrap_or(0);
+                let bopomofo = syl
+                    .as_ref()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                PhraseEntry {
+                    word,
+                    bopomofo,
+                    boost,
+                }
+            })
+            .collect();
+        list.sort_by(|a, b| a.bopomofo.cmp(&b.bopomofo).then(a.word.cmp(&b.word)));
+        list
+    }
+
+    fn parse(word: &str, bopomofo: &str) -> Result<SyllableVec, String> {
+        let syl: SyllableVec = bopomofo
+            .trim()
+            .parse()
+            .map_err(|_| format!("注音格式錯誤：{bopomofo}"))?;
+        let n = word.chars().count();
+        if n == 0 || n != syl.as_ref().len() {
+            return Err(format!("「{word}」有 {n} 個字，注音有 {} 個音節", syl.as_ref().len()));
+        }
+        Ok(syl)
+    }
+
+    /// 加入自訂詞：使用者明確加入的詞要能打得出來，所以和固頂一樣優先
+    pub fn add_phrase(&self, word: &str, bopomofo: &str) -> Result<(), String> {
+        let word = word.trim();
+        let syl = Self::parse(word, bopomofo)?;
+        match self.boost_of(syl.as_ref(), word) {
+            Some(b) if b != PhraseEntry::BANNED => return Err(format!("已有：{word}")),
+            _ => self.pin(syl.as_ref(), word),
+        }
+        Ok(())
+    }
+
+    pub fn phrase_action(&self, word: &str, bopomofo: &str, action: PhraseAction) -> Result<(), String> {
+        let syl = Self::parse(word, bopomofo)?;
+        match action {
+            PhraseAction::Ban => {
+                self.user_dict.ban(syl.as_ref(), word);
+                self.history.remove(syl.as_ref(), word);
+            }
+            // insert 會把被封鎖的詞恢復成一般自訂詞
+            PhraseAction::Unban => self.user_dict.insert(syl.as_ref(), word),
+            PhraseAction::Unpin => {
+                self.forget(syl.as_ref(), word);
+                return Ok(());
+            }
+        }
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// 備份清單（新的在前）
+    pub fn backups(backup_dir: &Path) -> Vec<String> {
+        let mut days: Vec<String> = std::fs::read_dir(backup_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        days.sort();
+        days.reverse();
+        days
+    }
+
+    /// 把某天的備份複製回學習資料夾，並停止存檔；呼叫端接著要結束程序，重新啟動時載入
+    pub fn restore(&self, backup_dir: &Path, day: &str) -> std::io::Result<()> {
+        if day.contains(['/', '\\', '.']) {
+            return Err(std::io::Error::other("無效的日期"));
+        }
+        let src = backup_dir.join(day);
+        if !src.join(HISTORY).exists() && !src.join(USER_DICT).exists() {
+            return Err(std::io::Error::other(format!("找不到備份：{day}")));
+        }
+        self.frozen.store(true, Ordering::SeqCst);
+        for name in [USER_DICT, HISTORY, STATS] {
+            let (from, to) = (src.join(name), self.dir.join(name));
+            if from.exists() {
+                std::fs::copy(&from, &to)?;
+            }
+        }
+        Ok(())
     }
 
     /// 有變更才寫檔；回傳是否有寫入
     pub fn save(&self) -> std::io::Result<bool> {
+        if self.frozen.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
         if !self.dirty.swap(false, Ordering::Relaxed) {
             return Ok(false);
         }
@@ -260,7 +412,9 @@ impl Engine {
     /// 每日備份到 `backup_dir/<日期>/`，保留最新 `keep` 份；今天已備份過就不重複
     pub fn backup(&self, backup_dir: &Path, keep: usize) -> std::io::Result<()> {
         let target = backup_dir.join(today());
-        if !target.exists() {
+        // 還沒有任何資料時不建立備份：否則會留下空的當日備份，當天之後也不會再補
+        let has_data = [USER_DICT, HISTORY].iter().any(|n| self.dir.join(n).exists());
+        if has_data && !target.exists() {
             std::fs::create_dir_all(&target)?;
             for name in [USER_DICT, HISTORY, STATS] {
                 let src = self.dir.join(name);
@@ -268,6 +422,9 @@ impl Engine {
                     std::fs::copy(&src, target.join(name))?;
                 }
             }
+        }
+        if !backup_dir.exists() {
+            return Ok(());
         }
         let mut days: Vec<PathBuf> = std::fs::read_dir(backup_dir)?
             .filter_map(|e| e.ok().map(|e| e.path()))

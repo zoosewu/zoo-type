@@ -1,16 +1,19 @@
 //! TSF DLL ↔ 服務程序之間的訊息（架構文件第 4 節）
 
 use serde::{Deserialize, Serialize};
-use zct_core::{KeyEvent, KeyResult};
+use zct_core::{DayStats, KeyEvent, KeyResult, PhraseAction, PhraseEntry};
 
 #[cfg(windows)]
 pub mod pipe;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
-/// 單一訊息上限（候選字頁面遠小於此）
-pub const MAX_MESSAGE: usize = 64 * 1024;
+/// 單一訊息上限（詞庫清單等管理用回應可能較大）
+pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
+
+/// 緩衝區初始大小與管道緩衝大小；按鍵訊息遠小於此，較大的回應會自動擴充緩衝區
+pub const INITIAL_BUFFER: usize = 64 * 1024;
 
 /// 螢幕座標（實體像素）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +43,24 @@ pub enum Request {
     Reset,
     /// 輸入焦點換到另一個文件：同 Reset，並依 `on_focus` 設定重設中英狀態
     Focus,
+
+    // ---- 管理用（設定程式）：服務程序是學習資料唯一的擁有者 ----
+    /// 列出使用者詞庫 → `Phrases`
+    ListPhrases,
+    /// 加入自訂詞 → `Ok` / `Error`
+    AddPhrase { word: String, bopomofo: String },
+    /// 封鎖 / 解除封鎖 / 取消固頂 → `Ok` / `Error`
+    Phrase {
+        word: String,
+        bopomofo: String,
+        action: PhraseAction,
+    },
+    /// 每日統計 → `Stats`
+    Stats,
+    /// 備份清單（新的在前）→ `Backups`
+    Backups,
+    /// 從備份還原；成功後服務程序會結束，下次按鍵時重新啟動並載入 → `Ok` / `Error`
+    Restore { day: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +75,9 @@ pub enum Response {
     },
     Eat(bool),
     Key(KeyResult),
+    Phrases(Vec<PhraseEntry>),
+    Stats(Vec<DayStats>),
+    Backups(Vec<String>),
     Error(String),
 }
 

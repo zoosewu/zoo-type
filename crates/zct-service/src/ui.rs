@@ -40,15 +40,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{HSTRING, Result, w};
 use windows_numerics::Vector2;
 use zct_core::CandidatePage;
+use zct_core::config::{Color, Layout, ThemeConfig};
 use zct_ipc::Rect;
 
 const WM_WAKE: u32 = WM_APP + 1;
 const HINT_TIMER: usize = 1;
 const HINT_MS: u32 = 800;
 
-const FONT: &str = "Microsoft JhengHei UI";
-const TEXT_DIP: f32 = 16.0;
-const NUM_DIP: f32 = 12.0;
+/// 數字字級相對於候選字字級
+const NUM_RATIO: f32 = 0.75;
 const PAD_X: f32 = 6.0;
 const PAD_Y: f32 = 4.0;
 /// 選擇框左右內距
@@ -62,18 +62,33 @@ const ROW_RADIUS: f32 = 4.0;
 /// 候選窗與游標之間的距離
 const OFFSET_DIP: f32 = 4.0;
 
-const BG: D2D1_COLOR_F = rgb(0xFFFFFF);
-const FG: D2D1_COLOR_F = rgb(0x1A1A1A);
-const DIM: D2D1_COLOR_F = rgb(0x7A7A7A);
-/// 選擇框
-const HL: D2D1_COLOR_F = rgb(0xCCE4F7);
-
-const fn rgb(hex: u32) -> D2D1_COLOR_F {
+fn color(c: Color) -> D2D1_COLOR_F {
+    let (r, g, b) = c.rgb();
     D2D1_COLOR_F {
-        r: ((hex >> 16) & 0xFF) as f32 / 255.0,
-        g: ((hex >> 8) & 0xFF) as f32 / 255.0,
-        b: (hex & 0xFF) as f32 / 255.0,
+        r: r as f32 / 255.0,
+        g: g as f32 / 255.0,
+        b: b as f32 / 255.0,
         a: 1.0,
+    }
+}
+
+/// 主題轉成 Direct2D 用的顏色
+#[derive(Clone, Copy)]
+struct Colors {
+    bg: D2D1_COLOR_F,
+    fg: D2D1_COLOR_F,
+    dim: D2D1_COLOR_F,
+    hl: D2D1_COLOR_F,
+}
+
+impl Colors {
+    fn from(t: &ThemeConfig) -> Colors {
+        Colors {
+            bg: color(t.background),
+            fg: color(t.text),
+            dim: color(t.number),
+            hl: color(t.highlight),
+        }
     }
 }
 
@@ -92,6 +107,10 @@ pub enum UiCmd {
         text: String,
         anchor: Option<Rect>,
     },
+    /// 設定檔的主題變更了
+    Theme(ThemeConfig),
+    /// 結束服務程序（先移除系統匣圖示）
+    Exit,
 }
 
 #[derive(Clone)]
@@ -116,14 +135,21 @@ impl UiHandle {
     }
 }
 
-pub fn spawn() -> std::result::Result<UiHandle, Box<dyn std::error::Error>> {
+pub fn spawn(
+    theme: ThemeConfig,
+    tray: crate::tray::TrayCtx,
+) -> std::result::Result<UiHandle, Box<dyn std::error::Error>> {
     let (tx, rx) = channel();
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     std::thread::Builder::new().name("ui".into()).spawn(move || {
-        match Ui::new(rx) {
+        match Ui::new(rx, theme) {
             Ok(ui) => {
                 let wake = ui.cand.hwnd.0 as isize;
                 UI.with(|cell| *cell.borrow_mut() = Some(ui));
+                // 系統匣圖示失敗不影響打字
+                if let Err(e) = crate::tray::create(tray) {
+                    log::warn!("無法建立系統匣圖示：{e}");
+                }
                 let _ = ready_tx.send(Ok(wake));
                 message_loop();
             }
@@ -150,6 +176,9 @@ thread_local! {
     static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
 }
 
+/// 排版結果：文字、選擇框、視窗大小（DIP）
+type Laid = (Vec<Run>, Option<D2D_RECT_F>, (f32, f32));
+
 /// 已排版、待繪製的一段文字
 struct Run {
     layout: IDWriteTextLayout,
@@ -172,6 +201,8 @@ struct Popup {
 struct Ui {
     d2d: ID2D1Factory,
     dw: IDWriteFactory,
+    theme: ThemeConfig,
+    colors: Colors,
     text_fmt: IDWriteTextFormat,
     num_fmt: IDWriteTextFormat,
     cand: Popup,
@@ -182,23 +213,38 @@ struct Ui {
 }
 
 impl Ui {
-    fn new(rx: Receiver<UiCmd>) -> Result<Ui> {
+    fn formats(
+        dw: &IDWriteFactory,
+        t: &ThemeConfig,
+    ) -> Result<(IDWriteTextFormat, IDWriteTextFormat)> {
+        let fmt = |size: f32| unsafe {
+            dw.CreateTextFormat(
+                &HSTRING::from(t.font.as_str()),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                size,
+                w!("zh-TW"),
+            )
+        };
+        Ok((fmt(t.font_size)?, fmt(t.font_size * NUM_RATIO)?))
+    }
+
+    fn set_theme(&mut self, theme: ThemeConfig) -> Result<()> {
+        let (text_fmt, num_fmt) = Self::formats(&self.dw, &theme)?;
+        self.text_fmt = text_fmt;
+        self.num_fmt = num_fmt;
+        self.colors = Colors::from(&theme);
+        self.theme = theme;
+        Ok(())
+    }
+
+    fn new(rx: Receiver<UiCmd>, theme: ThemeConfig) -> Result<Ui> {
         unsafe {
             let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-            let fmt = |size: f32| {
-                dw.CreateTextFormat(
-                    &HSTRING::from(FONT),
-                    None,
-                    DWRITE_FONT_WEIGHT_NORMAL,
-                    DWRITE_FONT_STYLE_NORMAL,
-                    DWRITE_FONT_STRETCH_NORMAL,
-                    size,
-                    w!("zh-TW"),
-                )
-            };
-            let text_fmt = fmt(TEXT_DIP)?;
-            let num_fmt = fmt(NUM_DIP)?;
+            let (text_fmt, num_fmt) = Self::formats(&dw, &theme)?;
 
             let hinst = GetModuleHandleW(None)?;
             let class = WNDCLASSEXW {
@@ -245,6 +291,8 @@ impl Ui {
             Ok(Ui {
                 d2d,
                 dw,
+                colors: Colors::from(&theme),
+                theme,
                 text_fmt,
                 num_fmt,
                 cand: make()?,
@@ -277,6 +325,14 @@ impl Ui {
                     Ok(())
                 }
                 UiCmd::Hint { text, anchor } => self.show_hint(&text, anchor),
+                UiCmd::Exit => {
+                    crate::tray::remove();
+                    std::process::exit(0);
+                }
+                UiCmd::Theme(t) => {
+                    log::info!("套用候選窗主題");
+                    self.set_theme(t)
+                }
             };
             if let Err(e) = r {
                 log::warn!("繪製失敗：{e}");
@@ -303,11 +359,75 @@ impl Ui {
         }
     }
 
-    /// 直式候選窗：每列「數字 候選字」，選擇框標示目前項目，多頁時底部顯示頁碼
     fn show_candidates(&mut self, page: &CandidatePage, anchor: Option<Rect>) -> Result<()> {
         let Some(anchor) = self.anchor(anchor) else {
             return Ok(());
         };
+        let (runs, highlight, dip) = match self.theme.layout {
+            Layout::Vertical => self.layout_vertical(page)?,
+            Layout::Horizontal => self.layout_horizontal(page)?,
+        };
+        let (d2d, colors, cand) = (&self.d2d, self.colors, &mut self.cand);
+        cand.runs = runs;
+        cand.highlight = highlight;
+        place(cand, anchor, dip)?;
+        render(d2d, &colors, cand)
+    }
+
+    /// 橫式：「1 天 2 添 …」排成一列，選擇框框住目前項目，最後是頁碼
+    fn layout_horizontal(&self, page: &CandidatePage) -> Result<Laid> {
+        let mut items = Vec::new();
+        let mut row_h: f32 = 0.0;
+        for (i, item) in page.items.iter().enumerate() {
+            let num = self.layout(&format!("{}", (i + 1) % 10), &self.num_fmt)?;
+            let text = self.layout(item, &self.text_fmt)?;
+            row_h = row_h.max(text.2).max(num.2);
+            items.push((num, text));
+        }
+        let row_h = row_h + ROW_PAD_Y * 2.0;
+        let mut runs = Vec::new();
+        let mut highlight = None;
+        let mut x = PAD_X;
+        for (i, ((num, nw, nh), (text, tw, th))) in items.into_iter().enumerate() {
+            let w = ROW_PAD_X + nw + GAP_NUM / 2.0 + tw + ROW_PAD_X;
+            if i == page.highlight {
+                highlight = Some(D2D_RECT_F {
+                    left: x,
+                    top: PAD_Y,
+                    right: x + w,
+                    bottom: PAD_Y + row_h,
+                });
+            }
+            runs.push(Run {
+                layout: num,
+                x: x + ROW_PAD_X,
+                y: PAD_Y + (row_h - nh) / 2.0,
+                dim: true,
+            });
+            runs.push(Run {
+                layout: text,
+                x: x + ROW_PAD_X + nw + GAP_NUM / 2.0,
+                y: PAD_Y + (row_h - th) / 2.0,
+                dim: false,
+            });
+            x += w;
+        }
+        if page.total_pages > 1 {
+            let (layout, w, h) =
+                self.layout(&format!("{}/{}", page.page + 1, page.total_pages), &self.num_fmt)?;
+            runs.push(Run {
+                layout,
+                x: x + ROW_PAD_X,
+                y: PAD_Y + (row_h - h) / 2.0,
+                dim: true,
+            });
+            x += w + ROW_PAD_X * 2.0;
+        }
+        Ok((runs, highlight, (x + PAD_X, row_h + PAD_Y * 2.0)))
+    }
+
+    /// 直式：每列「數字 候選字」，選擇框標示目前項目，多頁時底部顯示頁碼
+    fn layout_vertical(&self, page: &CandidatePage) -> Result<Laid> {
         // 數字欄寬固定，候選字才會對齊
         let (_, num_w, _) = self.layout("0", &self.num_fmt)?;
         let mut rows = Vec::new();
@@ -367,12 +487,7 @@ impl Ui {
         if let Some(hl) = &mut highlight {
             hl.right = PAD_X + width;
         }
-        let dip = (PAD_X * 2.0 + width, y + PAD_Y);
-        let (d2d, cand) = (&self.d2d, &mut self.cand);
-        cand.runs = runs;
-        cand.highlight = highlight;
-        place(cand, anchor, dip)?;
-        render(d2d, cand)
+        Ok((runs, highlight, (PAD_X * 2.0 + width, y + PAD_Y)))
     }
 
     fn show_hint(&mut self, text: &str, anchor: Option<Rect>) -> Result<()> {
@@ -380,7 +495,7 @@ impl Ui {
             return Ok(());
         };
         let (layout, w, h) = self.layout(text, &self.text_fmt)?;
-        let (d2d, hint) = (&self.d2d, &mut self.hint);
+        let (d2d, colors, hint) = (&self.d2d, self.colors, &mut self.hint);
         hint.highlight = None;
         hint.runs = vec![Run {
             layout,
@@ -389,7 +504,7 @@ impl Ui {
             dim: false,
         }];
         place(hint, anchor, (w + PAD_X * 2.0, h + PAD_Y * 2.0))?;
-        render(d2d, hint)?;
+        render(d2d, &colors, hint)?;
         unsafe {
             SetTimer(Some(hint.hwnd), HINT_TIMER, HINT_MS, None);
         }
@@ -456,7 +571,7 @@ fn place(p: &mut Popup, anchor: Rect, dip: (f32, f32)) -> Result<()> {
     }
 }
 
-fn render(d2d: &ID2D1Factory, p: &mut Popup) -> Result<()> {
+fn render(d2d: &ID2D1Factory, c: &Colors, p: &mut Popup) -> Result<()> {
     unsafe {
         if p.target.is_none() {
             let props = D2D1_RENDER_TARGET_PROPERTIES {
@@ -479,12 +594,12 @@ fn render(d2d: &ID2D1Factory, p: &mut Popup) -> Result<()> {
             p.target = Some(d2d.CreateHwndRenderTarget(&props, &hwnd_props)?);
         }
         let Some(t) = &p.target else { return Ok(()) };
-        let fg = t.CreateSolidColorBrush(&FG, None)?;
-        let dim = t.CreateSolidColorBrush(&DIM, None)?;
+        let fg = t.CreateSolidColorBrush(&c.fg, None)?;
+        let dim = t.CreateSolidColorBrush(&c.dim, None)?;
         t.BeginDraw();
-        t.Clear(Some(&BG));
+        t.Clear(Some(&c.bg));
         if let Some(rect) = p.highlight {
-            let hl = t.CreateSolidColorBrush(&HL, None)?;
+            let hl = t.CreateSolidColorBrush(&c.hl, None)?;
             t.FillRoundedRectangle(
                 &D2D1_ROUNDED_RECT {
                     rect,
@@ -540,12 +655,13 @@ fn handle(hwnd: HWND, msg: u32, wparam: WPARAM) -> Option<LRESULT> {
         WM_PAINT => {
             let painted = with_ui(|ui| {
                 let d2d = ui.d2d.clone();
+                let colors = ui.colors;
                 let p = if ui.cand.hwnd == hwnd {
                     &mut ui.cand
                 } else {
                     &mut ui.hint
                 };
-                let _ = render(&d2d, p);
+                let _ = render(&d2d, &colors, p);
             });
             painted.map(|_| LRESULT(0))
         }

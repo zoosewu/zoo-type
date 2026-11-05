@@ -206,6 +206,84 @@ impl Default for CandidateConfig {
     }
 }
 
+/// 候選窗排列方向
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    #[default]
+    Vertical,
+    Horizontal,
+}
+
+/// `#RRGGBB` 顏色
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Color(pub u32);
+
+impl Color {
+    pub fn rgb(self) -> (u8, u8, u8) {
+        ((self.0 >> 16) as u8, (self.0 >> 8) as u8, self.0 as u8)
+    }
+}
+
+impl std::str::FromStr for Color {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Color, String> {
+        let hex = s.trim().strip_prefix('#').unwrap_or(s.trim());
+        if hex.len() != 6 {
+            return Err(format!("顏色格式應為 #RRGGBB：{s}"));
+        }
+        u32::from_str_radix(hex, 16)
+            .map(Color)
+            .map_err(|_| format!("顏色格式應為 #RRGGBB：{s}"))
+    }
+}
+
+impl std::fmt::Display for Color {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{:06X}", self.0)
+    }
+}
+
+impl Serialize for Color {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Color, D::Error> {
+        String::deserialize(d)?.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// 候選窗外觀
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThemeConfig {
+    pub layout: Layout,
+    pub font: String,
+    /// 候選字字級（DIP），數字約為其 0.75 倍
+    pub font_size: f32,
+    pub background: Color,
+    pub text: Color,
+    pub number: Color,
+    pub highlight: Color,
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        ThemeConfig {
+            layout: Layout::Vertical,
+            font: "Microsoft JhengHei UI".into(),
+            font_size: 16.0,
+            background: Color(0xFFFFFF),
+            text: Color(0x1A1A1A),
+            number: Color(0x7A7A7A),
+            highlight: Color(0xCCE4F7),
+        }
+    }
+}
+
 /// 自訂標點：`"shift+," = "，"`，覆寫內建的對照
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -244,7 +322,7 @@ impl PunctuationConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub input: InputConfig,
@@ -253,6 +331,7 @@ pub struct Config {
     pub detect: DetectConfig,
     pub candidates: CandidateConfig,
     pub punctuation: PunctuationConfig,
+    pub theme: ThemeConfig,
 }
 
 #[derive(Debug)]
@@ -281,7 +360,21 @@ impl Config {
             .punctuation
             .compile()
             .map_err(ConfigError::Invalid)?;
+        if !(8.0..=48.0).contains(&config.theme.font_size) {
+            return Err(ConfigError::Invalid(format!(
+                "候選字字級應在 8–48 之間：{}",
+                config.theme.font_size
+            )));
+        }
         Ok(config)
+    }
+
+    /// 存回檔案（暫存檔再改名）；設定程式使用
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(tmp, path)
     }
 
     /// 檔案不存在時使用預設值；格式錯誤則回報錯誤（不默默忽略使用者的設定）
@@ -340,6 +433,31 @@ mod tests {
         assert_eq!(c.hotkeys.width, Binding(None));
         assert_eq!(c.hotkeys.output.0.unwrap().key, Key::Char(b's'));
         assert!(Config::parse("[hotkeys]\nwidth = 'ctrl+bogus'").is_err());
+    }
+
+    #[test]
+    fn theme_colors_and_size_are_validated() {
+        let c = Config::parse("[theme]
+layout = 'horizontal'
+background = '#202020'").unwrap();
+        assert_eq!(c.theme.layout, Layout::Horizontal);
+        assert_eq!(c.theme.background, Color(0x202020));
+        assert!(Config::parse("[theme]
+text = 'red'").is_err());
+        assert!(Config::parse("[theme]
+font_size = 200.0").is_err());
+    }
+
+    #[test]
+    fn save_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut c = Config::default();
+        c.theme.layout = Layout::Horizontal;
+        c.hotkeys.output = Binding::key("ctrl+alt+s");
+        c.punctuation.full.insert("shift+,".into(), "《".into());
+        c.save(&path).unwrap();
+        assert_eq!(Config::load(&path).unwrap(), c);
     }
 
     #[test]

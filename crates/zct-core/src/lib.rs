@@ -10,7 +10,7 @@ pub mod session;
 pub mod shift;
 
 pub use apps::{AppRule, AppRules};
-pub use engine::Engine;
+pub use engine::{DayStats, Engine, PhraseAction, PhraseEntry};
 pub use config::{Config, GameMode, InputMode, Output, Width};
 pub use key::{Key, KeyEvent, Mods, Side};
 pub use session::{CandidatePage, KeyResult, Preedit, Session, SessionOptions};

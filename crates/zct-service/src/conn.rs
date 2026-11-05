@@ -127,6 +127,36 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 Response::Ok
             }
+            Request::ListPhrases => Response::Phrases(shared.engine.phrases()),
+            Request::AddPhrase { word, bopomofo } => {
+                match shared.engine.add_phrase(&word, &bopomofo) {
+                    Ok(()) => Response::Ok,
+                    Err(e) => Response::Error(e),
+                }
+            }
+            Request::Phrase {
+                word,
+                bopomofo,
+                action,
+            } => match shared.engine.phrase_action(&word, &bopomofo, action) {
+                Ok(()) => Response::Ok,
+                Err(e) => Response::Error(e),
+            },
+            Request::Stats => Response::Stats(shared.engine.stats()),
+            Request::Backups => Response::Backups(zct_core::Engine::backups(&shared.backup)),
+            Request::Restore { day } => match shared.engine.restore(&shared.backup, &day) {
+                Ok(()) => {
+                    log::info!("已從備份 {day} 還原，服務程序結束後重新載入");
+                    // 先回應再結束；DLL 會在下次按鍵時重新啟動服務程序
+                    let ui = shared.ui.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(300));
+                        ui.send(UiCmd::Exit);
+                    });
+                    Response::Ok
+                }
+                Err(e) => Response::Error(e.to_string()),
+            },
             Request::Reset | Request::Focus => {
                 if let Some(s) = session.as_mut() {
                     if req == Request::Focus {

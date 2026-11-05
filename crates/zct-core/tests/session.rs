@@ -600,6 +600,8 @@ fn stats_count_chars_and_corrections() {
 fn backup_keeps_latest_copies() {
     let dir = tempfile::tempdir().unwrap();
     let engine = open_engine(&dir.path().join("learning"));
+    engine.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").unwrap();
+    engine.save().unwrap();
     let backups = dir.path().join("backup");
     for old in ["2026-01-01", "2026-01-02", "2026-01-03"] {
         std::fs::create_dir_all(backups.join(old)).unwrap();
@@ -636,4 +638,74 @@ fn shift_arrows_mark_range_and_enter_adds_phrase() {
     let notice = r.notice.expect("要有加詞提示");
     assert!(notice.contains("天氣"), "{notice}");
     assert!(h.s.is_composing(), "加詞後仍在組字，不會送出");
+}
+
+// ---- M5：詞庫管理 ----
+
+#[test]
+fn add_list_ban_unban_phrase() {
+    use zct_core::PhraseAction;
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(open_engine(&dir.path().join("learning")));
+    engine.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").unwrap();
+    assert!(engine.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").is_err(), "重複加入要報錯");
+    assert!(engine.add_phrase("酷", "ㄎㄨˋ ㄧㄣ").is_err(), "字數與音節數不符");
+    assert!(engine.add_phrase("酷音", "abc").is_err(), "注音格式錯誤");
+    let list = engine.phrases();
+    let e = list.iter().find(|p| p.word == "酷音").unwrap();
+    assert_eq!(e.bopomofo, "ㄎㄨˋ ㄧㄣ");
+    assert!(e.is_pinned(), "手動加入的詞優先");
+
+    engine.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Ban).unwrap();
+    let e = engine.phrases().into_iter().find(|p| p.word == "酷音").unwrap();
+    assert_eq!(e.boost, zct_core::PhraseEntry::BANNED);
+    engine.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Unban).unwrap();
+    let e = engine.phrases().into_iter().find(|p| p.word == "酷音").unwrap();
+    assert_eq!(e.boost, zct_core::PhraseEntry::NORMAL);
+    assert!(!e.is_pinned() && !e.is_banned());
+}
+
+#[test]
+fn added_phrase_shows_up_when_typing() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(open_engine(&dir.path().join("learning")));
+    // ㄓㄜˋ ㄙㄨㄟˋ：自創詞「這穗」
+    engine.add_phrase("這穗", "ㄓㄜˋ ㄙㄨㄟˋ").unwrap();
+    let mut h = Harness::with_engine(engine, Config::default(), None, dir);
+    h.type_str("5k4njo4"); // ㄓㄜˋ ㄙㄨㄟˋ
+    assert_eq!(h.s.preedit().text, "這穗");
+}
+
+#[test]
+fn restore_copies_backup_and_freezes_saving() {
+    let dir = tempfile::tempdir().unwrap();
+    let learning = dir.path().join("learning");
+    let backups = dir.path().join("backup");
+    let engine = open_engine(&learning);
+    engine.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").unwrap();
+    engine.save().unwrap();
+    engine.backup(&backups, 7).unwrap();
+    let day = zct_core::Engine::backups(&backups).remove(0);
+
+    engine.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", zct_core::PhraseAction::Ban).unwrap();
+    engine.restore(&backups, &day).unwrap();
+    assert!(!engine.save().unwrap(), "還原後不能再存檔，否則會蓋掉還原的檔案");
+    assert!(engine.restore(&backups, "../x").is_err());
+
+    let reloaded = open_engine(&learning);
+    let e = reloaded.phrases().into_iter().find(|p| p.word == "酷音").unwrap();
+    assert!(!e.is_banned(), "還原成備份當時（未封鎖）的狀態");
+}
+
+#[test]
+fn no_backup_without_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = open_engine(&dir.path().join("learning"));
+    let backups = dir.path().join("backup");
+    engine.backup(&backups, 7).unwrap();
+    assert!(zct_core::Engine::backups(&backups).is_empty(), "沒有資料時不建立空的備份");
+    engine.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").unwrap();
+    engine.save().unwrap();
+    engine.backup(&backups, 7).unwrap();
+    assert_eq!(zct_core::Engine::backups(&backups).len(), 1);
 }

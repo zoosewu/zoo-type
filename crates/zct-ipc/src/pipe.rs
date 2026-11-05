@@ -30,7 +30,7 @@ use windows::Win32::System::Pipes::{
 use windows::Win32::System::Threading::{CreateEventW, GetCurrentProcess, OpenProcessToken};
 use windows::core::{HSTRING, PWSTR};
 
-use crate::{Error, MAX_MESSAGE, Request, Response, Result, decode, encode};
+use crate::{Error, INITIAL_BUFFER, MAX_MESSAGE, Request, Response, Result, decode, encode};
 
 /// 擁有的 HANDLE，離開作用域自動關閉
 struct Owned(HANDLE);
@@ -145,8 +145,8 @@ impl Listener {
                 open_mode,
                 PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
-                MAX_MESSAGE as u32,
-                MAX_MESSAGE as u32,
+                INITIAL_BUFFER as u32,
+                INITIAL_BUFFER as u32,
                 0,
                 Some(&sa),
             );
@@ -163,7 +163,7 @@ impl Listener {
             }
             Ok(ServerConn {
                 pipe,
-                buf: vec![0; MAX_MESSAGE],
+                buf: vec![0; INITIAL_BUFFER],
             })
         }
     }
@@ -175,7 +175,7 @@ impl ServerConn {
         let mut read = 0u32;
         match unsafe { ReadFile(self.pipe.0, Some(&mut self.buf), Some(&mut read), None) } {
             Ok(()) => decode(&self.buf[..read as usize]).map(Some),
-            Err(e) if e.code() == ERROR_MORE_DATA.to_hresult() => Err(Error::TooLarge(MAX_MESSAGE)),
+            Err(e) if e.code() == ERROR_MORE_DATA.to_hresult() => Err(Error::TooLarge(INITIAL_BUFFER)),
             // ERROR_BROKEN_PIPE 等：用戶端已離開
             Err(_) => Ok(None),
         }
@@ -238,49 +238,93 @@ impl Client {
             Ok(Client {
                 pipe,
                 event,
-                buf: vec![0; MAX_MESSAGE],
+                buf: vec![0; INITIAL_BUFFER],
             })
         }
     }
 
-    /// 送出請求並等待回應；逾時會取消 I/O 並回傳 `Error::Timeout`（呼叫端應丟棄這個連線）
+    /// 等一個 overlapped 操作完成；回傳（讀到的位元組數, 訊息是否還有剩）
+    ///
+    /// 逾時會取消 I/O 並等待取消完成，確保核心不再寫入緩衝區
+    unsafe fn finish(&self, ov: &OVERLAPPED, started: windows::core::Result<()>, ms: u32) -> Result<(usize, bool)> {
+        let more = |e: &windows::core::Error| e.code() == ERROR_MORE_DATA.to_hresult();
+        let mut n = 0u32;
+        unsafe {
+            match started {
+                Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {
+                    match GetOverlappedResultEx(self.pipe.0, ov, &mut n, ms, false) {
+                        Ok(()) => Ok((n as usize, false)),
+                        Err(e) if more(&e) => Ok((n as usize, true)),
+                        Err(e) if e.code() == windows::core::HRESULT::from_win32(WAIT_TIMEOUT.0) => {
+                            let _ = CancelIoEx(self.pipe.0, Some(ov));
+                            let _ = GetOverlappedResult(self.pipe.0, ov, &mut n, true);
+                            Err(Error::Timeout)
+                        }
+                        Err(e) => Err(e.into()),
+                    }
+                }
+                // 立即完成（成功或還有剩）：從 OVERLAPPED 取得實際讀到的位元組數
+                Ok(()) => {
+                    let r = GetOverlappedResult(self.pipe.0, ov, &mut n, false);
+                    Ok((n as usize, r.as_ref().is_err_and(more)))
+                }
+                Err(e) if more(&e) => {
+                    let _ = GetOverlappedResult(self.pipe.0, ov, &mut n, false);
+                    Ok((n as usize, true))
+                }
+                Err(e) => Err(e.into()),
+            }
+        }
+    }
+
+    /// 送出請求並等待回應；逾時回傳 `Error::Timeout`（呼叫端應丟棄這個連線）
+    ///
+    /// 回應超過緩衝區時（`ERROR_MORE_DATA`）會擴充緩衝區繼續讀，直到 `MAX_MESSAGE`
     pub fn call(&mut self, req: &Request, timeout: Duration) -> Result<Response> {
         let bytes = encode(req)?;
         let ms = timeout.as_millis().min(u32::MAX as u128) as u32;
+        let new_ov = |event: HANDLE| OVERLAPPED {
+            hEvent: event,
+            ..Default::default()
+        };
         unsafe {
-            let mut ov = OVERLAPPED {
-                hEvent: self.event.0,
-                ..Default::default()
-            };
-            let mut read = 0u32;
+            let ov = new_ov(self.event.0);
             let started = windows::Win32::System::Pipes::TransactNamedPipe(
                 self.pipe.0,
                 Some(bytes.as_ptr().cast()),
                 bytes.len() as u32,
                 Some(self.buf.as_mut_ptr().cast()),
                 self.buf.len() as u32,
-                &mut read,
-                Some(&mut ov),
+                std::ptr::null_mut(),
+                Some(&ov as *const _ as *mut _),
             );
-            match started {
-                Ok(()) => {}
-                Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {
-                    if let Err(e) = GetOverlappedResultEx(self.pipe.0, &ov, &mut read, ms, false) {
-                        if e.code() == windows::core::HRESULT::from_win32(WAIT_TIMEOUT.0) {
-                            let _ = CancelIoEx(self.pipe.0, Some(&ov));
-                            // 等待取消完成，確保核心不再寫入 buf / ov
-                            let _ = GetOverlappedResult(self.pipe.0, &ov, &mut read, true);
-                            return Err(Error::Timeout);
-                        }
-                        return Err(e.into());
+            let (mut total, mut more) = self.finish(&ov, started, ms)?;
+            while more {
+                if total >= self.buf.len() {
+                    if self.buf.len() >= MAX_MESSAGE {
+                        return Err(Error::TooLarge(MAX_MESSAGE));
                     }
+                    let grown = (self.buf.len() * 2).min(MAX_MESSAGE);
+                    self.buf.resize(grown, 0);
                 }
-                Err(e) if e.code() == ERROR_MORE_DATA.to_hresult() => {
-                    return Err(Error::TooLarge(MAX_MESSAGE));
-                }
-                Err(e) => return Err(e.into()),
+                let ov = new_ov(self.event.0);
+                let started = ReadFile(
+                    self.pipe.0,
+                    Some(&mut self.buf[total..]),
+                    None,
+                    Some(&ov as *const _ as *mut _),
+                );
+                let (n, m) = self.finish(&ov, started, ms)?;
+                total += n;
+                more = m;
             }
-            decode(&self.buf[..read as usize])
+            let resp = decode(&self.buf[..total]);
+            // 讀過大型回應後縮回，避免每個 App 都長期佔用大緩衝區
+            if self.buf.len() > INITIAL_BUFFER {
+                self.buf.truncate(INITIAL_BUFFER);
+                self.buf.shrink_to_fit();
+            }
+            resp
         }
     }
 }

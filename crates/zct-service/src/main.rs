@@ -11,6 +11,8 @@ mod logger;
 #[cfg(windows)]
 mod settings;
 #[cfg(windows)]
+mod tray;
+#[cfg(windows)]
 mod ui;
 
 #[cfg(windows)]
@@ -42,14 +44,16 @@ mod app {
     use zct_core::Engine;
     use zct_core::paths::DataRoot;
 
-    use crate::{conn, logger, settings, ui};
+    use crate::{conn, logger, settings, tray, ui};
 
     pub struct Shared {
         pub settings: settings::Settings,
         /// 所有連線共用的詞庫與學習紀錄
         pub engine: Arc<Engine>,
-        /// 手動快捷鍵開啟的全域遊戲模式
-        pub game: AtomicBool,
+        /// 每日備份資料夾
+        pub backup: PathBuf,
+        /// 手動快捷鍵或系統匣開啟的全域遊戲模式
+        pub game: Arc<AtomicBool>,
         pub ui: ui::UiHandle,
     }
 
@@ -87,6 +91,26 @@ mod app {
             .map(|_| ())
     }
 
+    /// 每秒檢查設定檔；主題變更立即套用到候選窗（其他設定在 App 重新連線時生效）
+    fn spawn_watcher(
+        shared: Arc<Shared>,
+        mut theme: zct_core::config::ThemeConfig,
+    ) -> std::io::Result<()> {
+        std::thread::Builder::new()
+            .name("watcher".into())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let current = shared.settings.current().0.theme;
+                    if current != theme {
+                        theme = current;
+                        shared.ui.send(ui::UiCmd::Theme(theme.clone()));
+                    }
+                }
+            })
+            .map(|_| ())
+    }
+
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // 單一實例：同一個登入工作階段只跑一個服務程序
         let _mutex = unsafe { CreateMutexW(None, true, w!("Local\\zct-service"))? };
@@ -103,7 +127,7 @@ mod app {
 
         // 設定檔寫錯時仍要能打字：settings 會記錄錯誤並改用上一份正確的設定或預設值
         let settings = settings::Settings::new(&data);
-        settings.current();
+        let theme = settings.current().0.theme;
         let sys_dict_dir = find_sys_dict()?;
         log::info!("系統詞庫：{}", sys_dict_dir.display());
 
@@ -115,13 +139,22 @@ mod app {
         let engine = Arc::new(Engine::open(&sys_dict_dir, &data.learning())?);
         spawn_saver(engine.clone(), data.backup())?;
 
-        let ui = ui::spawn()?;
+        let game = Arc::new(AtomicBool::new(false));
+        let ui = ui::spawn(
+            theme.clone(),
+            tray::TrayCtx {
+                game: game.clone(),
+                engine: engine.clone(),
+            },
+        )?;
         let shared = Arc::new(Shared {
             settings,
             engine,
-            game: AtomicBool::new(false),
+            backup: data.backup(),
+            game,
             ui,
         });
+        spawn_watcher(shared.clone(), theme)?;
 
         let mut listener = zct_ipc::pipe::Listener::new()?;
         let mut next_id = 1u64;
