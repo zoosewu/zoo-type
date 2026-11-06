@@ -149,6 +149,8 @@ pub struct Session {
     mixed: MixedConfig,
     /// 目前這個音節的原始按鍵（中英混打判斷用）
     raw: String,
+    /// 目前這段按鍵的位置可能是英文：組字開頭，或緊接在空白之後（「我 love」可以，「我love」不行）
+    raw_english_ok: bool,
     /// B：剛完成的音節按鍵也是英文單字 → 候選窗附上的英文
     english_alt: Option<String>,
     /// E：游標前最後一個字（本輸入法送出的，或交給 App 的按鍵）；未知時為 None
@@ -195,6 +197,7 @@ impl Session {
             highlight: 0,
             mixed: opts.config.mixed.clone(),
             raw: String::new(),
+            raw_english_ok: false,
             english_alt: None,
             last_char: None,
             emoji: None,
@@ -339,6 +342,10 @@ impl Session {
             return false;
         }
         if self.mode == InputMode::English {
+            // 組字中切到英文：按鍵繼續放進組字區，整句一起送出
+            if !self.editor.is_empty() {
+                return !matches!(ev.key, Key::F(_));
+            }
             // E：英文模式下，緊接在中文後的第一個英數字要由輸入法補空格
             return self.space_before_latin(ev).is_some();
         }
@@ -426,8 +433,33 @@ impl Session {
             && !ev.mods.shift
             && !self.editor.is_selecting()
             && self.editor.entering_syllable()
+            && self.raw_english_ok
             && self.engine.words().auto_english(raw);
         ok.then(|| raw.clone())
+    }
+
+    /// 組字中的英文模式：要放進組字區的字元（選字中交給候選窗，數字用來選字）
+    fn latin_in_composition(&self, ev: &KeyEvent) -> Option<String> {
+        if self.mode != InputMode::English || self.editor.is_empty() || self.editor.is_selecting() {
+            return None;
+        }
+        let c = match ev.key {
+            Key::Char(c) if c.is_ascii_alphabetic() => {
+                let upper = ev.mods.shift ^ ev.mods.caps_lock;
+                if upper { c.to_ascii_uppercase() } else { c }
+            }
+            Key::Char(c) if ev.mods.shift => shifted(c),
+            Key::Char(c) | Key::Numpad(c) => c,
+            Key::Space => b' ',
+            _ => return None,
+        };
+        Some((c as char).to_string())
+    }
+
+    /// 這個位置開始的按鍵可能是英文嗎：組字開頭，或前一個是空白
+    fn english_position(&self) -> bool {
+        let c = self.editor.cursor();
+        c == 0 || self.sym_space(c - 1)
     }
 
     /// 把英文字母或空白放進組字區（chewing 英文模式下會插入為一般字元）
@@ -697,6 +729,9 @@ impl Session {
                     self.complete_segment();
                     return true;
                 } else {
+                    if self.raw.is_empty() {
+                        self.raw_english_ok = self.english_position();
+                    }
                     self.raw.push(c as char);
                     self.english_alt = None;
                 }
@@ -725,8 +760,10 @@ impl Session {
 
     fn complete_segment(&mut self) {
         let raw = std::mem::take(&mut self.raw);
-        self.english_alt =
-            (self.mixed.english_candidate && self.engine.words().candidate(&raw)).then_some(raw);
+        self.english_alt = (self.mixed.english_candidate
+            && self.raw_english_ok
+            && self.engine.words().candidate(&raw))
+        .then_some(raw);
     }
 
     pub fn process_key(&mut self, ev: &KeyEvent) -> KeyResult {
@@ -735,8 +772,18 @@ impl Session {
 
         // 遊戲模式下 Shift 不切換中英
         if self.shift.observe(ev) && self.game_mode() == GameMode::Off {
-            let text = self.flush();
-            self.join(&mut commit, &text);
+            if self.editor.is_empty() || self.emoji.is_some() {
+                let text = self.flush();
+                self.join(&mut commit, &text);
+            } else {
+                // 組字中只切換中英、不送出：英文與數字接著放進組字區（「第」Shift「6」Shift「章」）
+                if self.editor.is_selecting() {
+                    let _ = self.editor.cancel_selecting();
+                }
+                self.editor.cancel_entering_syllable();
+                self.raw.clear();
+                self.english_alt = None;
+            }
             self.mode = self.mode.toggled();
             r.mode_changed = Some(self.mode);
         }
@@ -773,7 +820,9 @@ impl Session {
                 let text = self.flush();
                 self.join(&mut commit, &text);
                 r.toggle_game = true;
-            } else if self.mode == InputMode::English {
+            } else if let Some(text) = self.latin_in_composition(ev) {
+                self.insert_latin(&text);
+            } else if self.mode == InputMode::English && self.editor.is_empty() {
                 // 只有 E（盤古之白）會走到這裡
                 if let Some(c) = self.space_before_latin(ev) {
                     commit.push(' ');

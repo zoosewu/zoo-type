@@ -143,12 +143,51 @@ fn shift_tap_toggles_mode_and_english_passes_through() {
 }
 
 #[test]
-fn shift_tap_commits_composition() {
+fn shift_tap_keeps_composition_and_types_latin_into_it() {
+    // 第 Shift 6 Shift 章：組字中切英文不送出，數字與英文放進組字區
     let mut h = Harness::new();
-    h.type_str("wu0 fu4");
+    h.type_str("2u4"); // 第
+    let first = h.s.preedit().text;
     let r = h.tap_shift();
-    assert_eq!(r.commit.as_deref(), Some("天氣"));
-    assert!(!h.s.is_composing());
+    assert_eq!(r.mode_changed, Some(InputMode::English));
+    assert!(r.commit.is_none());
+    assert!(h.press(Key::Char(b'6'), Mods::NONE).eaten);
+    assert_eq!(h.s.preedit().text, format!("{first}6"));
+    h.tap_shift();
+    h.type_str("5; "); // ㄓㄤ
+    let text = h.press(Key::Enter, Mods::NONE).commit.unwrap();
+    assert!(text.starts_with(&format!("{first}6")) && text.chars().count() == 3, "{text}");
+}
+
+#[test]
+fn shift_tap_when_empty_still_toggles_without_composition() {
+    let mut h = Harness::new();
+    assert_eq!(h.tap_shift().mode_changed, Some(InputMode::English));
+    assert!(!h.press(Key::Char(b'a'), Mods::NONE).eaten, "沒在組字時英文直接交給 App");
+}
+
+#[test]
+fn english_mode_in_composition_uppercase_space_and_enter() {
+    let mut h = Harness::new();
+    h.type_str("ji3"); // 我
+    h.tap_shift();
+    h.press(Key::Space, Mods::NONE);
+    h.press(Key::Char(b'o'), Mods::shift());
+    h.press(Key::Char(b'k'), Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我 Ok");
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("我 Ok"));
+}
+
+#[test]
+fn english_only_at_start_or_after_space() {
+    // 我love：中文後面沒有空白 → 不判斷英文
+    let mut h = Harness::new();
+    h.type_str("ji3love ");
+    assert!(!h.s.preedit().text.contains("love"), "{}", h.s.preedit().text);
+    // 開頭
+    let mut h = Harness::new();
+    h.type_str("hello ");
+    assert_eq!(h.s.preedit().text, "hello ");
 }
 
 #[test]
@@ -956,14 +995,14 @@ fn b_english_option_in_candidates() {
 #[test]
 fn b_english_option_keeps_previous_chinese() {
     let mut h = Harness::new();
-    h.type_str("ji3fu "); // 我 + ㄑㄧ（七）
+    h.type_str("ji3 fu "); // 我 + 空白 + ㄑㄧ（七）
     let page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
     let n = page.items.len();
     for _ in 0..n - 1 {
         h.press(Key::Down, Mods::NONE);
     }
     h.press(Key::Enter, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "我fu");
+    assert_eq!(h.s.preedit().text, "我 fu");
 }
 
 #[test]

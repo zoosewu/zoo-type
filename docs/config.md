@@ -40,9 +40,10 @@ ai = "ctrl+shift+'"         # AI 修正組字內容中的同音錯字
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
 exclusive_fullscreen = true  # 有程式獨佔全螢幕
 
-[mixed]                    # 中英混打
-auto_english = true        # 按空白時，剛打的按鍵是英文單字且不是合法注音 → 送出英文（例：hello）
+[mixed]                    # 中英混打（組字中單按 Shift 切英文不會送出，英文與數字會放進組字區）
+auto_english = true        # 按空白時，剛打的按鍵是英文單字且不是合法注音 → 放進組字區當英文（例：hello）
 english_candidate = true   # 剛完成的音節也是英文單字時，候選窗附上英文（例：fu → 七 / fu）
+                           # 以上兩項只在組字開頭，或「中文 + 空白」之後判斷（「我 love」會、「我love」不會）
 auto_space = false         # 中英文之間自動加空格（盤古之白）
 
 [sync]                     # git 同步，見下方說明
