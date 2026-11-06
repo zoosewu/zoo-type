@@ -1339,3 +1339,48 @@ fn user_english_words_file() {
     h.type_str("zctx ");
     assert_eq!(h.s.preedit().text, "zctx ");
 }
+
+/// 共用同一個 Engine 的第二個 Harness（模擬下一次打字）
+fn again(h: &Harness) -> Harness {
+    Harness::with_engine(h.s.engine(), Config::default(), None, tempfile::tempdir().unwrap())
+}
+
+#[test]
+fn shift_typed_english_is_learned_after_commit() {
+    let mut h = Harness::new();
+    h.type_str("ji3"); // 我
+    h.tap_shift();
+    h.type_str(" zctq");
+    h.tap_shift();
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("我 zctq"));
+    // 下次直接打 zctq + 空白就是英文
+    let mut h2 = again(&h);
+    h2.type_str("zctq ");
+    assert_eq!(h2.s.preedit().text, "zctq ");
+}
+
+#[test]
+fn shift_english_deleted_before_commit_is_not_learned() {
+    let mut h = Harness::new();
+    h.type_str("ji3");
+    h.tap_shift();
+    h.type_str(" zctq");
+    h.s.reset(); // 取消，沒有送出
+    let mut h2 = again(&h);
+    h2.type_str("zctq ");
+    assert_ne!(h2.s.preedit().text, "zctq ");
+}
+
+#[test]
+fn forget_hotkey_on_english_word_stops_auto_english() {
+    let mut h = Harness::new();
+    h.type_str("repo ");
+    assert_eq!(h.s.preedit().text, "repo ");
+    h.press(Key::Left, Mods::NONE); // 游標移到 repo 後面
+    let r = h.press(Key::Delete, Mods::shift());
+    assert!(r.notice.is_some_and(|n| n.contains("repo")));
+    assert_eq!(h.s.preedit().text, "repo ", "文字不變，只是之後不再當英文");
+    let mut h2 = again(&h);
+    h2.type_str("repo ");
+    assert_ne!(h2.s.preedit().text, "repo ");
+}

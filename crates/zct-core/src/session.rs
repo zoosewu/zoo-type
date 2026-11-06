@@ -166,6 +166,9 @@ pub struct Session {
     extras_page: bool,
     /// 候選窗已展開成多欄（選字時按過 ← / →）
     expanded: bool,
+    /// 組字區中用 Shift 切英文打的單字：正在打的與已打完的，整句送出時加入自訂英文單字
+    latin_word: String,
+    shift_words: Vec<String>,
     /// 剛用 Backspace 刪掉完整英文單字後面的空白：下一次 Backspace 刪整個單字
     word_backspace: bool,
 }
@@ -211,6 +214,8 @@ impl Session {
             ai_enabled: opts.config.ai.enabled,
             extras_page: false,
             expanded: false,
+            latin_word: String::new(),
+            shift_words: Vec::new(),
             word_backspace: false,
         })
     }
@@ -257,6 +262,11 @@ impl Session {
 
     pub fn set_global_game(&mut self, on: bool) {
         self.global_game = on;
+    }
+
+    /// 共用的詞庫與學習紀錄
+    pub fn engine(&self) -> Arc<Engine> {
+        self.engine.clone()
     }
 
     pub fn is_composing(&self) -> bool {
@@ -441,7 +451,7 @@ impl Session {
             && !self.editor.is_selecting()
             && self.editor.entering_syllable()
             && self.raw_english_ok
-            && self.engine.words().auto_english(raw);
+            && self.engine.auto_english(raw);
         ok.then(|| raw.clone())
     }
 
@@ -461,6 +471,53 @@ impl Session {
             _ => return None,
         };
         Some((c as char).to_string())
+    }
+
+    /// 記下組字區中用 Shift 打的英文單字
+    fn track_latin(&mut self, text: &str) {
+        for c in text.chars() {
+            if c.is_ascii_alphabetic() {
+                self.latin_word.push(c);
+            } else {
+                self.end_latin_word();
+            }
+        }
+    }
+
+    fn end_latin_word(&mut self) {
+        let word = std::mem::take(&mut self.latin_word);
+        if word.len() >= 2 {
+            self.shift_words.push(word);
+        }
+    }
+
+    /// 整句送出：還留在送出內容裡的 Shift 英文單字，加入自訂英文單字（送出前刪掉的不算）
+    fn learn_shift_words(&mut self, committed: &str) {
+        self.end_latin_word();
+        for word in std::mem::take(&mut self.shift_words) {
+            if contains_word(committed, &word) {
+                self.engine.learn_english(&word.to_ascii_lowercase());
+            }
+        }
+    }
+
+    /// 游標所在（或剛打完、緊接在游標前）的英文單字
+    fn english_word_at_cursor(&self) -> Option<String> {
+        if self.editor.is_selecting() || self.editor.entering_syllable() {
+            return None;
+        }
+        let c = self.editor.cursor();
+        if !self.sym_letter(c) && !(c > 0 && self.sym_letter(c - 1)) {
+            return None;
+        }
+        let start = c - self.letters_before(c);
+        let n = self.letters_after(start);
+        let symbols = self.editor.symbols();
+        let word: String = symbols[start..start + n]
+            .iter()
+            .filter_map(|s| s.to_char())
+            .collect();
+        (word.len() >= 2).then(|| word.to_ascii_lowercase())
     }
 
     /// 這個位置開始的按鍵可能是英文嗎：組字開頭，或前一個是空白
@@ -769,7 +826,7 @@ impl Session {
         let raw = std::mem::take(&mut self.raw);
         self.english_alt = (self.mixed.english_candidate
             && self.raw_english_ok
-            && self.engine.words().candidate(&raw))
+            && self.engine.english_candidate(&raw))
         .then_some(raw);
     }
 
@@ -784,6 +841,7 @@ impl Session {
                 self.join(&mut commit, &text);
             } else {
                 // 組字中只切換中英、不送出：英文與數字接著放進組字區（「第」Shift「6」Shift「章」）
+                self.end_latin_word();
                 if self.editor.is_selecting() {
                     let _ = self.editor.cancel_selecting();
                 }
@@ -831,7 +889,14 @@ impl Session {
                 self.join(&mut commit, &text);
                 r.toggle_game = true;
             } else if let Some(text) = self.latin_in_composition(ev) {
+                self.track_latin(&text);
                 self.insert_latin(&text);
+            } else if self.hotkeys.forget.matches(ev)
+                && let Some(word) = self.english_word_at_cursor()
+            {
+                // 組字區中游標停在英文單字上：之後不再把它當英文
+                self.engine.forget_english(&word);
+                r.notice = Some(format!("不再當英文：{word}"));
             } else if self.mode == InputMode::English && self.editor.is_empty() {
                 // 只有 E（盤古之白）會走到這裡
                 if let Some(c) = self.space_before_latin(ev) {
@@ -1237,6 +1302,8 @@ impl Session {
         self.ai = None;
         self.extras_page = false;
         self.word_backspace = false;
+        self.latin_word.clear();
+        self.shift_words.clear();
     }
 
     /// 輸入焦點回到這個 context：依 `on_focus` 決定是否重設中英狀態
@@ -1385,10 +1452,20 @@ impl Session {
     fn take_commit(&mut self) -> String {
         let text = self.editor.display_commit().to_owned();
         if !text.is_empty() {
+            self.learn_shift_words(&text);
             self.editor.ack();
             // chewing 送出時會更新學習紀錄（記憶體中），存檔交給服務程序
             self.engine.record(text.chars().count() as u64, 0);
         }
         text
     }
+}
+
+/// `text` 中有沒有完整的英文單字 `word`（前後不是英文字母）
+fn contains_word(text: &str, word: &str) -> bool {
+    text.match_indices(word).any(|(i, _)| {
+        let before = text[..i].chars().next_back();
+        let after = text[i + word.len()..].chars().next();
+        !before.is_some_and(|c| c.is_ascii_alphabetic()) && !after.is_some_and(|c| c.is_ascii_alphabetic())
+    })
 }

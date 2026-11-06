@@ -95,6 +95,8 @@ pub struct Engine {
     history: HistoryDict,
     /// 英文單字表（中英混打）；沒有 `english.txt` 時為空，功能自動停用
     words: crate::mixed::WordList,
+    /// 使用者的英文單字（自動學到、手動加入、排除）；執行中會變動
+    user_words: std::sync::RwLock<crate::mixed::UserWords>,
     /// Emoji 關鍵字（CLDR 繁中註解）；沒有檔案時只能用常用 Emoji
     emoji: crate::emoji::EmojiIndex,
     dir: PathBuf,
@@ -198,6 +200,7 @@ impl Engine {
 
         Ok(Engine {
             words,
+            user_words: Default::default(),
             emoji,
             string_table,
             static_dict,
@@ -213,23 +216,58 @@ impl Engine {
         })
     }
 
-    /// 使用者自訂的英文單字（資料資料夾 `dict/english.txt`，一行一個）；
-    /// 檔案不存在時建立一個說明範本，方便使用者找到
+    /// 使用者的英文單字檔（資料資料夾 `dict/english.txt`，隨 git 同步）
     pub fn load_user_words(&mut self, path: &Path) {
-        if !path.exists() {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(
-                path,
-                "# 自訂英文單字：一行一個，按空白時會判斷為英文（例如公司或專案的縮寫）\n# # 開頭為註解\n",
-            );
+        *self.user_words.get_mut().unwrap_or_else(|e| e.into_inner()) =
+            crate::mixed::UserWords::load(path);
+    }
+
+    fn user_words(&self) -> std::sync::RwLockReadGuard<'_, crate::mixed::UserWords> {
+        self.user_words.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 是不是英文單字：使用者的設定優先，其次看字典
+    pub fn is_english(&self, word: &str) -> bool {
+        let w = word.to_ascii_lowercase();
+        self.user_words().verdict(&w).unwrap_or_else(|| self.words.contains(&w))
+    }
+
+    /// C：按空白時要自動變成英文嗎（使用者加入的字不限長度）
+    pub(crate) fn auto_english(&self, keys: &str) -> bool {
+        let added = self.user_words().verdict(keys) == Some(true);
+        let shape = crate::mixed::auto_english_shape(keys)
+            || (added && keys.len() >= 2 && !crate::mixed::is_syllable(keys));
+        shape && self.is_english(keys)
+    }
+
+    /// B：候選窗要附上英文嗎
+    pub(crate) fn english_candidate(&self, keys: &str) -> bool {
+        crate::mixed::english_candidate_shape(keys) && self.is_english(keys)
+    }
+
+    /// 學到一個英文單字（在組字區用 Shift 打的）；字典已有的不重複記
+    pub fn learn_english(&self, word: &str) {
+        if word.len() < 2 || !word.bytes().all(|b| b.is_ascii_alphabetic()) || self.is_english(word) {
             return;
         }
-        match std::fs::read_to_string(path) {
-            Ok(text) => self.words.extend(&text),
-            Err(e) => log::warn!("讀不到自訂英文單字 {}：{e}", path.display()),
-        }
+        log::info!("學到英文單字（{} 個字母）", word.len());
+        self.user_words.write().unwrap_or_else(|e| e.into_inner()).add(word);
+    }
+
+    /// 不再把這個字當英文；回傳原本是不是英文
+    pub fn forget_english(&self, word: &str) -> bool {
+        let was = self.is_english(word);
+        let in_dictionary = self.words.contains(word);
+        self.user_words
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(word, in_dictionary);
+        was
+    }
+
+    /// 使用者加入的英文單字（設定程式顯示用）
+    pub fn user_english(&self) -> Vec<String> {
+        self.user_words().added().map(str::to_owned).collect()
     }
 
     /// 建立共用詞庫的 Editor（不會自己寫檔）
@@ -247,10 +285,6 @@ impl Engine {
 
     pub(crate) fn emoji(&self) -> &crate::emoji::EmojiIndex {
         &self.emoji
-    }
-
-    pub(crate) fn words(&self) -> &crate::mixed::WordList {
-        &self.words
     }
 
     pub fn dir(&self) -> &Path {

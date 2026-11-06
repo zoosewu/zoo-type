@@ -39,6 +39,8 @@ if (Test-Path $dll) {
 
 Copy-Item "$release\zct_tsf.dll" $dest
 Copy-Item "$release\zct-service.exe" $dest -Force
+# 輸入法清單與工作列的圖示（白底黑字「動」，由 scripts/make-icon.ps1 產生）
+Copy-Item (Join-Path $root 'crates\zct-tsf\res\zct.ico') $dest -Force
 Copy-Item "$release\zct-settings.exe" $dest -Force
 Copy-Item "$dict\*" "$dest\dict" -Force
 
