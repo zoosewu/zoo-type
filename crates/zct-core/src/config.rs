@@ -168,8 +168,9 @@ impl Default for HotkeyConfig {
             game_mode: Binding::key("ctrl+shift+f12"),
             forget: Binding::key("shift+delete"),
             pin: Binding::key("shift+enter"),
-            emoji: Binding::key("ctrl+alt+e"),
-            ai: Binding::key("ctrl+alt+r"),
+            // Ctrl+Alt 等同 AltGr，很多鍵盤配置會輸出符號（例如 Ctrl+Alt+E = €），不拿來當預設
+            emoji: Binding::key("ctrl+shift+;"),
+            ai: Binding::key("ctrl+shift+'"),
         }
     }
 }
@@ -255,7 +256,8 @@ impl Default for MixedConfig {
         MixedConfig {
             auto_english: true,
             english_candidate: true,
-            auto_space: true,
+            // 空白由使用者自己輸入（使用者回饋）
+            auto_space: false,
         }
     }
 }

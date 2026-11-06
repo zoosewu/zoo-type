@@ -11,7 +11,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use chewing::editor::{BasicEditor, Editor, EditorKeyBehavior};
+use chewing::editor::{BasicEditor, Editor, EditorKeyBehavior, LanguageMode};
 use ferrous_opencc::OpenCC;
 use ferrous_opencc::config::BuiltinConfig;
 use serde::{Deserialize, Serialize};
@@ -22,8 +22,8 @@ use crate::config::{
     Config, GameMode, HotkeyConfig, InputMode, MixedConfig, OnFocus, Output, PunctuationTable,
     Width,
 };
-use crate::mixed::{is_cjk, is_latin, is_tone};
-use crate::key::{Key, KeyEvent, Mods, shifted, to_chewing};
+use crate::mixed::{is_cjk, is_latin, is_syllable, is_tone};
+use crate::key::{Key, KeyEvent, Mods, ascii_event, shifted, to_chewing};
 use crate::shift::ShiftTap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -31,6 +31,10 @@ pub struct Preedit {
     pub text: String,
     /// 游標位置（以字元計）
     pub cursor: usize,
+    /// 按 ↓ 會影響的範圍（字元起點, 長度）；游標在最後、或正在打注音時為 None
+    pub target: Option<(usize, usize)>,
+    /// 組字區的字數（chewing 上限 39，超過時最前面的字會自動送出）
+    pub len: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +45,8 @@ pub struct CandidatePage {
     pub total_pages: usize,
     /// 目前選擇框所在的項目（本頁內的索引），Enter 選它
     pub highlight: usize,
+    /// 每個項目是否已固頂（候選窗標 ★）
+    pub pinned: Vec<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -99,6 +105,22 @@ struct AiPick {
     suggestion: Option<String>,
 }
 
+/// 候選窗最後一頁的額外選項
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Extra {
+    Emoji(String),
+    /// 整段組字的注音
+    Bopomofo(String),
+}
+
+impl Extra {
+    fn label(&self) -> &str {
+        match self {
+            Extra::Emoji(e) | Extra::Bopomofo(e) => e,
+        }
+    }
+}
+
 /// Emoji 選擇中的狀態
 #[derive(Debug)]
 struct EmojiPick {
@@ -132,6 +154,10 @@ pub struct Session {
     emoji: Option<EmojiPick>,
     ai: Option<AiPick>,
     ai_enabled: bool,
+    /// 候選窗目前在最後的額外選項頁（Emoji、注音）
+    extras_page: bool,
+    /// 剛用 Backspace 刪掉完整英文單字後面的空白：下一次 Backspace 刪整個單字
+    word_backspace: bool,
 }
 
 impl Session {
@@ -142,7 +168,8 @@ impl Session {
         let per_page = opts.config.candidates.per_page.clamp(1, 10);
         editor.set_editor_options(|o| {
             o.candidates_per_page = per_page;
-            o.space_is_select_key = true;
+            // 空白不開候選窗（↓ 才開）：注音未完成時是一聲，否則在組字區插入空白
+            o.space_is_select_key = false;
             // 選完字後游標跳到該詞後面（今天|天氣很好 → 今天天氣|很好）
             o.auto_shift_cursor = true;
             // 全半形切換由 ZCT 自己處理，避免 chewing 吃掉 Shift+Space
@@ -171,6 +198,8 @@ impl Session {
             emoji: None,
             ai: None,
             ai_enabled: opts.config.ai.enabled,
+            extras_page: false,
+            word_backspace: false,
         })
     }
 
@@ -370,15 +399,109 @@ impl Session {
         out.push_str(piece);
     }
 
-    /// C：按空白時，剛打的按鍵若是英文單字且不是合法注音 → 回傳該單字
+    /// C：按空白或 Enter 時，剛打的按鍵是英文 → 回傳該單字
+    ///
+    /// 英文 = 在單字表中且組不成注音，或 4 個字母以上且組不成注音（打錯的英文也算）
     fn auto_english(&self, ev: &KeyEvent) -> Option<String> {
+        let raw = &self.raw;
+        let letters = raw.len() >= 4 && raw.bytes().all(|b| b.is_ascii_lowercase()) && !is_syllable(raw);
         let ok = self.mixed.auto_english
-            && ev.key == Key::Space
+            && matches!(ev.key, Key::Space | Key::Enter)
             && !ev.mods.shift
             && !self.editor.is_selecting()
             && self.editor.entering_syllable()
-            && self.engine.words().auto_english(&self.raw);
-        ok.then(|| self.raw.clone())
+            && (letters || self.engine.words().auto_english(raw));
+        ok.then(|| raw.clone())
+    }
+
+    /// 把英文字母或空白放進組字區（chewing 英文模式下會插入為一般字元）
+    ///
+    /// chewing 在組字區是空的時候，英文會直接送出而不是放進組字區；
+    /// 這時先放一個「，」占位，插入英文後再刪掉它。
+    fn insert_latin(&mut self, text: &str) {
+        let placeholder = self.editor.is_empty();
+        if placeholder {
+            self.editor.process_keyevent(ascii_event(b'<')); // Shift + , → ，
+        }
+        self.editor
+            .set_editor_options(|o| o.language_mode = LanguageMode::English);
+        for b in text.bytes() {
+            self.editor.process_keyevent(ascii_event(b));
+        }
+        self.editor
+            .set_editor_options(|o| o.language_mode = LanguageMode::Chinese);
+        if placeholder {
+            self.chewing_key(Key::Home);
+            self.chewing_key(Key::Delete);
+            self.chewing_key(Key::End);
+        }
+    }
+
+    /// 組字區第 i 個符號是不是英文字母 / 空白
+    fn sym_letter(&self, i: usize) -> bool {
+        self.editor
+            .symbols()
+            .get(i)
+            .and_then(|s| s.to_char())
+            .is_some_and(|c| c.len() == 1 && c.as_bytes()[0].is_ascii_alphabetic())
+    }
+
+    fn sym_space(&self, i: usize) -> bool {
+        self.editor
+            .symbols()
+            .get(i)
+            .and_then(|s| s.to_char())
+            .is_some_and(|c| c == " ")
+    }
+
+    /// 從 i 往前（含 i）連續英文字母的長度
+    fn letters_before(&self, end: usize) -> usize {
+        (0..end).rev().take_while(|&i| self.sym_letter(i)).count()
+    }
+
+    fn letters_after(&self, start: usize) -> usize {
+        (start..self.editor.len()).take_while(|&i| self.sym_letter(i)).count()
+    }
+
+    /// 組字區中英文單字當成一個單位：← → 跳過整個單字；Backspace / Delete 刪整個完整單字
+    fn word_key(&mut self, ev: &KeyEvent) -> bool {
+        let backspace_armed = std::mem::take(&mut self.word_backspace);
+        if ev.mods.shift
+            || self.editor.is_selecting()
+            || self.editor.entering_syllable()
+            || self.editor.is_empty()
+        {
+            return false;
+        }
+        let c = self.editor.cursor();
+        let (key, times) = match ev.key {
+            Key::Left if c > 0 && self.sym_letter(c - 1) => (Key::Left, self.letters_before(c)),
+            Key::Right if self.sym_letter(c) => (Key::Right, self.letters_after(c)),
+            // 完整單字（後面有空白）：第一次刪空白，並記下來
+            Key::Backspace if c >= 2 && self.sym_space(c - 1) && self.sym_letter(c - 2) => {
+                self.word_backspace = true;
+                (Key::Backspace, 1)
+            }
+            // 剛刪過完整單字後面的空白：刪整個單字
+            Key::Backspace if backspace_armed && c > 0 && self.sym_letter(c - 1) => {
+                (Key::Backspace, self.letters_before(c))
+            }
+            // 游標在完整單字前面：Delete 刪整個單字
+            Key::Delete if self.sym_letter(c) && self.sym_space(c + self.letters_after(c)) => {
+                (Key::Delete, self.letters_after(c))
+            }
+            _ => return false,
+        };
+        for _ in 0..times {
+            self.chewing_key(key);
+        }
+        true
+    }
+
+    /// ↓ 會作用的位置：游標在最後時是最後一個字
+    fn select_target(&self) -> Option<usize> {
+        let (c, len) = (self.editor.cursor(), self.editor.len());
+        (len > 0).then(|| if c < len { c } else { len - 1 })
     }
 
     /// B：候選窗中英文選項的位置（本頁索引）
@@ -410,14 +533,17 @@ impl Session {
         if !chosen || ev.mods.shift {
             return false;
         }
+        let _ = commit;
         let word = self.english_alt.take().unwrap_or_default();
-        let text = self.editor.display();
-        let n = text.chars().count();
-        let prefix: String = text.chars().take(n.saturating_sub(1)).collect();
-        self.editor.clear();
+        // 最後一個音節換成英文（仍留在組字區）
+        let _ = self.editor.cancel_selecting();
+        let len = self.editor.len();
+        while self.editor.cursor() < len {
+            self.chewing_key(Key::Right);
+        }
+        self.chewing_key(Key::Backspace);
+        self.insert_latin(&word);
         self.highlight = 0;
-        self.join(commit, &prefix);
-        self.join(commit, &word);
         true
     }
 
@@ -559,12 +685,14 @@ impl Session {
                     self.english_alt = None;
                 }
             }
-            // 有音節在組時空白 = 一聲，音節完成；否則空白是開候選窗，保留英文選項
+            // 有音節在組時空白 = 一聲，音節完成
             Key::Space if !was_selecting && self.editor.entering_syllable() => {
                 self.complete_segment();
                 return true;
             }
             Key::Space => {}
+            // ↓ 開候選窗：保留英文選項
+            Key::Down if !was_selecting => {}
             Key::Backspace => {
                 self.raw.pop();
                 self.english_alt = None;
@@ -599,6 +727,20 @@ impl Session {
 
         if self.test_key(ev) {
             r.eaten = true;
+            // C：Enter 前先把還在打的英文單字放進組字區，接著由 chewing 整句送出
+            if ev.key == Key::Enter
+                && let Some(word) = self.auto_english(ev)
+            {
+                self.editor.cancel_entering_syllable();
+                self.raw.clear();
+                self.insert_latin(&word);
+            }
+            if ev.key == Key::Down && !self.editor.is_selecting() && self.emoji.is_none() {
+                // 游標停在英文上時沒有候選可選
+                if self.select_target().is_some_and(|i| self.sym_letter(i) || self.sym_space(i)) {
+                    return self.finish(r, commit);
+                }
+            }
             if self.ai_key(ev, &mut commit) {
             } else if self.emoji.is_some() {
                 self.emoji_key(ev, &mut commit);
@@ -622,15 +764,15 @@ impl Session {
             } else if self.hotkeys.output.matches(ev) && self.chinese_hotkey(ev) {
                 self.output = self.output.toggled();
                 r.output_changed = Some(self.output);
-            } else if let Some(word) = self.auto_english(ev) {
-                // C：送出前面的中文與這個英文單字，空白鍵本身也送出
+            } else if let Some(word) = self.auto_english(ev).filter(|_| ev.key == Key::Space) {
+                // C：英文單字與使用者按的空白都放進組字區
                 self.editor.cancel_entering_syllable();
                 self.raw.clear();
-                let chinese = self.flush();
-                self.join(&mut commit, &chinese);
-                self.join(&mut commit, &word);
-                commit.push(' ');
-            } else if self.pick_english(ev, &mut commit) {
+                self.insert_latin(&format!("{word} "));
+            } else if self.word_key(ev)
+                || self.extras_key(ev, &mut commit)
+                || self.pick_english(ev, &mut commit)
+            {
             } else if let Some(text) = self.direct_text(ev) {
                 // 組字中先送出組字，順序才正確
                 let composed = self.flush();
@@ -676,10 +818,37 @@ impl Session {
             self.observe_passthrough(ev);
         }
 
-        let notice = self.editor.notification();
+        let notice = self.editor.notification().to_owned();
         if !notice.is_empty() && r.notice.is_none() {
-            r.notice = Some(notice.to_owned());
+            r.notice = Some(self.added_phrase_notice(&notice));
         }
+        self.finish(r, commit)
+    }
+
+    /// chewing 的加詞提示（Shift + ← / → 選範圍 + Enter）：加入的詞設為優先，提示改清楚
+    fn added_phrase_notice(&self, notice: &str) -> String {
+        let (word, existed) = match (notice.strip_prefix("加入："), notice.strip_prefix("已有：")) {
+            (Some(w), _) => (w, false),
+            (_, Some(w)) => (w, true),
+            _ => return notice.to_owned(),
+        };
+        let word = word.trim();
+        for p in self.engine.phrases().into_iter().filter(|p| p.word == word) {
+            let _ = self.engine.set_phrase_state(
+                &p.word,
+                &p.bopomofo,
+                crate::sync::PhraseState::Pinned,
+                None,
+            );
+        }
+        if existed {
+            format!("已在詞庫：{word}（設為優先）")
+        } else {
+            format!("已加入詞庫：{word}")
+        }
+    }
+
+    fn finish(&mut self, mut r: KeyResult, commit: String) -> KeyResult {
         if !commit.is_empty() {
             self.last_char = commit.chars().last();
             r.commit = Some(self.convert(&commit));
@@ -695,7 +864,7 @@ impl Session {
     /// - Enter：選擇框所在的項目
     /// - 其他鍵（← → 翻頁、數字直接選、Esc 取消…）交給 chewing
     fn navigate_candidates(&mut self, ev: &KeyEvent) -> bool {
-        if !self.editor.is_selecting() || ev.mods.shift {
+        if !self.editor.is_selecting() || ev.mods.shift || self.extras_page {
             return false;
         }
         let len = self.candidates().map(|p| p.items.len()).unwrap_or(0);
@@ -722,6 +891,142 @@ impl Session {
             }
             _ => return false,
         }
+        true
+    }
+
+    /// 候選窗最後一頁的額外選項：Emoji（以第一個候選詞為關鍵字）與整段注音
+    fn extras(&self) -> Vec<Extra> {
+        if !self.editor.is_selecting() {
+            return Vec::new();
+        }
+        let mut out: Vec<Extra> = Vec::new();
+        if let Some(word) = self.editor.all_candidates().ok().and_then(|c| c.into_iter().next()) {
+            let emoji = self.engine.emoji();
+            if !emoji.is_empty() {
+                out.extend(
+                    emoji
+                        .search(&word)
+                        .into_iter()
+                        .take(self.per_page.saturating_sub(1))
+                        .map(Extra::Emoji),
+                );
+            }
+        }
+        let bopomofo = self.bopomofo_text();
+        if !bopomofo.is_empty() {
+            out.push(Extra::Bopomofo(bopomofo));
+        }
+        out
+    }
+
+    /// 整段組字的注音文字：音節之間以空白分隔，英文與符號保留原樣
+    fn bopomofo_text(&self) -> String {
+        let mut out = String::new();
+        let mut prev_syllable = false;
+        for sym in self.editor.symbols() {
+            match sym.to_syllable() {
+                Some(syl) => {
+                    if prev_syllable {
+                        out.push(' ');
+                    }
+                    out.push_str(&syl.to_string());
+                    prev_syllable = true;
+                }
+                None => {
+                    out.push_str(&sym.to_char().unwrap_or_default());
+                    prev_syllable = false;
+                }
+            }
+        }
+        out
+    }
+
+    /// 額外選項頁的按鍵：← → 在 chewing 頁與額外頁之間切換；數字 / Enter 選取
+    fn extras_key(&mut self, ev: &KeyEvent, commit: &mut String) -> bool {
+        if !self.editor.is_selecting() || ev.mods.shift {
+            return false;
+        }
+        let extras = self.extras();
+        if extras.is_empty() {
+            self.extras_page = false;
+            return false;
+        }
+        let page = self.editor.current_page_no().unwrap_or(0);
+        let last = self.editor.total_page().unwrap_or(1).saturating_sub(1);
+        let forward = matches!(ev.key, Key::Right | Key::PageDown);
+        let backward = matches!(ev.key, Key::Left | Key::PageUp);
+        if !self.extras_page {
+            // chewing 最後一頁往後、第一頁往前 → 額外選項頁
+            if (forward && page == last) || (backward && page == 0) {
+                self.extras_page = true;
+                self.highlight = 0;
+                return true;
+            }
+            return false;
+        }
+        let pick = match ev.key {
+            _ if forward => {
+                self.extras_page = false;
+                if page == last && last > 0 {
+                    self.chewing_key(Key::Right); // 回到第一頁
+                }
+                self.highlight = 0;
+                return true;
+            }
+            _ if backward => {
+                self.extras_page = false;
+                if page == 0 && last > 0 {
+                    self.chewing_key(Key::Left); // 回到最後一頁
+                }
+                self.highlight = 0;
+                return true;
+            }
+            Key::Up => {
+                self.highlight = self.highlight.saturating_sub(1);
+                return true;
+            }
+            Key::Down => {
+                self.highlight = (self.highlight + 1).min(extras.len() - 1);
+                return true;
+            }
+            Key::Esc => {
+                self.extras_page = false;
+                return false;
+            }
+            Key::Enter => Some(self.highlight),
+            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() => {
+                let d = (c - b'0') as usize;
+                Some(if d == 0 { 9 } else { d - 1 })
+            }
+            _ => return true,
+        };
+        let Some(extra) = pick.and_then(|i| extras.get(i)).cloned() else {
+            return true;
+        };
+        let text = match extra {
+            // Emoji 取代游標處的詞（第一個候選詞的長度）
+            Extra::Emoji(e) => {
+                let chars: Vec<char> = self.editor.display().chars().collect();
+                let start = self.editor.cursor().min(chars.len());
+                let n = self
+                    .editor
+                    .all_candidates()
+                    .ok()
+                    .and_then(|c| c.into_iter().next())
+                    .map_or(1, |w| w.chars().count());
+                let end = (start + n).min(chars.len());
+                let before: String = chars[..start].iter().collect();
+                let after: String = chars[end..].iter().collect();
+                format!("{before}{e}{after}")
+            }
+            Extra::Bopomofo(b) => b,
+        };
+        self.extras_page = false;
+        self.editor.clear();
+        self.raw.clear();
+        self.english_alt = None;
+        self.highlight = 0;
+        self.join(commit, &text);
         true
     }
 
@@ -831,6 +1136,8 @@ impl Session {
         self.last_char = None;
         self.emoji = None;
         self.ai = None;
+        self.extras_page = false;
+        self.word_backspace = false;
     }
 
     /// 輸入焦點回到這個 context：依 `on_focus` 決定是否重設中英狀態
@@ -850,9 +1157,28 @@ impl Session {
         let after: String = converted[cursor..].iter().collect();
         let before = self.convert(&before);
         let after = self.convert(&after);
+        let shift = before.chars().count() + syllable.chars().count();
+        // 選字目標：候選窗開啟時是正在選的詞；否則是游標後的字（英文單字整個）；
+        // 游標在最後或正在打注音時不標示（使用者可能根本不打算選字）
+        let target = if self.editor.is_selecting() {
+            let n = self
+                .editor
+                .paginated_candidates()
+                .ok()
+                .and_then(|c| c.into_iter().nth(self.highlight))
+                .map_or(1, |w| w.chars().count());
+            Some((cursor, n))
+        } else if syllable.is_empty() && cursor < converted.len() {
+            let n = self.letters_after(cursor).max(1);
+            Some((shift, n))
+        } else {
+            None
+        };
         Preedit {
-            cursor: before.chars().count() + syllable.chars().count(),
+            cursor: shift,
             text: format!("{before}{syllable}{after}"),
+            target,
+            len: converted.len(),
         }
     }
 
@@ -863,12 +1189,15 @@ impl Session {
                 page: 0,
                 total_pages: 1,
                 highlight: 0,
+                pinned: vec![false],
             });
         }
         if let Some(pick) = &self.emoji {
             let start = pick.page * self.per_page;
+            let items = pick.items[start..(start + self.per_page).min(pick.items.len())].to_vec();
             return Some(CandidatePage {
-                items: pick.items[start..(start + self.per_page).min(pick.items.len())].to_vec(),
+                pinned: vec![false; items.len()],
+                items,
                 page: pick.page,
                 total_pages: pick.items.len().div_ceil(self.per_page).max(1),
                 highlight: pick.highlight,
@@ -877,25 +1206,52 @@ impl Session {
         if !self.editor.is_selecting() {
             return None;
         }
-        let items = self
+        let chewing_pages = self.editor.total_page().unwrap_or(1);
+        let extras = self.extras();
+        let total_pages = chewing_pages + usize::from(!extras.is_empty());
+        if self.extras_page && !extras.is_empty() {
+            let items: Vec<String> = extras.iter().map(|e| e.label().to_owned()).collect();
+            return Some(CandidatePage {
+                pinned: vec![false; items.len()],
+                items,
+                page: chewing_pages,
+                total_pages,
+                highlight: self.highlight,
+            });
+        }
+        let raw: Vec<String> = self
             .editor
             .paginated_candidates()
             .ok()?
             .into_iter()
             .take(self.per_page)
-            .map(|c| self.convert(&c))
-            .collect::<Vec<_>>();
-        let mut items = items;
+            .collect();
+        let start = self.editor.cursor();
+        let symbols = self.editor.symbols();
+        let mut pinned: Vec<bool> = raw
+            .iter()
+            .map(|w| {
+                let n = w.chars().count();
+                symbols
+                    .get(start..start + n)
+                    .and_then(|s| s.iter().map(|s| s.to_syllable()).collect::<Option<Vec<_>>>())
+                    .and_then(|syl| self.engine.boost_of(&syl, w))
+                    .is_some_and(|b| b > crate::engine::PhraseEntry::NORMAL)
+            })
+            .collect();
+        let mut items: Vec<String> = raw.iter().map(|c| self.convert(c)).collect();
         if self.english_index().is_some()
             && let Some(w) = &self.english_alt
         {
             items.push(w.clone());
+            pinned.push(false);
         }
         Some(CandidatePage {
             items,
             page: self.editor.current_page_no().unwrap_or(0),
-            total_pages: self.editor.total_page().unwrap_or(1),
+            total_pages,
             highlight: self.highlight,
+            pinned,
         })
     }
 

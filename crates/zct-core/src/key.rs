@@ -157,6 +157,11 @@ fn special(code: keycode::Keycode, sym: keysym::Keysym, shift: bool) -> Keyboard
         .build()
 }
 
+/// 一個 ASCII 字元的 chewing 按鍵事件（把英文字母、空白塞進組字區用）
+pub(crate) fn ascii_event(b: u8) -> KeyboardEvent {
+    map_ascii(&QWERTY_MAP, b)
+}
+
 /// 轉成 chewing 的按鍵事件；修飾鍵本身與 `Other` 回傳 `None`
 pub(crate) fn to_chewing(key: Key, mods: Mods) -> Option<KeyboardEvent> {
     let ev = match key {

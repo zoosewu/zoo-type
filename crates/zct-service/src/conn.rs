@@ -80,6 +80,7 @@ fn spawn_ai(id: u64, original: String, shared: &Shared, mailbox: AiMailbox) {
                     page: 0,
                     total_pages: 1,
                     highlight: 0,
+                    pinned: vec![false],
                 },
                 anchor: None,
             }),
