@@ -4,6 +4,7 @@
 //! 以 SendInput 模擬鍵盤（與實體鍵盤相同路徑），最後印出編輯框內容。
 //!
 //! cargo run -p zct-tsf --example tsf_probe -- "wu0 fu4" "{enter}" "{ctrl+alt+e}"
+//! 環境變數 ZCT_PROBE_RICH=1：改用 RichEdit（Windows 11 記事本的控制項，有 Ctrl+Alt+E = € 等內建快捷鍵）
 //! 按鍵：一般字元依美式鍵盤；{enter} {space} {esc} {bs} {left} {right} {down} {shift} {ctrl+shift+;} …
 
 use std::time::{Duration, Instant};
@@ -12,7 +13,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
 };
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::TextServices::{
     CLSID_TF_InputProcessorProfiles, ITfInputProcessorProfileMgr, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
@@ -155,9 +156,13 @@ fn main() {
             None,
         )
         .unwrap();
+        let rich = std::env::var_os("ZCT_PROBE_RICH").is_some();
+        if rich {
+            LoadLibraryW(w!("Msftedit.dll")).unwrap();
+        }
         let edit = CreateWindowExW(
             Default::default(),
-            w!("EDIT"),
+            if rich { w!("RICHEDIT50W") } else { w!("EDIT") },
             w!(""),
             WS_CHILD | WS_VISIBLE | WS_BORDER | WINDOW_STYLE(ES_MULTILINE as u32),
             10,

@@ -168,7 +168,7 @@ impl Default for HotkeyConfig {
             game_mode: Binding::key("ctrl+shift+f12"),
             forget: Binding::key("shift+delete"),
             pin: Binding::key("shift+enter"),
-            // Ctrl+Alt 等同 AltGr，很多鍵盤配置會輸出符號（例如 Ctrl+Alt+E = €），不拿來當預設
+            // 不用 Ctrl+Alt：RichEdit（Win11 記事本）、Word 內建 Ctrl+Alt+E = €，部分鍵盤配置也把 Ctrl+Alt 當 AltGr
             emoji: Binding::key("ctrl+shift+;"),
             ai: Binding::key("ctrl+shift+'"),
         }
