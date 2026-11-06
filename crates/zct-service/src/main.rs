@@ -141,7 +141,9 @@ mod app {
             Ok(false) => {}
             Err(e) => log::warn!("遷移學習資料失敗：{e}"),
         }
-        let engine = Arc::new(Engine::open(&sys_dict_dir, &data.learning())?);
+        let mut engine = Engine::open(&sys_dict_dir, &data.learning())?;
+        engine.load_user_words(&data.root().join("dict").join("english.txt"));
+        let engine = Arc::new(engine);
         spawn_saver(engine.clone(), data.backup())?;
         let sync = sync::spawn(data.clone(), settings.clone(), engine.clone())?;
 

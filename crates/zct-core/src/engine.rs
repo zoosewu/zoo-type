@@ -183,10 +183,12 @@ impl Engine {
             HistoryDict::new(string_table.clone())
         };
 
-        let words = crate::mixed::WordList::load(&sys_dir.join("english.txt")).unwrap_or_else(|e| {
-            log::warn!("沒有英文單字表，中英混打停用：{e}");
+        let mut words = crate::mixed::WordList::load(&sys_dir.join("english.txt")).unwrap_or_else(|e| {
+            log::warn!("沒有英文單字表，只用內建的補充單字：{e}");
             crate::mixed::WordList::default()
         });
+        // 一般字典沒有的技術用語與縮寫（repo、config、api…）
+        words.extend(include_str!("../data/english-extra.txt"));
 
         let emoji = crate::emoji::EmojiIndex::load(&sys_dir.join("emoji-zh-Hant.json"))
             .unwrap_or_else(|e| {
@@ -209,6 +211,25 @@ impl Engine {
             frozen: AtomicBool::new(false),
             stats: Mutex::new(load_stats(&dir.join(STATS))),
         })
+    }
+
+    /// 使用者自訂的英文單字（資料資料夾 `dict/english.txt`，一行一個）；
+    /// 檔案不存在時建立一個說明範本，方便使用者找到
+    pub fn load_user_words(&mut self, path: &Path) {
+        if !path.exists() {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(
+                path,
+                "# 自訂英文單字：一行一個，按空白時會判斷為英文（例如公司或專案的縮寫）\n# # 開頭為註解\n",
+            );
+            return;
+        }
+        match std::fs::read_to_string(path) {
+            Ok(text) => self.words.extend(&text),
+            Err(e) => log::warn!("讀不到自訂英文單字 {}：{e}", path.display()),
+        }
     }
 
     /// 建立共用詞庫的 Editor（不會自己寫檔）

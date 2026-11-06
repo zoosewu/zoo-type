@@ -1314,3 +1314,28 @@ fn delete_keeps_original_behavior_while_typing_syllable() {
     h.press(Key::Delete, Mods::NONE);
     assert_eq!(h.s.preedit().text, "ㄍㄟ");
 }
+
+#[test]
+fn tech_abbreviations_are_english() {
+    // 一般字典沒有的縮寫：repo、config、api
+    for w in ["repo", "config", "api"] {
+        let mut h = Harness::new();
+        h.type_str(&format!("{w} "));
+        assert_eq!(h.s.preedit().text, format!("{w} "), "{w}");
+    }
+}
+
+#[test]
+fn user_english_words_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let words = dir.path().join("dict").join("english.txt");
+    let mut engine = open_engine(&dir.path().join("learning"));
+    engine.load_user_words(&words);
+    assert!(words.exists(), "不存在時建立範本");
+    std::fs::write(&words, "# 註解\nZctx\n").unwrap();
+    let mut engine = open_engine(&dir.path().join("learning"));
+    engine.load_user_words(&words);
+    let mut h = Harness::with_engine(std::sync::Arc::new(engine), Config::default(), None, dir);
+    h.type_str("zctx ");
+    assert_eq!(h.s.preedit().text, "zctx ");
+}

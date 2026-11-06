@@ -44,6 +44,7 @@ exclusive_fullscreen = true  # 有程式獨佔全螢幕
 auto_english = true        # 按空白時，剛打的按鍵是英文單字且不是合法注音 → 放進組字區當英文（例：hello）
 english_candidate = true   # 剛完成的音節也是英文單字時，候選窗附上英文（例：fu → 七 / fu）
                            # 以上兩項只在組字開頭，或「中文 + 空白」之後判斷（「我 love」會、「我love」不會）
+                           # 單字表：一般英文字典 + 內建技術用語（repo、config、api…）+ 自訂的 dict/english.txt（一行一個）
 auto_space = false         # 中英文之間自動加空格（盤古之白）
 
 [sync]                     # git 同步，見下方說明

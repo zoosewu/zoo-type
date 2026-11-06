@@ -66,7 +66,11 @@ impl WordList {
     }
 
     pub fn from_text(text: String) -> WordList {
-        let mut words: Vec<&str> = text.lines().map(str::trim).filter(|w| !w.is_empty()).collect();
+        let mut words: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|w| !w.is_empty() && !w.starts_with('#'))
+            .collect();
         words.sort_unstable();
         words.dedup();
         let mut packed = String::with_capacity(text.len());
@@ -100,6 +104,14 @@ impl WordList {
             }
         }
         false
+    }
+
+    /// 加入更多單字（補充單字表、使用者自訂單字），一律轉小寫
+    pub fn extend(&mut self, more: &str) {
+        let mut text = std::mem::take(&mut self.text);
+        text.push('\n');
+        text.push_str(&more.to_ascii_lowercase());
+        *self = WordList::from_text(text);
     }
 
     pub fn len(&self) -> usize {
