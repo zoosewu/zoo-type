@@ -1,4 +1,4 @@
-# ZCT
+# ZCT — 動物園輸入法
 
 跨平台（Windows / macOS）注音輸入法，Rust 核心。開發中。
 

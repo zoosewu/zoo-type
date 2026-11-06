@@ -65,7 +65,7 @@ pub struct KeyResult {
     pub mode_changed: Option<InputMode>,
     /// 這次按鍵切換了標點全半形（平台層顯示「全形 / 半形」提示）
     pub width_changed: Option<Width>,
-    /// 這次按鍵切換了繁簡輸出（平台層顯示「繁 / 简」提示）
+    /// 這次按鍵切換了繁簡輸出（平台層顯示「動 / 动」提示）
     pub output_changed: Option<Output>,
     /// 使用者按了遊戲模式快捷鍵；遊戲模式是全域狀態，由服務程序切換並廣播
     pub toggle_game: bool,

@@ -1,6 +1,6 @@
 //! 工作列右下角的輸入法圖示（語言列項目，GUID_LBI_INPUTMODE）
 //!
-//! - 顯示目前狀態：「動」（繁體）/「动」（簡體）/「英」；只畫線條，不畫底色，顏色跟著工作列深淺色
+//! - 顯示目前「中 / 英」；只畫線條，不畫底色，顏色跟著工作列深淺色
 //! - 左鍵：切換中英
 //! - 右鍵：設定…、遊戲模式、重新啟動 ZCT
 //!
@@ -67,11 +67,7 @@ impl LangBarButton {
 impl LangBarButton_Impl {
     /// 圖示上的字
     fn glyph(&self) -> &'static str {
-        match (self.chinese.get(), self.simplified.get()) {
-            (false, _) => "英",
-            (true, true) => "动",
-            (true, false) => "動",
-        }
+        if self.chinese.get() { "中" } else { "英" }
     }
 
     fn notify(&self) {
@@ -154,7 +150,7 @@ impl ITfLangBarItem_Impl for LangBarButton_Impl {
                 return Err(windows::Win32::Foundation::E_INVALIDARG.into());
             }
             let mut desc = [0u16; 32];
-            for (i, c) in "動".encode_utf16().enumerate() {
+            for (i, c) in "動物園輸入法".encode_utf16().enumerate() {
                 desc[i] = c;
             }
             unsafe {
@@ -180,9 +176,9 @@ impl ITfLangBarItem_Impl for LangBarButton_Impl {
 
     fn GetTooltipString(&self) -> Result<BSTR> {
         Ok(BSTR::from(match (self.chinese.get(), self.simplified.get()) {
-            (false, _) => "動：英文（左鍵切換、右鍵選單）",
-            (true, true) => "动：简体（左鍵切換、右鍵選單）",
-            (true, false) => "動：中文（左鍵切換、右鍵選單）",
+            (false, _) => "動物園輸入法：英文（左鍵切換、右鍵選單）",
+            (true, true) => "動物園輸入法：中文・简体（左鍵切換、右鍵選單）",
+            (true, false) => "動物園輸入法：中文（左鍵切換、右鍵選單）",
         }))
     }
 }

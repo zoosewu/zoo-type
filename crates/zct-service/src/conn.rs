@@ -38,8 +38,8 @@ fn static_hint(r: &KeyResult) -> Option<&'static str> {
         });
     }
     r.output_changed.map(|o| match o {
-        Output::Traditional => "繁",
-        Output::Simplified => "简",
+        Output::Traditional => "動",
+        Output::Simplified => "动",
     })
 }
 

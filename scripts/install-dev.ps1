@@ -57,7 +57,7 @@ $lnk.Save()
 Write-Host '設定登入時自動啟動服務程序'
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ZCT' -Value "`"$dest\zct-service.exe`""
 
-Write-Host '加入中文（台灣）鍵盤清單，並排在第一位（Alt+Shift 切到中文時就是「動」）'
+Write-Host '加入中文（台灣）鍵盤清單，並排在第一位（Alt+Shift 切到中文時就是「動物園輸入法」）'
 $list = Get-WinUserLanguageList
 $zh = $list | Where-Object LanguageTag -eq 'zh-Hant-TW'
 if (-not $zh) {
@@ -71,4 +71,4 @@ if ($zh.InputMethodTips[0] -ne $tip) {
 }
 
 Write-Host "完成：$dest"
-Write-Host '用 Alt + Shift 或 Win + 空白鍵 切換到「動」。已開啟的 App 需要重新開啟才會載入新版 DLL。'
+Write-Host '用 Alt + Shift 或 Win + 空白鍵 切換到「動物園輸入法」。已開啟的 App 需要重新開啟才會載入新版 DLL。'
