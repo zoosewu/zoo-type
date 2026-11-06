@@ -108,10 +108,9 @@ pub fn register() -> Result<()> {
 
         let profiles: ITfInputProcessorProfileMgr =
             CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
-        // 圖示：DLL 旁的 zct.ico（白底黑字「動」）；沒有時 Windows 會改顯示語言簡稱「繁體」
-        let dll = dll_path();
-        let ico = std::path::Path::new(&dll).with_file_name("zct.ico");
-        let icon = wide(&if ico.exists() { ico.to_string_lossy().into_owned() } else { dll });
+        // 圖示：DLL 內第 0 個圖示資源（白底黑字「動」，見 build.rs）；
+        // 工作列只認 DLL / EXE 的圖示資源，讀不到時會改顯示語言簡稱「繁體」
+        let icon = wide(&dll_path());
         profiles.RegisterProfile(
             &CLSID_ZCT,
             LANGID_ZH_TW,

@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-產生輸入法清單 / 工作列用的圖示 crates/zct-tsf/res/zct.ico（白底黑字「動」，與微軟新注音的「ㄅ」同風格）
+產生輸入法清單 / 工作列用的圖示 crates/zct-tsf/res/zct.ico（白底黑字「動」，與微軟新注音的「ㄅ」同風格），建置時由 build.rs 編進 DLL
 
 .DESCRIPTION
 每個尺寸存成 32 位元 BMP（ExtractIconEx 支援最完整）。改字或字型後重新執行即可。
