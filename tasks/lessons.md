@@ -39,3 +39,9 @@
   - SendInput / keybd_event 這類全域輸入，每次送出前都檢查 `GetForegroundWindow()` 是測試視窗，否則立刻停止
   - 會搶前景或送全域輸入的測試，先徵得使用者同意再執行
   - 能用不影響使用者的方式（直接呼叫函式、IPC 模擬）驗證時優先使用
+
+## Bash 工具的 heredoc 會吃掉反斜線
+- 現象：在 Bash heredoc 裡跑 Python 修改檔案，`\\` 變成 `\`，`\r` 被寫成真正的歸位字元、字串比對失敗；腳本中途失敗但後面的 git commit 照樣執行
+- 規則：
+  - 內容含反斜線（Windows 路徑、跳脫字元）的修改，用 Write 把腳本寫到 scratchpad 再執行，或直接用 Edit
+  - 修改腳本與 git commit 不要用 `&&` 以外的方式串接；失敗時先檢查 `git diff` 再 commit
