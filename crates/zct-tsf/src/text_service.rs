@@ -461,15 +461,32 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         })
     }
 
-    fn OnKeyUp(&self, pic: Ref<ITfContext>, _w: WPARAM, _l: LPARAM) -> Result<BOOL> {
+    fn OnKeyUp(&self, pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
-            let pending = self.pending_up.borrow_mut().take();
-            match (pending, pic.as_ref()) {
-                (Some(r), Some(ctx)) => {
+            let r = match self.pending_up.borrow_mut().take() {
+                Some(r) => r,
+                // 有些 App（例如 Win11 記事本）直接呼叫 ITfKeystrokeMgr::KeyUp，不會先經過 OnTestKeyUp；
+                // 這時要在這裡處理放開事件，否則單按 Shift 永遠不會切換中英
+                None => {
+                    if self.not_input() {
+                        return Ok(false.into());
+                    }
+                    let ev = keys::event(w, l, true);
+                    let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
+                        return Ok(false.into());
+                    };
+                    if r.commit.is_none() && r.mode_changed.is_none() {
+                        return Ok(false.into());
+                    }
+                    r
+                }
+            };
+            match pic.as_ref() {
+                Some(ctx) => {
                     self.apply(ctx, r);
                     Ok(true.into())
                 }
-                _ => Ok(false.into()),
+                None => Ok(false.into()),
             }
         })
     }

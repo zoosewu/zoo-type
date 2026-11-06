@@ -810,9 +810,9 @@ fn invalid_syllable_stays_with_bell() {
     let r = h.press(Key::Char(b'3'), Mods::NONE);
     assert!(r.bell);
     assert_eq!(h.s.preedit().text, "ㄍㄧ");
-    // 修正後照常打字
+    // Backspace 清掉整個注音後照常打字
     h.press(Key::Backspace, Mods::NONE);
-    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "");
     let r = h.press(Key::Char(b'j'), Mods::NONE); // ㄨ
     assert!(!r.bell);
     h.type_str("i3"); // ㄛˇ → 我
@@ -829,16 +829,19 @@ fn invalid_first_tone_with_space_stays_with_bell() {
 }
 
 #[test]
-fn delete_cancels_half_typed_syllable() {
-    // 相ㄑㄧㄣ + Delete → 相
+fn backspace_cancels_half_typed_syllable() {
+    // 相ㄑㄧㄣ + Backspace → 相
     let mut h = Harness::new();
     h.type_str("vu; ");
     let first = h.s.preedit().text;
     h.type_str("fup");
     assert_eq!(h.s.preedit().text, format!("{first}ㄑㄧㄣ"));
-    let r = h.press(Key::Delete, Mods::NONE);
+    let r = h.press(Key::Backspace, Mods::NONE);
     assert!(r.eaten);
     assert_eq!(h.s.preedit().text, first);
+    // 沒有注音時 Backspace 照常刪前一個字
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "");
 }
 
 #[test]
@@ -1304,10 +1307,10 @@ fn enter_with_only_stuck_syllable_clears_without_newline() {
 }
 
 #[test]
-fn delete_cancels_syllable_even_if_shift_state_is_reported() {
-    // 遠端桌面有時回報 Shift 仍按著；Delete 照樣取消注音
+fn delete_keeps_original_behavior_while_typing_syllable() {
+    // Delete 不取消注音（維持 chewing 原本行為）
     let mut h = Harness::new();
     h.type_str("eo"); // ㄍㄟ
-    h.press(Key::Delete, Mods::shift());
-    assert_eq!(h.s.preedit().text, "");
+    h.press(Key::Delete, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "ㄍㄟ");
 }
