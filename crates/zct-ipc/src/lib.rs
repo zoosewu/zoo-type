@@ -9,7 +9,7 @@ pub mod pipe;
 pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -81,6 +81,8 @@ pub enum Request {
     Command(Command),
 }
 
+// 每次呼叫只傳一個回應，大小差異不影響效能；不裝箱讓序列化格式保持單純
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Response {
     Ok,

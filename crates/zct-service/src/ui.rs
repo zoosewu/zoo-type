@@ -383,6 +383,7 @@ impl Ui {
             return Ok(());
         };
         let (runs, highlight, dip) = match self.theme.layout {
+            _ if !page.columns.is_empty() => self.layout_columns(page)?,
             Layout::Vertical => self.layout_vertical(page)?,
             Layout::Horizontal => self.layout_horizontal(page)?,
         };
@@ -444,6 +445,81 @@ impl Ui {
             x += w + ROW_PAD_X * 2.0;
         }
         Ok((runs, highlight, (x + PAD_X, row_h + PAD_Y * 2.0)))
+    }
+
+    /// 展開多欄：每一頁一欄並排，目前這一欄有數字與選擇框，其他欄淡色；底部顯示頁碼
+    fn layout_columns(&self, page: &CandidatePage) -> Result<Laid> {
+        let active = page.page.saturating_sub(page.first_column);
+        let (_, num_w, _) = self.layout("0★", &self.num_fmt)?;
+        let mut cols = Vec::new();
+        let mut row_h: f32 = 0.0;
+        for (c, items) in page.columns.iter().enumerate() {
+            // 目前這欄用 page.items（含 ★ 與英文選項）
+            let items = if c == active { &page.items } else { items };
+            let mut rows = Vec::new();
+            let mut text_w: f32 = 0.0;
+            for (i, item) in items.iter().enumerate() {
+                let num = if c == active {
+                    let mark = if page.pinned.get(i).copied().unwrap_or(false) { "★" } else { "" };
+                    Some(self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?)
+                } else {
+                    None
+                };
+                let text = self.layout(item, &self.text_fmt)?;
+                row_h = row_h.max(text.2);
+                text_w = text_w.max(text.1);
+                rows.push((num, text));
+            }
+            cols.push((rows, text_w));
+        }
+        let row_h = row_h + ROW_PAD_Y * 2.0;
+
+        let mut runs = Vec::new();
+        let mut highlight = None;
+        let mut x = PAD_X;
+        let mut bottom = PAD_Y;
+        for (c, (rows, text_w)) in cols.into_iter().enumerate() {
+            let col_w = ROW_PAD_X + num_w + GAP_NUM + text_w + ROW_PAD_X;
+            let mut y = PAD_Y;
+            for (i, (num, (text, _, th))) in rows.into_iter().enumerate() {
+                if c == active && i == page.highlight {
+                    highlight = Some(D2D_RECT_F {
+                        left: x,
+                        top: y,
+                        right: x + col_w,
+                        bottom: y + row_h,
+                    });
+                }
+                if let Some((num, nw, nh)) = num {
+                    runs.push(Run {
+                        layout: num,
+                        x: x + ROW_PAD_X + num_w - nw,
+                        y: y + (row_h - nh) / 2.0,
+                        dim: true,
+                    });
+                }
+                runs.push(Run {
+                    layout: text,
+                    x: x + ROW_PAD_X + num_w + GAP_NUM,
+                    y: y + (row_h - th) / 2.0,
+                    dim: c != active,
+                });
+                y += row_h;
+            }
+            bottom = bottom.max(y);
+            x += col_w;
+        }
+        let width = x - PAD_X;
+        let (layout, w, h) =
+            self.layout(&format!("{}/{}", page.page + 1, page.total_pages), &self.num_fmt)?;
+        runs.push(Run {
+            layout,
+            x: PAD_X + width - ROW_PAD_X - w,
+            y: bottom + ROW_PAD_Y,
+            dim: true,
+        });
+        let height = bottom + h + ROW_PAD_Y * 2.0;
+        Ok((runs, highlight, (PAD_X * 2.0 + width, height + PAD_Y)))
     }
 
     /// 直式：每列「數字 候選字」，選擇框標示目前項目，多頁時底部顯示頁碼

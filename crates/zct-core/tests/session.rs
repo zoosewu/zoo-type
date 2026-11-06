@@ -918,15 +918,17 @@ fn preedit_target_marks_char_after_cursor_but_not_at_end() {
 }
 
 #[test]
-fn candidates_end_with_extras_page_of_emoji_and_bopomofo() {
+fn tab_switches_to_extras_page_of_emoji_and_bopomofo() {
     let mut h = Harness::new();
     h.type_str("d9 vup "); // 開心
     h.press(Key::Home, Mods::NONE);
     let first = h.press(Key::Down, Mods::NONE).candidates.unwrap();
-    // 從第一頁往左 → 最後的額外選項頁
-    let extras = h.press(Key::Left, Mods::NONE).candidates.unwrap();
-    assert_eq!(extras.page, first.total_pages - 1);
+    // Tab → 額外選項頁；再按 Tab 回到候選字
+    let extras = h.press(Key::Tab, Mods::NONE).candidates.unwrap();
     assert_eq!(extras.items.last().map(String::as_str), Some("ㄎㄞ ㄒㄧㄣ"));
+    let back = h.press(Key::Tab, Mods::NONE).candidates.unwrap();
+    assert_eq!(back.items, first.items);
+    let extras = h.press(Key::Tab, Mods::NONE).candidates.unwrap();
     assert!(extras.items.len() > 1, "有 Emoji：{:?}", extras.items);
     // 選注音
     let n = extras.items.len();
@@ -1243,4 +1245,38 @@ fn phrase_state_cycle_normal_pinned_banned() {
     assert_eq!(state(&e), (true, false), "封鎖後可直接設回優先");
     e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Pin).unwrap();
     assert_eq!(state(&e), (true, false), "重複設定優先不會溢位");
+}
+
+#[test]
+fn left_right_expand_candidates_into_columns_and_keep_row() {
+    // ㄕˋ 的候選很多：→ 換到下一欄並展開，選擇框停在同一行
+    let mut h = Harness::new();
+    h.type_str("g4"); // ㄕˋ
+    let first = h.press(Key::Down, Mods::NONE).candidates.unwrap();
+    assert!(first.columns.is_empty(), "還沒按 ← → 時不展開");
+    assert!(first.total_pages > 2);
+    h.press(Key::Down, Mods::NONE);
+    h.press(Key::Down, Mods::NONE); // 第 3 行
+    let page = h.press(Key::Right, Mods::NONE).candidates.unwrap();
+    assert_eq!(page.page, 1);
+    assert_eq!(page.highlight, 2, "同一行");
+    assert!(page.columns.len() > 1);
+    assert_eq!(page.first_column, 0);
+    assert_eq!(page.columns[0], first.items);
+    assert_eq!(page.columns[1], page.items);
+    // Enter 選的是第二欄第 3 個
+    let want = page.items[2].clone();
+    h.press(Key::Enter, Mods::NONE);
+    assert_eq!(h.s.preedit().text, want);
+}
+
+#[test]
+fn expanded_state_resets_after_selection() {
+    let mut h = Harness::new();
+    h.type_str("g4");
+    h.press(Key::Down, Mods::NONE);
+    h.press(Key::Right, Mods::NONE);
+    h.press(Key::Enter, Mods::NONE);
+    let page = h.press(Key::Down, Mods::NONE).candidates.unwrap();
+    assert!(page.columns.is_empty());
 }

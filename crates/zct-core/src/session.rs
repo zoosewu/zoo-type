@@ -37,7 +37,7 @@ pub struct Preedit {
     pub len: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CandidatePage {
     pub items: Vec<String>,
     /// 從 0 開始
@@ -47,6 +47,10 @@ pub struct CandidatePage {
     pub highlight: usize,
     /// 每個項目是否已固頂（候選窗標 ★）
     pub pinned: Vec<bool>,
+    /// 展開多欄（選字時按過 ← / →）：每一頁一欄；空的代表沒有展開
+    pub columns: Vec<Vec<String>>,
+    /// `columns[0]` 是第幾頁
+    pub first_column: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -158,8 +162,10 @@ pub struct Session {
     emoji: Option<EmojiPick>,
     ai: Option<AiPick>,
     ai_enabled: bool,
-    /// 候選窗目前在最後的額外選項頁（Emoji、注音）
+    /// 候選窗目前在額外選項頁（Emoji、注音；選字時按 Tab 切換）
     extras_page: bool,
+    /// 候選窗已展開成多欄（選字時按過 ← / →）
+    expanded: bool,
     /// 剛用 Backspace 刪掉完整英文單字後面的空白：下一次 Backspace 刪整個單字
     word_backspace: bool,
 }
@@ -204,6 +210,7 @@ impl Session {
             ai: None,
             ai_enabled: opts.config.ai.enabled,
             extras_page: false,
+            expanded: false,
             word_backspace: false,
         })
     }
@@ -940,6 +947,10 @@ impl Session {
     }
 
     fn finish(&mut self, mut r: KeyResult, commit: String) -> KeyResult {
+        if !self.editor.is_selecting() {
+            self.expanded = false;
+            self.extras_page = false;
+        }
         if !commit.is_empty() {
             self.last_char = commit.chars().last();
             r.commit = Some(self.convert(&commit));
@@ -952,8 +963,9 @@ impl Session {
     /// 候選窗開啟時的選擇框操作（chewing 本身沒有選擇框）
     ///
     /// - ↑ / ↓：移動選擇框，超出本頁就翻頁
+    /// - ← / →：換頁並展開成多欄（與微軟新注音相同），選擇框停在同一行
     /// - Enter：選擇框所在的項目
-    /// - 其他鍵（← → 翻頁、數字直接選、Esc 取消…）交給 chewing
+    /// - 其他鍵（數字直接選、Esc 取消…）交給 chewing
     fn navigate_candidates(&mut self, ev: &KeyEvent) -> bool {
         if !self.editor.is_selecting() || ev.mods.shift || self.extras_page {
             return false;
@@ -973,6 +985,13 @@ impl Session {
             Key::Down => {
                 self.chewing_key(Key::Down);
                 self.highlight = 0;
+            }
+            Key::Left | Key::Right => {
+                let row = self.highlight;
+                self.chewing_key(ev.key);
+                self.expanded = self.editor.total_page().unwrap_or(1) > 1;
+                let len = self.candidates().map(|p| p.items.len()).unwrap_or(1);
+                self.highlight = row.min(len.saturating_sub(1));
             }
             Key::Enter => {
                 let picked = self.page_offset() + self.highlight.min(len - 1);
@@ -1032,7 +1051,7 @@ impl Session {
         out
     }
 
-    /// 額外選項頁的按鍵：← → 在 chewing 頁與額外頁之間切換；數字 / Enter 選取
+    /// 額外選項頁的按鍵：Tab 在候選與額外頁之間切換；數字 / Enter 選取
     fn extras_key(&mut self, ev: &KeyEvent, commit: &mut String) -> bool {
         if !self.editor.is_selecting() || ev.mods.shift {
             return false;
@@ -1040,35 +1059,21 @@ impl Session {
         let extras = self.extras();
         if extras.is_empty() {
             self.extras_page = false;
-            return false;
+            // 沒有額外選項時 Tab 什麼都不做（不要交給 chewing）
+            return ev.key == Key::Tab;
         }
-        let page = self.editor.current_page_no().unwrap_or(0);
-        let last = self.editor.total_page().unwrap_or(1).saturating_sub(1);
-        let forward = matches!(ev.key, Key::Right | Key::PageDown);
-        let backward = matches!(ev.key, Key::Left | Key::PageUp);
+        if ev.key == Key::Tab {
+            self.extras_page = !self.extras_page;
+            self.highlight = 0;
+            return true;
+        }
         if !self.extras_page {
-            // chewing 最後一頁往後、第一頁往前 → 額外選項頁
-            if (forward && page == last) || (backward && page == 0) {
-                self.extras_page = true;
-                self.highlight = 0;
-                return true;
-            }
             return false;
         }
         let pick = match ev.key {
-            _ if forward => {
+            // ← → 回到候選字
+            Key::Left | Key::Right | Key::PageUp | Key::PageDown => {
                 self.extras_page = false;
-                if page == last && last > 0 {
-                    self.chewing_key(Key::Right); // 回到第一頁
-                }
-                self.highlight = 0;
-                return true;
-            }
-            _ if backward => {
-                self.extras_page = false;
-                if page == 0 && last > 0 {
-                    self.chewing_key(Key::Left); // 回到最後一頁
-                }
                 self.highlight = 0;
                 return true;
             }
@@ -1281,6 +1286,7 @@ impl Session {
                 total_pages: 1,
                 highlight: 0,
                 pinned: vec![false],
+                ..Default::default()
             });
         }
         if let Some(pick) = &self.emoji {
@@ -1292,23 +1298,26 @@ impl Session {
                 page: pick.page,
                 total_pages: pick.items.len().div_ceil(self.per_page).max(1),
                 highlight: pick.highlight,
+                ..Default::default()
             });
         }
         if !self.editor.is_selecting() {
             return None;
         }
-        let chewing_pages = self.editor.total_page().unwrap_or(1);
-        let extras = self.extras();
-        let total_pages = chewing_pages + usize::from(!extras.is_empty());
-        if self.extras_page && !extras.is_empty() {
-            let items: Vec<String> = extras.iter().map(|e| e.label().to_owned()).collect();
-            return Some(CandidatePage {
-                pinned: vec![false; items.len()],
-                items,
-                page: chewing_pages,
-                total_pages,
-                highlight: self.highlight,
-            });
+        let total_pages = self.editor.total_page().unwrap_or(1);
+        if self.extras_page {
+            let extras = self.extras();
+            if !extras.is_empty() {
+                let items: Vec<String> = extras.iter().map(|e| e.label().to_owned()).collect();
+                return Some(CandidatePage {
+                    pinned: vec![false; items.len()],
+                    items,
+                    page: 0,
+                    total_pages: 1,
+                    highlight: self.highlight,
+                    ..Default::default()
+                });
+            }
         }
         let raw: Vec<String> = self
             .editor
@@ -1337,13 +1346,37 @@ impl Session {
             items.push(w.clone());
             pinned.push(false);
         }
+        let page = self.editor.current_page_no().unwrap_or(0);
+        let (columns, first_column) = if self.expanded {
+            self.columns(page)
+        } else {
+            (Vec::new(), 0)
+        };
         Some(CandidatePage {
             items,
-            page: self.editor.current_page_no().unwrap_or(0),
+            page,
             total_pages,
             highlight: self.highlight,
             pinned,
+            columns,
+            first_column,
         })
+    }
+
+    /// 展開多欄：目前這頁所在的一組欄（最多 MAX_COLUMNS 欄，超過就換下一組）
+    fn columns(&self, page: usize) -> (Vec<Vec<String>>, usize) {
+        const MAX_COLUMNS: usize = 6;
+        let Ok(all) = self.editor.all_candidates() else {
+            return (Vec::new(), 0);
+        };
+        let first = page / MAX_COLUMNS * MAX_COLUMNS;
+        let columns = all
+            .chunks(self.per_page)
+            .skip(first)
+            .take(MAX_COLUMNS)
+            .map(|c| c.iter().map(|w| self.convert(w)).collect())
+            .collect();
+        (columns, first)
     }
 
     fn take_commit(&mut self) -> String {
