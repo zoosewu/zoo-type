@@ -22,7 +22,7 @@ use crate::config::{
     Config, GameMode, HotkeyConfig, InputMode, MixedConfig, OnFocus, Output, PunctuationTable,
     Width,
 };
-use crate::mixed::{is_cjk, is_latin, is_syllable, is_tone};
+use crate::mixed::{is_cjk, is_latin, is_tone};
 use crate::key::{Key, KeyEvent, Mods, ascii_event, shifted, to_chewing};
 use crate::shift::ShiftTap;
 
@@ -69,6 +69,8 @@ pub struct KeyResult {
     pub notice: Option<String>,
     /// 要送去 AI 修正的句子（服務程序在背景呼叫，結果用 [`Session::set_ai_suggestion`] 交回）
     pub ai_request: Option<String>,
+    /// 要發出提示音（例如組不成字的注音：保留注音並提示，與微軟新注音相同）
+    pub bell: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -413,18 +415,18 @@ impl Session {
         out.push_str(piece);
     }
 
-    /// C：按空白或 Enter 時，剛打的按鍵是英文 → 回傳該單字
+    /// C：按空白時，剛打的按鍵是英文 → 回傳該單字
     ///
-    /// 英文 = 在單字表中且組不成注音，或 4 個字母以上且組不成注音（打錯的英文也算）
+    /// 只在空白鍵判斷，而且必須是單字表中的單字、組不成注音；
+    /// 亂打或打錯的注音一律當中文（組不成字就保留並提示），不會自動變英文。
     fn auto_english(&self, ev: &KeyEvent) -> Option<String> {
         let raw = &self.raw;
-        let letters = raw.len() >= 4 && raw.bytes().all(|b| b.is_ascii_lowercase()) && !is_syllable(raw);
         let ok = self.mixed.auto_english
-            && matches!(ev.key, Key::Space | Key::Enter)
+            && ev.key == Key::Space
             && !ev.mods.shift
             && !self.editor.is_selecting()
             && self.editor.entering_syllable()
-            && (letters || self.engine.words().auto_english(raw));
+            && self.engine.words().auto_english(raw);
         ok.then(|| raw.clone())
     }
 
@@ -741,13 +743,18 @@ impl Session {
 
         if self.test_key(ev) {
             r.eaten = true;
-            // C：Enter 前先把還在打的英文單字放進組字區，接著由 chewing 整句送出
-            if ev.key == Key::Enter
-                && let Some(word) = self.auto_english(ev)
+            // 注音打到一半按 Delete：取消這個音節（「相ㄑㄧㄣ」→「相」）
+            if ev.key == Key::Delete
+                && !ev.mods.has_command_modifier()
+                && !ev.mods.shift
+                && self.emoji.is_none()
+                && self.editor.entering_syllable()
+                && !self.editor.is_selecting()
             {
                 self.editor.cancel_entering_syllable();
                 self.raw.clear();
-                self.insert_latin(&word);
+                self.english_alt = None;
+                return self.finish(r, commit);
             }
             if ev.key == Key::Down && !self.editor.is_selecting() && self.emoji.is_none() {
                 // 游標停在英文上時沒有候選可選
@@ -787,6 +794,13 @@ impl Session {
                 || self.extras_key(ev, &mut commit)
                 || self.pick_english(ev, &mut commit)
             {
+            } else if let Key::Numpad(c) = ev.key
+                && !self.editor.is_empty()
+                && !self.editor.is_selecting()
+                && !self.editor.entering_syllable()
+            {
+                // 組字中的數字鍵盤：放進組字區（「第 6 章」整句一起選字、送出）
+                self.insert_latin(&(c as char).to_string());
             } else if let Some(text) = self.direct_text(ev) {
                 // 組字中先送出組字，順序才正確
                 let composed = self.flush();
@@ -802,13 +816,27 @@ impl Session {
                     k => k,
                 };
                 let len_before = self.editor.len();
+                let was_entering = self.editor.entering_syllable();
+                let raw_before = self.raw.clone();
                 let completed = self.track_raw(ev, was_selecting);
                 match to_chewing(key, ev.mods) {
                     Some(chewing_ev) => {
                         let was_composing = self.is_composing();
                         let behavior = self.editor.process_keyevent(chewing_ev);
-                        // 音節沒有真的組成字（例如 ㄕㄟ 沒有一聲）：英文選項不能對應到前一個字
-                        if completed && self.editor.len() != len_before + 1 {
+                        // 音節組不成字（例如 ㄍㄧˇ）：chewing 會直接清掉注音；
+                        // 改成保留注音並提示，讓使用者自己修正（與微軟新注音相同）
+                        if completed
+                            && was_entering
+                            && !self.editor.entering_syllable()
+                            && self.editor.len() == len_before
+                        {
+                            for b in raw_before.bytes() {
+                                self.chewing_key(Key::Char(b));
+                            }
+                            self.raw = raw_before;
+                            self.english_alt = None;
+                            r.bell = true;
+                        } else if completed && self.editor.len() != len_before + 1 {
                             self.english_alt = None;
                         }
                         r.eaten = was_composing || behavior != EditorKeyBehavior::Ignore;

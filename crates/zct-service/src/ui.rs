@@ -99,7 +99,12 @@ pub enum UiCmd {
         page: CandidatePage,
         anchor: Option<Rect>,
     },
+    /// 隱藏候選窗與組字提示列（失焦、重設、連線結束）
     Hide {
+        owner: u64,
+    },
+    /// 只隱藏候選窗（每次按鍵後沒有候選時；組字提示列由 Composition 控制）
+    HideCandidates {
         owner: u64,
     },
     /// 狀態提示：中 / A / 全形 / 半形
@@ -209,6 +214,7 @@ struct Ui {
     comp: Popup,
     rx: Receiver<UiCmd>,
     owner: Option<u64>,
+    comp_owner: Option<u64>,
     last_anchor: Option<Rect>,
 }
 
@@ -300,6 +306,7 @@ impl Ui {
                 comp: make()?,
                 rx,
                 owner: None,
+                comp_owner: None,
                 last_anchor: None,
             })
         }
@@ -317,13 +324,12 @@ impl Ui {
                     self.show_candidates(&page, anchor)
                 }
                 UiCmd::Hide { owner } => {
-                    if self.owner == Some(owner) {
-                        self.owner = None;
-                        unsafe {
-                            let _ = ShowWindow(self.cand.hwnd, SW_HIDE);
-                            let _ = ShowWindow(self.comp.hwnd, SW_HIDE);
-                        }
-                    }
+                    self.hide_candidates(owner);
+                    self.hide_composition(owner);
+                    Ok(())
+                }
+                UiCmd::HideCandidates { owner } => {
+                    self.hide_candidates(owner);
                     Ok(())
                 }
                 UiCmd::Composition {
@@ -332,15 +338,11 @@ impl Ui {
                     anchor,
                 } => match preedit.filter(|p| !p.text.is_empty() && self.theme.composition_bar) {
                     Some(p) => {
-                        self.owner = Some(owner);
+                        self.comp_owner = Some(owner);
                         self.show_composition(&p, anchor)
                     }
                     None => {
-                        if self.owner == Some(owner) || self.owner.is_none() {
-                            unsafe {
-                                let _ = ShowWindow(self.comp.hwnd, SW_HIDE);
-                            }
-                        }
+                        self.hide_composition(owner);
                         Ok(())
                     }
                 },
@@ -507,6 +509,25 @@ impl Ui {
             hl.right = PAD_X + width;
         }
         Ok((runs, highlight, (PAD_X * 2.0 + width, y + PAD_Y)))
+    }
+
+    /// 只隱藏自己顯示的視窗，避免舊連線蓋掉新連線的畫面
+    fn hide_candidates(&mut self, owner: u64) {
+        if self.owner == Some(owner) {
+            self.owner = None;
+            unsafe {
+                let _ = ShowWindow(self.cand.hwnd, SW_HIDE);
+            }
+        }
+    }
+
+    fn hide_composition(&mut self, owner: u64) {
+        if self.comp_owner == Some(owner) {
+            self.comp_owner = None;
+            unsafe {
+                let _ = ShowWindow(self.comp.hwnd, SW_HIDE);
+            }
+        }
     }
 
     /// 組字提示列：「組字內容（選字目標反白）　N 字」，放在游標上方

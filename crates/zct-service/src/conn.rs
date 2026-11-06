@@ -182,6 +182,14 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             Request::Key(ev) => match session.as_mut() {
                 Some(s) => {
                     let r = s.process_key(&ev);
+                    if r.bell {
+                        // 系統預設提示音；非同步播放，不會卡住按鍵處理
+                        unsafe {
+                            let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(
+                                windows::Win32::UI::WindowsAndMessaging::MB_OK,
+                            );
+                        }
+                    }
                     if let Some(text) = &r.ai_request {
                         spawn_ai(id, text.clone(), shared, mailbox.clone());
                     }
@@ -209,7 +217,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                             page,
                             anchor: rect,
                         }),
-                        None => shared.ui.send(UiCmd::Hide { owner: id }),
+                        None => shared.ui.send(UiCmd::HideCandidates { owner: id }),
                     }
                     if let Some(text) = hint {
                         shared.ui.send(UiCmd::Hint { text, anchor: rect });

@@ -446,12 +446,13 @@ fn custom_punctuation_overrides_default() {
 }
 
 #[test]
-fn numpad_digits_pass_through_when_idle_and_commit_when_composing() {
+fn numpad_digits_pass_through_when_idle_and_join_composition() {
     let mut h = Harness::with_config(no_auto_space());
     assert!(!h.press(Key::Numpad(b'5'), Mods::NONE).eaten);
-    h.type_str("wu0 "); // 天
+    h.type_str("wu0 "); // 天（空白 = 一聲）
     let r = h.press(Key::Numpad(b'5'), Mods::NONE);
-    assert_eq!(r.commit.as_deref(), Some("天5"));
+    assert!(r.eaten && r.commit.is_none());
+    assert_eq!(h.s.preedit().text, "天5");
 }
 
 #[test]
@@ -751,11 +752,67 @@ fn c_mixed_sentence_in_composition() {
 }
 
 #[test]
-fn c_misspelled_long_word_is_english_and_enter_triggers() {
-    // detault 不在單字表，但 4 個字母以上且組不成注音 → 英文；直接按 Enter 也算
+fn c_garbage_keys_never_become_english() {
+    // 不在單字表的亂打按鍵：空白或 Enter 都不會變英文
     let mut h = Harness::new();
-    h.type_str("detault");
-    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("detault"));
+    h.type_str("detault ");
+    assert!(!h.s.preedit().text.contains("detault"));
+    let mut h = Harness::new();
+    h.type_str("hello");
+    let r = h.press(Key::Enter, Mods::NONE);
+    assert_ne!(r.commit.as_deref(), Some("hello"), "英文只在空白鍵判斷");
+}
+
+#[test]
+fn invalid_syllable_stays_with_bell() {
+    // ㄍㄧˇ 組不成字：保留注音並提示，不要消失
+    let mut h = Harness::new();
+    h.type_str("eu");
+    let r = h.press(Key::Char(b'3'), Mods::NONE);
+    assert!(r.bell);
+    assert_eq!(h.s.preedit().text, "ㄍㄧ");
+    // 修正後照常打字
+    h.press(Key::Backspace, Mods::NONE);
+    h.press(Key::Backspace, Mods::NONE);
+    let r = h.press(Key::Char(b'j'), Mods::NONE); // ㄨ
+    assert!(!r.bell);
+    h.type_str("i3"); // ㄛˇ → 我
+    assert_eq!(h.s.preedit().text, "我");
+}
+
+#[test]
+fn invalid_first_tone_with_space_stays_with_bell() {
+    let mut h = Harness::new();
+    h.type_str("eu");
+    let r = h.press(Key::Space, Mods::NONE);
+    assert!(r.bell);
+    assert_eq!(h.s.preedit().text, "ㄍㄧ");
+}
+
+#[test]
+fn delete_cancels_half_typed_syllable() {
+    // 相ㄑㄧㄣ + Delete → 相
+    let mut h = Harness::new();
+    h.type_str("vu; ");
+    let first = h.s.preedit().text;
+    h.type_str("fup");
+    assert_eq!(h.s.preedit().text, format!("{first}ㄑㄧㄣ"));
+    let r = h.press(Key::Delete, Mods::NONE);
+    assert!(r.eaten);
+    assert_eq!(h.s.preedit().text, first);
+}
+
+#[test]
+fn numpad_digit_goes_into_composition() {
+    // 第 6 章：數字鍵盤的 6 放進組字區，整句一起送出
+    let mut h = Harness::new();
+    h.type_str("2u4 "); // 第 + 空白
+    let r = h.press(Key::Numpad(b'6'), Mods::NONE);
+    assert!(r.commit.is_none());
+    h.type_str(" 5; "); // 空白 + ㄓㄤ
+    let r = h.press(Key::Enter, Mods::NONE);
+    let text = r.commit.unwrap();
+    assert!(text.chars().skip(1).take(3).eq(" 6 ".chars()) && text.chars().count() == 5, "{text}");
 }
 
 #[test]
@@ -913,9 +970,12 @@ fn b_english_option_keeps_previous_chinese() {
 fn b_failed_syllable_does_not_leave_english_option() {
     // go = ㄕㄟ 沒有一聲，不會組成字；之後開「我」的候選窗不能出現 go，選了會把「我」刪掉
     let mut h = Harness::new();
-    h.type_str("ji3go ");
-    let page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
-    assert!(!page.items.contains(&"go".to_string()), "{:?}", page.items);
+    h.type_str("ji3go");
+    assert!(h.press(Key::Space, Mods::NONE).bell, "組不成字要提示");
+    assert_eq!(h.s.preedit().text, "我ㄕㄟ");
+    if let Some(page) = h.press(Key::Down, Mods::NONE).candidates {
+        assert!(!page.items.contains(&"go".to_string()), "{:?}", page.items);
+    }
 }
 
 #[test]
