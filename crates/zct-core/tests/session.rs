@@ -1280,3 +1280,34 @@ fn expanded_state_resets_after_selection() {
     let page = h.press(Key::Down, Mods::NONE).candidates.unwrap();
     assert!(page.columns.is_empty());
 }
+
+#[test]
+fn enter_drops_stuck_syllable_and_commits_rest() {
+    // 我ㄍㄟ（組不成字卡住）+ Enter → 送出「我」
+    let mut h = Harness::new();
+    h.type_str("ji3eo");
+    assert!(h.press(Key::Space, Mods::NONE).bell);
+    let r = h.press(Key::Enter, Mods::NONE);
+    assert!(r.eaten);
+    assert_eq!(r.commit.as_deref(), Some("我"));
+    assert!(!h.s.is_composing());
+}
+
+#[test]
+fn enter_with_only_stuck_syllable_clears_without_newline() {
+    let mut h = Harness::new();
+    h.type_str("eu3"); // ㄍㄧˇ 卡住
+    let r = h.press(Key::Enter, Mods::NONE);
+    assert!(r.eaten, "不要把 Enter 交給 App 換行");
+    assert!(r.commit.is_none());
+    assert!(!h.s.is_composing());
+}
+
+#[test]
+fn delete_cancels_syllable_even_if_shift_state_is_reported() {
+    // 遠端桌面有時回報 Shift 仍按著；Delete 照樣取消注音
+    let mut h = Harness::new();
+    h.type_str("eo"); // ㄍㄟ
+    h.press(Key::Delete, Mods::shift());
+    assert_eq!(h.s.preedit().text, "");
+}

@@ -798,17 +798,20 @@ impl Session {
         if self.test_key(ev) {
             r.eaten = true;
             // 注音打到一半按 Delete：取消這個音節（「相ㄑㄧㄣ」→「相」）
-            if ev.key == Key::Delete
-                && !ev.mods.has_command_modifier()
-                && !ev.mods.shift
+            // 注音卡住（組不成字）時按 Enter：丟掉這個音節，其餘照常送出（「我ㄍㄟ」→「我」）
+            let pending_syllable = !ev.mods.has_command_modifier()
                 && self.emoji.is_none()
+                && self.ai_suggestion().is_none()
                 && self.editor.entering_syllable()
-                && !self.editor.is_selecting()
-            {
+                && !self.editor.is_selecting();
+            if pending_syllable && matches!(ev.key, Key::Delete | Key::Enter) {
                 self.editor.cancel_entering_syllable();
                 self.raw.clear();
                 self.english_alt = None;
-                return self.finish(r, commit);
+                // 只有卡住的注音時，Enter 也不交給 App（不要多換一行）
+                if ev.key == Key::Delete || self.editor.is_empty() {
+                    return self.finish(r, commit);
+                }
             }
             if ev.key == Key::Down && !self.editor.is_selecting() && self.emoji.is_none() {
                 // 游標停在英文上時沒有候選可選

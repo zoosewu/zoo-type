@@ -43,6 +43,23 @@ fn static_hint(r: &KeyResult) -> Option<&'static str> {
     })
 }
 
+/// 按鍵診斷：只記錄非字元鍵，絕不記錄字母、數字與符號
+fn debug_key(shared: &Shared, id: u64, stage: &str, ev: &zct_core::KeyEvent, result: &str) {
+    use zct_core::Key;
+    if !shared.debug_keys || matches!(ev.key, Key::Char(_) | Key::Numpad(_)) {
+        return;
+    }
+    log::info!(
+        "[{id}] 按鍵診斷 {stage} {:?} {} shift={} ctrl={} alt={} t={} {result}",
+        ev.key,
+        if ev.released { "放開" } else { "按下" },
+        ev.mods.shift,
+        ev.mods.ctrl,
+        ev.mods.alt,
+        ev.time_ms,
+    );
+}
+
 fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> {
     let (config, apps) = shared.settings.current();
     let rule = apps.find(exe).cloned();
@@ -177,12 +194,28 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
             }
             Request::TestKeyDown(ev) => match session.as_mut() {
-                Some(s) => Response::Eat(s.test_key_down(&ev)),
+                Some(s) => {
+                    let eat = s.test_key_down(&ev);
+                    debug_key(shared, id, "test", &ev, &format!("eat={eat}"));
+                    Response::Eat(eat)
+                }
                 None => Response::Eat(false),
             },
             Request::Key(ev) => match session.as_mut() {
                 Some(s) => {
                     let r = s.process_key(&ev);
+                    debug_key(
+                        shared,
+                        id,
+                        "key",
+                        &ev,
+                        &format!(
+                            "eaten={} mode={:?} composing={}",
+                            r.eaten,
+                            r.mode_changed,
+                            !r.preedit.text.is_empty()
+                        ),
+                    );
                     if r.bell {
                         // 系統預設提示音；非同步播放，不會卡住按鍵處理
                         unsafe {
