@@ -69,6 +69,8 @@ pub enum PhraseAction {
     Unban,
     /// 取消固頂並清除學習紀錄
     Unpin,
+    /// 設為優先（固頂）
+    Pin,
 }
 
 /// 每日選字統計（需求 4.14：個人首選正確率）
@@ -371,6 +373,10 @@ impl Engine {
             PhraseAction::Unban => self.user_dict.insert(syl.as_ref(), word),
             PhraseAction::Unpin => {
                 self.forget(syl.as_ref(), word);
+                return Ok(());
+            }
+            PhraseAction::Pin => {
+                self.pin(syl.as_ref(), word);
                 return Ok(());
             }
         }

@@ -8,7 +8,7 @@ use zct_core::CandidatePage;
 
 use zct_core::{InputMode, KeyResult, Output, Session, SessionOptions, Width};
 use zct_ipc::pipe::ServerConn;
-use zct_ipc::{PROTOCOL_VERSION, Request, Response};
+use zct_ipc::{Command, PROTOCOL_VERSION, Request, Response};
 
 use crate::app::Shared;
 use crate::ui::UiCmd;
@@ -102,6 +102,34 @@ fn spawn_ai(id: u64, original: String, shared: &Shared, mailbox: AiMailbox) {
     });
 }
 
+/// 輸入法圖示右鍵選單
+fn run_command(cmd: Command, shared: &Shared) {
+    match cmd {
+        Command::OpenSettings => {
+            let exe = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("zct-settings.exe")));
+            match exe.filter(|p| p.exists()) {
+                Some(exe) => {
+                    if let Err(e) = std::process::Command::new(exe).spawn() {
+                        log::warn!("無法開啟設定程式：{e}");
+                    }
+                }
+                None => log::warn!("找不到設定程式 zct-settings.exe"),
+            }
+        }
+        Command::ToggleGame => {
+            let on = !shared.game.fetch_xor(true, Ordering::Relaxed);
+            log::info!("輸入法圖示：遊戲模式{}", if on { "開" } else { "關" });
+        }
+        Command::Restart => {
+            log::info!("輸入法圖示：重新啟動");
+            let _ = shared.engine.save();
+            shared.ui.send(UiCmd::Exit);
+        }
+    }
+}
+
 pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let mut session: Option<Session> = None;
     let mailbox: AiMailbox = Arc::new(Mutex::new(None));
@@ -170,6 +198,11 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             },
             Request::Caret(rect) => {
                 if let Some((r, hint)) = last.take() {
+                    shared.ui.send(UiCmd::Composition {
+                        owner: id,
+                        preedit: Some(r.preedit.clone()),
+                        anchor: rect,
+                    });
                     match r.candidates {
                         Some(page) => shared.ui.send(UiCmd::Show {
                             owner: id,
@@ -214,6 +247,22 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 Err(e) => Response::Error(e.to_string()),
             },
+            Request::Status => Response::Status {
+                chinese: session.as_ref().is_none_or(|s| s.mode() == InputMode::Chinese),
+                game: shared.game.load(Ordering::Relaxed),
+            },
+            Request::ToggleMode => match session.as_mut() {
+                Some(s) => {
+                    let r = s.toggle_mode();
+                    last = Some((r.clone(), hint(&r, None)));
+                    Response::Key(r)
+                }
+                None => Response::Key(KeyResult::default()),
+            },
+            Request::Command(cmd) => {
+                run_command(cmd, shared);
+                Response::Ok
+            }
             Request::SyncNow => {
                 let _ = shared.sync.send(());
                 Response::Ok

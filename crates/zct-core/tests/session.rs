@@ -1124,3 +1124,24 @@ fn ai_disabled_shows_notice() {
     assert!(r.ai_request.is_none());
     assert!(r.notice.unwrap().contains("未啟用"));
 }
+
+#[test]
+fn phrase_state_cycle_normal_pinned_banned() {
+    use zct_core::PhraseAction;
+    let dir = tempfile::tempdir().unwrap();
+    let e = open_engine(dir.path());
+    let state = |e: &zct_core::Engine| {
+        let p = e.phrases().into_iter().find(|p| p.word == "酷音").unwrap();
+        (p.is_pinned(), p.is_banned())
+    };
+    e.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").unwrap();
+    assert_eq!(state(&e), (true, false), "加入即優先");
+    e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Unpin).unwrap();
+    assert_eq!(state(&e), (false, false), "取消優先");
+    e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Ban).unwrap();
+    assert_eq!(state(&e), (false, true));
+    e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Pin).unwrap();
+    assert_eq!(state(&e), (true, false), "封鎖後可直接設回優先");
+    e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Pin).unwrap();
+    assert_eq!(state(&e), (true, false), "重複設定優先不會溢位");
+}

@@ -7,9 +7,11 @@
 
 mod client;
 mod detect;
+mod display;
 mod edit;
 mod factory;
 mod keys;
+mod langbar;
 mod register;
 mod text_service;
 

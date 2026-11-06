@@ -33,8 +33,8 @@ output = ""                # 切換繁體 / 簡體（預設不綁定）
 game_mode = "ctrl+shift+f12"  # 開關遊戲模式（所有 App 一起）
 forget = "shift+delete"    # 候選窗中：忘記選擇框所在詞的學習紀錄（並取消固頂）
 pin = "shift+enter"        # 候選窗中：固頂選擇框所在的詞並選它
-emoji = "ctrl+alt+e"       # Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
-ai = "ctrl+alt+r"          # AI 修正組字內容中的同音錯字
+emoji = "ctrl+shift+;"     # Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
+ai = "ctrl+shift+'"         # AI 修正組字內容中的同音錯字
 
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
@@ -43,7 +43,7 @@ exclusive_fullscreen = true  # 有程式獨佔全螢幕
 [mixed]                    # 中英混打
 auto_english = true        # 按空白時，剛打的按鍵是英文單字且不是合法注音 → 送出英文（例：hello）
 english_candidate = true   # 剛完成的音節也是英文單字時，候選窗附上英文（例：fu → 七 / fu）
-auto_space = true          # 中英文之間自動加空格（盤古之白）
+auto_space = false         # 中英文之間自動加空格（盤古之白）
 
 [sync]                     # git 同步，見下方說明
 enabled = false

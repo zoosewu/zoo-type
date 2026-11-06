@@ -229,6 +229,20 @@ impl Session {
         (self.eff.detect_legacy, self.eff.detect_fullscreen)
     }
 
+    /// 點輸入法圖示切換中英（組字中先送出）
+    pub fn toggle_mode(&mut self) -> KeyResult {
+        let mut commit = String::new();
+        let text = self.flush();
+        self.join(&mut commit, &text);
+        self.mode = self.mode.toggled();
+        let r = KeyResult {
+            eaten: true,
+            mode_changed: Some(self.mode),
+            ..Default::default()
+        };
+        self.finish(r, commit)
+    }
+
     pub fn set_global_game(&mut self, on: bool) {
         self.global_game = on;
     }

@@ -341,6 +341,8 @@ pub struct ThemeConfig {
     pub text: Color,
     pub number: Color,
     pub highlight: Color,
+    /// 組字提示列：游標上方顯示組字內容、選字目標與字數（App 自己畫的底線不明顯時很有用）
+    pub composition_bar: bool,
 }
 
 impl Default for ThemeConfig {
@@ -353,6 +355,7 @@ impl Default for ThemeConfig {
             text: Color(0x1A1A1A),
             number: Color(0x7A7A7A),
             highlight: Color(0xCCE4F7),
+            composition_bar: true,
         }
     }
 }

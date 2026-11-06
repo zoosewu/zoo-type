@@ -8,6 +8,7 @@ pub mod hotkey;
 pub mod key;
 pub mod mixed;
 pub mod paths;
+pub mod readings;
 pub mod session;
 pub mod shift;
 pub mod sync;

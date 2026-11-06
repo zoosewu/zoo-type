@@ -25,5 +25,10 @@ curl -fsSL -A "zct-dev" "$WORDS" | tr -d '\r' | awk 'length($0) >= 2 && length($
 EMOJI="https://raw.githubusercontent.com/unicode-org/cldr-json/main/cldr-json/cldr-annotations-full/annotations/zh-Hant/annotations.json"
 echo "下載 $EMOJI"
 curl -fsSL -A "zct-dev" -o "$DEST/emoji-zh-Hant.json" "$EMOJI"
+
+# 詞 → 讀音（設定程式自動填注音、選字評測）：libchewing-data，LGPL-2.1-or-later
+TSI="https://codeberg.org/chewing/libchewing-data/raw/branch/main/dict/chewing/tsi.csv"
+echo "下載 $TSI"
+curl -fsSL -A "zct-dev" -o "$DEST/tsi.csv" "$TSI"
 echo "完成：$DEST"
 ls -la "$DEST"

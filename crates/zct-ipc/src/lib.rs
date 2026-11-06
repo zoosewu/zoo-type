@@ -9,13 +9,21 @@ pub mod pipe;
 pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 
 /// 緩衝區初始大小與管道緩衝大小；按鍵訊息遠小於此，較大的回應會自動擴充緩衝區
 pub const INITIAL_BUFFER: usize = 64 * 1024;
+
+/// 輸入法圖示右鍵選單的指令
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Command {
+    OpenSettings,
+    ToggleGame,
+    Restart,
+}
 
 /// 螢幕座標（實體像素）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +73,12 @@ pub enum Request {
     Restore { day: String },
     /// 立即在背景同步；結果寫在 `local/sync-status.txt` → `Ok`
     SyncNow,
+    /// 輸入法圖示顯示用：目前中英與遊戲模式 → `Status`
+    Status,
+    /// 點輸入法圖示切換中英 → `Key`（組字中會先送出）
+    ToggleMode,
+    /// 輸入法圖示右鍵選單 → `Ok`
+    Command(Command),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +96,7 @@ pub enum Response {
     Phrases(Vec<PhraseEntry>),
     Stats(Vec<DayStats>),
     Backups(Vec<String>),
+    Status { chinese: bool, game: bool },
     Error(String),
 }
 
