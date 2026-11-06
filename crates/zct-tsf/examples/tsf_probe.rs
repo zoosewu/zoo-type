@@ -61,6 +61,7 @@ fn vk_of(name: &str) -> Option<VIRTUAL_KEY> {
     Some(match name {
         "enter" => VK_RETURN,
         "space" => VK_SPACE,
+        "tab" => VK_TAB,
         "esc" => VK_ESCAPE,
         "bs" => VK_BACK,
         "del" => VK_DELETE,
