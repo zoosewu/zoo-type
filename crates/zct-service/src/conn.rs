@@ -291,6 +291,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             },
             Request::Status => Response::Status {
                 chinese: session.as_ref().is_none_or(|s| s.mode() == InputMode::Chinese),
+                simplified: session.as_ref().is_some_and(|s| s.output() == Output::Simplified),
                 game: shared.game.load(Ordering::Relaxed),
             },
             Request::ToggleMode => match session.as_mut() {

@@ -20,7 +20,8 @@ use windows::core::{GUID, HSTRING, Result};
 
 use crate::{CLSID_ZCT, LANGID_ZH_TW, PROFILE_ZCT, dll_instance};
 
-const DESCRIPTION: &str = "ZCT 注音";
+/// 輸入法名稱（Win + 空白鍵清單、設定 → 語言）
+const DESCRIPTION: &str = "動";
 
 const CATEGORIES: [GUID; 4] = [
     GUID_TFCAT_TIP_KEYBOARD,

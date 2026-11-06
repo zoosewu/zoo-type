@@ -181,7 +181,7 @@ impl TextService_Impl {
     fn apply(&self, ctx: &ITfContext, r: KeyResult) {
         let has_composition = self.composition.borrow().is_some();
         let touches_doc = r.commit.is_some() || !r.preedit.text.is_empty() || has_composition;
-        if r.mode_changed.is_some() || r.toggle_game {
+        if r.mode_changed.is_some() || r.output_changed.is_some() || r.toggle_game {
             self.refresh_langbar();
         }
         let needs_caret = touches_doc
@@ -226,10 +226,16 @@ impl TextService_Impl {
     /// 向服務程序查詢中英與遊戲模式，更新輸入法圖示
     fn refresh_langbar(&self) {
         let button = self.tsf.borrow().langbar.clone();
-        if let (Some(button), Some(Response::Status { chinese, game })) =
-            (button, self.call(&Request::Status))
+        if let (
+            Some(button),
+            Some(Response::Status {
+                chinese,
+                simplified,
+                game,
+            }),
+        ) = (button, self.call(&Request::Status))
         {
-            langbar::set_state(&button, chinese, game);
+            langbar::set_state(&button, chinese, simplified, game);
         }
     }
 
