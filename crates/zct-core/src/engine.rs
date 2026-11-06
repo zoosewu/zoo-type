@@ -69,6 +69,8 @@ pub enum PhraseAction {
     Unban,
     /// 取消固頂並清除學習紀錄
     Unpin,
+    /// 設為優先（固頂）
+    Pin,
 }
 
 /// 每日選字統計（需求 4.14：個人首選正確率）
@@ -278,12 +280,19 @@ impl Engine {
     }
 
     /// 固頂：在使用者詞庫中大幅加權
+    ///
+    /// chewing 的 boost 是 `i8 + 100` 之後才夾在上限，加權超過 27 時再 boost 會溢位
+    /// （debug 版 panic、release 版繞回負數，詞反而被降權），所以已經固頂的詞不再加權。
     pub(crate) fn pin(&self, syllables: &[Syllable], word: &str) {
-        // insert：新詞或被封鎖的詞 → 一般自訂詞（10）；再 boost +100（上限 100）
-        if matches!(self.boost_of(syllables, word), None | Some(PhraseEntry::BANNED)) {
-            self.user_dict.insert(syllables, word);
+        match self.boost_of(syllables, word) {
+            Some(b) if b > PhraseEntry::NORMAL => {}
+            Some(b) if b != PhraseEntry::BANNED => self.user_dict.boost(syllables, word),
+            // 新詞或被封鎖的詞 → insert 成一般自訂詞（10）→ 再加權到 100
+            _ => {
+                self.user_dict.insert(syllables, word);
+                self.user_dict.boost(syllables, word);
+            }
         }
-        self.user_dict.boost(syllables, word);
         self.mark_dirty();
     }
 
@@ -364,6 +373,10 @@ impl Engine {
             PhraseAction::Unban => self.user_dict.insert(syl.as_ref(), word),
             PhraseAction::Unpin => {
                 self.forget(syl.as_ref(), word);
+                return Ok(());
+            }
+            PhraseAction::Pin => {
+                self.pin(syl.as_ref(), word);
                 return Ok(());
             }
         }

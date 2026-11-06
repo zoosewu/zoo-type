@@ -168,8 +168,9 @@ impl Default for HotkeyConfig {
             game_mode: Binding::key("ctrl+shift+f12"),
             forget: Binding::key("shift+delete"),
             pin: Binding::key("shift+enter"),
-            emoji: Binding::key("ctrl+alt+e"),
-            ai: Binding::key("ctrl+alt+r"),
+            // 不用 Ctrl+Alt：RichEdit（Win11 記事本）、Word 內建 Ctrl+Alt+E = €，部分鍵盤配置也把 Ctrl+Alt 當 AltGr
+            emoji: Binding::key("ctrl+shift+;"),
+            ai: Binding::key("ctrl+shift+'"),
         }
     }
 }
@@ -255,7 +256,8 @@ impl Default for MixedConfig {
         MixedConfig {
             auto_english: true,
             english_candidate: true,
-            auto_space: true,
+            // 空白由使用者自己輸入（使用者回饋）
+            auto_space: false,
         }
     }
 }
@@ -339,6 +341,8 @@ pub struct ThemeConfig {
     pub text: Color,
     pub number: Color,
     pub highlight: Color,
+    /// 組字提示列：游標上方顯示組字內容、選字目標與字數（App 自己畫的底線不明顯時很有用）
+    pub composition_bar: bool,
 }
 
 impl Default for ThemeConfig {
@@ -351,6 +355,7 @@ impl Default for ThemeConfig {
             text: Color(0x1A1A1A),
             number: Color(0x7A7A7A),
             highlight: Color(0xCCE4F7),
+            composition_bar: true,
         }
     }
 }

@@ -39,7 +39,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{HSTRING, Result, w};
 use windows_numerics::Vector2;
-use zct_core::CandidatePage;
+use zct_core::{CandidatePage, Preedit};
 use zct_core::config::{Color, Layout, ThemeConfig};
 use zct_ipc::Rect;
 
@@ -109,7 +109,13 @@ pub enum UiCmd {
     },
     /// 設定檔的主題變更了
     Theme(ThemeConfig),
-    /// 結束服務程序（先移除系統匣圖示）
+    /// 組字提示列；None 表示隱藏
+    Composition {
+        owner: u64,
+        preedit: Option<Preedit>,
+        anchor: Option<Rect>,
+    },
+    /// 結束服務程序
     Exit,
 }
 
@@ -135,10 +141,7 @@ impl UiHandle {
     }
 }
 
-pub fn spawn(
-    theme: ThemeConfig,
-    tray: crate::tray::TrayCtx,
-) -> std::result::Result<UiHandle, Box<dyn std::error::Error>> {
+pub fn spawn(theme: ThemeConfig) -> std::result::Result<UiHandle, Box<dyn std::error::Error>> {
     let (tx, rx) = channel();
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     std::thread::Builder::new().name("ui".into()).spawn(move || {
@@ -146,10 +149,6 @@ pub fn spawn(
             Ok(ui) => {
                 let wake = ui.cand.hwnd.0 as isize;
                 UI.with(|cell| *cell.borrow_mut() = Some(ui));
-                // 系統匣圖示失敗不影響打字
-                if let Err(e) = crate::tray::create(tray) {
-                    log::warn!("無法建立系統匣圖示：{e}");
-                }
                 let _ = ready_tx.send(Ok(wake));
                 message_loop();
             }
@@ -207,6 +206,7 @@ struct Ui {
     num_fmt: IDWriteTextFormat,
     cand: Popup,
     hint: Popup,
+    comp: Popup,
     rx: Receiver<UiCmd>,
     owner: Option<u64>,
     last_anchor: Option<Rect>,
@@ -297,6 +297,7 @@ impl Ui {
                 num_fmt,
                 cand: make()?,
                 hint: make()?,
+                comp: make()?,
                 rx,
                 owner: None,
                 last_anchor: None,
@@ -320,15 +321,31 @@ impl Ui {
                         self.owner = None;
                         unsafe {
                             let _ = ShowWindow(self.cand.hwnd, SW_HIDE);
+                            let _ = ShowWindow(self.comp.hwnd, SW_HIDE);
                         }
                     }
                     Ok(())
                 }
+                UiCmd::Composition {
+                    owner,
+                    preedit,
+                    anchor,
+                } => match preedit.filter(|p| !p.text.is_empty() && self.theme.composition_bar) {
+                    Some(p) => {
+                        self.owner = Some(owner);
+                        self.show_composition(&p, anchor)
+                    }
+                    None => {
+                        if self.owner == Some(owner) || self.owner.is_none() {
+                            unsafe {
+                                let _ = ShowWindow(self.comp.hwnd, SW_HIDE);
+                            }
+                        }
+                        Ok(())
+                    }
+                },
                 UiCmd::Hint { text, anchor } => self.show_hint(&text, anchor),
-                UiCmd::Exit => {
-                    crate::tray::remove();
-                    std::process::exit(0);
-                }
+                UiCmd::Exit => std::process::exit(0),
                 UiCmd::Theme(t) => {
                     log::info!("套用候選窗主題");
                     self.set_theme(t)
@@ -379,7 +396,8 @@ impl Ui {
         let mut items = Vec::new();
         let mut row_h: f32 = 0.0;
         for (i, item) in page.items.iter().enumerate() {
-            let num = self.layout(&format!("{}", (i + 1) % 10), &self.num_fmt)?;
+            let mark = if page.pinned.get(i).copied().unwrap_or(false) { "★" } else { "" };
+            let num = self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?;
             let text = self.layout(item, &self.text_fmt)?;
             row_h = row_h.max(text.2).max(num.2);
             items.push((num, text));
@@ -434,7 +452,8 @@ impl Ui {
         let mut row_h: f32 = 0.0;
         let mut text_w: f32 = 0.0;
         for (i, item) in page.items.iter().enumerate() {
-            let num = self.layout(&format!("{}", (i + 1) % 10), &self.num_fmt)?;
+            let mark = if page.pinned.get(i).copied().unwrap_or(false) { "★" } else { "" };
+            let num = self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?;
             let text = self.layout(item, &self.text_fmt)?;
             row_h = row_h.max(text.2).max(num.2);
             text_w = text_w.max(text.1);
@@ -490,6 +509,64 @@ impl Ui {
         Ok((runs, highlight, (PAD_X * 2.0 + width, y + PAD_Y)))
     }
 
+    /// 組字提示列：「組字內容（選字目標反白）　N 字」，放在游標上方
+    fn show_composition(&mut self, p: &Preedit, anchor: Option<Rect>) -> Result<()> {
+        let Some(anchor) = self.anchor(anchor) else {
+            return Ok(());
+        };
+        let chars: Vec<char> = p.text.chars().collect();
+        let (start, len) = p.target.unwrap_or((chars.len(), 0));
+        let end = (start + len).min(chars.len());
+        let pieces = [
+            chars[..start.min(chars.len())].iter().collect::<String>(),
+            chars[start.min(chars.len())..end].iter().collect::<String>(),
+            chars[end..].iter().collect::<String>(),
+        ];
+        let mut runs = Vec::new();
+        let mut x = PAD_X + ROW_PAD_X;
+        let mut h: f32 = 0.0;
+        let mut highlight = None;
+        for (i, piece) in pieces.iter().enumerate() {
+            if piece.is_empty() {
+                continue;
+            }
+            let (layout, w, lh) = self.layout(piece, &self.text_fmt)?;
+            h = h.max(lh);
+            if i == 1 {
+                highlight = Some(D2D_RECT_F {
+                    left: x - 1.0,
+                    top: PAD_Y,
+                    right: x + w + 1.0,
+                    bottom: PAD_Y + lh + ROW_PAD_Y * 2.0,
+                });
+            }
+            runs.push(Run {
+                layout,
+                x,
+                y: PAD_Y + ROW_PAD_Y,
+                dim: false,
+            });
+            x += w;
+        }
+        let (count, cw, ch) = self.layout(&format!("{} 字", p.len), &self.num_fmt)?;
+        let row_h = h + ROW_PAD_Y * 2.0;
+        runs.push(Run {
+            layout: count,
+            x: x + GAP_NUM * 2.0,
+            y: PAD_Y + (row_h - ch) / 2.0,
+            dim: true,
+        });
+        let width = x + GAP_NUM * 2.0 + cw + ROW_PAD_X + PAD_X;
+        if let Some(hl) = &mut highlight {
+            hl.bottom = PAD_Y + row_h;
+        }
+        let (d2d, colors, comp) = (&self.d2d, self.colors, &mut self.comp);
+        comp.runs = runs;
+        comp.highlight = highlight;
+        place_at(comp, anchor, (width, row_h + PAD_Y * 2.0), true)?;
+        render(d2d, &colors, comp)
+    }
+
     fn show_hint(&mut self, text: &str, anchor: Option<Rect>) -> Result<()> {
         let Some(anchor) = self.anchor(anchor) else {
             return Ok(());
@@ -514,6 +591,11 @@ impl Ui {
 
 /// 依游標位置放置視窗：預設在游標下方，超出螢幕下緣就改放上方
 fn place(p: &mut Popup, anchor: Rect, dip: (f32, f32)) -> Result<()> {
+    place_at(p, anchor, dip, false)
+}
+
+/// `above`：優先放在游標上方（組字提示列，避免與下方的候選窗重疊）
+fn place_at(p: &mut Popup, anchor: Rect, dip: (f32, f32), above: bool) -> Result<()> {
     unsafe {
         let rc = RECT {
             left: anchor.left,
@@ -535,8 +617,10 @@ fn place(p: &mut Popup, anchor: Rect, dip: (f32, f32)) -> Result<()> {
         let w = (dip.0 * scale).ceil() as i32;
         let h = (dip.1 * scale).ceil() as i32;
         let gap = (OFFSET_DIP * scale) as i32;
-        let mut y = rc.bottom + gap;
-        if y + h > work.bottom {
+        let mut y = if above { rc.top - gap - h } else { rc.bottom + gap };
+        if above && y < work.top {
+            y = rc.bottom + gap;
+        } else if !above && y + h > work.bottom {
             y = rc.top - gap - h;
         }
         let x = rc.left.clamp(work.left, (work.right - w).max(work.left));

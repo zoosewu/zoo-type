@@ -287,9 +287,43 @@ fn to_phrase(p: &PhraseEntry) -> Phrase {
     Phrase {
         word: p.word.clone().into(),
         bopomofo: p.bopomofo.clone().into(),
-        pinned: p.is_pinned(),
-        banned: p.is_banned(),
+        state: if p.is_banned() {
+            2
+        } else if p.is_pinned() {
+            1
+        } else {
+            0
+        },
     }
+}
+
+/// 詞庫下拉選單：從目前狀態到目標狀態要做的動作
+fn state_action(from: i32, to: i32) -> Option<PhraseAction> {
+    match (from, to) {
+        (a, b) if a == b => None,
+        (_, 1) => Some(PhraseAction::Pin),
+        (_, 2) => Some(PhraseAction::Ban),
+        (2, 0) => Some(PhraseAction::Unban),
+        (_, 0) => Some(PhraseAction::Unpin),
+        _ => None,
+    }
+}
+
+/// 讀音資料（libchewing 的 tsi.csv）：安裝時在執行檔旁的 dict/，開發時在 assets/dict/
+fn load_readings() -> Option<zct_core::readings::Readings> {
+    let candidates = [
+        std::env::var_os("ZCT_DICT").map(std::path::PathBuf::from),
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("dict"))),
+        Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/dict")),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|d| d.join("tsi.csv"))
+        .find(|p| p.exists())
+        .and_then(|p| zct_core::readings::Readings::load(&p).ok())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -350,6 +384,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(slint::Color::from_argb_u8(0, 0, 0, 0))
     });
     ui.on_hotkey_valid(|s| parse_binding(&s).is_ok());
+    {
+        // 第一次用到時才載入（約 5MB）
+        let readings: RefCell<Option<Option<zct_core::readings::Readings>>> = RefCell::new(None);
+        ui.on_suggest_reading(move |word| {
+            let mut cache = readings.borrow_mut();
+            let r = cache.get_or_insert_with(load_readings);
+            r.as_ref()
+                .and_then(|r| r.reading_of(&word))
+                .unwrap_or_default()
+                .into()
+        });
+    }
 
     // 儲存設定
     {
@@ -575,12 +621,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     {
         let (ui_weak, state, refresh) = (ui.as_weak(), state.clone(), refresh.clone());
-        ui.on_phrase_action(move |p, action| {
-            let action = match action.as_str() {
-                "ban" => PhraseAction::Ban,
-                "unban" => PhraseAction::Unban,
-                _ => PhraseAction::Unpin,
-            };
+        ui.on_phrase_state(move |p, to| {
+            let Some(action) = state_action(p.state, to) else { return };
             let r = state.borrow_mut().service.call(Request::Phrase {
                 word: p.word.to_string(),
                 bopomofo: p.bopomofo.to_string(),
@@ -681,6 +723,22 @@ mod tests {
         };
         assert_eq!(rule_from(&row_from(&rule)), rule);
         assert_eq!(rule_from(&row_from(&AppRule::default())), AppRule::default());
+    }
+
+    #[test]
+    fn dropdown_maps_to_actions() {
+        assert_eq!(state_action(0, 0), None);
+        assert_eq!(state_action(1, 0), Some(PhraseAction::Unpin));
+        assert_eq!(state_action(2, 0), Some(PhraseAction::Unban));
+        assert_eq!(state_action(2, 1), Some(PhraseAction::Pin));
+        assert_eq!(state_action(0, 2), Some(PhraseAction::Ban));
+    }
+
+    #[test]
+    fn readings_suggest_common_pronunciation() {
+        let Some(r) = load_readings() else { return };
+        assert_eq!(r.reading_of("天氣").as_deref(), Some("ㄊㄧㄢ ㄑㄧˋ"));
+        assert_eq!(r.reading_of("銀行").as_deref(), Some("ㄧㄣˊ ㄏㄤˊ"));
     }
 
     #[test]

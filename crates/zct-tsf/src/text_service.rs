@@ -19,10 +19,12 @@ use windows::Win32::UI::WindowsAndMessaging::{GUITHREADINFO, GetGUIThreadInfo, G
 use windows::core::{BOOL, GUID, IUnknown, Interface, Ref, Result, implement};
 use windows_core::{ComObject, IUnknownImpl};
 use zct_core::KeyResult;
-use zct_ipc::{Rect, Request, Response};
+use zct_ipc::{Command, Rect, Request, Response};
 
 use crate::client::Ipc;
 use crate::detect::{self, FullscreenCache};
+use crate::display::{self, Atoms};
+use crate::langbar::{self, Action, LangBarButton};
 use crate::edit::EditSession;
 use crate::{guard, keys};
 
@@ -31,9 +33,18 @@ struct Tsf {
     thread_mgr: Option<ITfThreadMgr>,
     client_id: u32,
     thread_sink_cookie: Option<u32>,
+    atoms: Atoms,
+    /// 工作列右下角的輸入法圖示
+    langbar: Option<ITfLangBarItemButton>,
 }
 
-#[implement(ITfTextInputProcessorEx, ITfKeyEventSink, ITfThreadMgrEventSink, ITfCompositionSink)]
+#[implement(
+    ITfTextInputProcessorEx,
+    ITfKeyEventSink,
+    ITfThreadMgrEventSink,
+    ITfCompositionSink,
+    ITfDisplayAttributeProvider
+)]
 pub struct TextService {
     tsf: RefCell<Tsf>,
     composition: RefCell<Option<ITfComposition>>,
@@ -170,6 +181,9 @@ impl TextService_Impl {
     fn apply(&self, ctx: &ITfContext, r: KeyResult) {
         let has_composition = self.composition.borrow().is_some();
         let touches_doc = r.commit.is_some() || !r.preedit.text.is_empty() || has_composition;
+        if r.mode_changed.is_some() || r.toggle_game {
+            self.refresh_langbar();
+        }
         let needs_caret = touches_doc
             || r.candidates.is_some()
             || r.mode_changed.is_some()
@@ -206,6 +220,44 @@ impl TextService_Impl {
         self.composition.borrow_mut().take();
         self.pending_up.borrow_mut().take();
         self.call(&req);
+        self.refresh_langbar();
+    }
+
+    /// 向服務程序查詢中英與遊戲模式，更新輸入法圖示
+    fn refresh_langbar(&self) {
+        let button = self.tsf.borrow().langbar.clone();
+        if let (Some(button), Some(Response::Status { chinese, game })) =
+            (button, self.call(&Request::Status))
+        {
+            langbar::set_state(&button, chinese, game);
+        }
+    }
+
+    /// 輸入法圖示的點擊與選單
+    fn on_action(&self, action: Action) {
+        let command = match action {
+            Action::ToggleMode => {
+                if let Some(Response::Key(r)) = self.call(&Request::ToggleMode) {
+                    // 組字中切換：送出組字內容需要目前文件的 context
+                    let ctx = self
+                        .tsf
+                        .borrow()
+                        .thread_mgr
+                        .clone()
+                        .and_then(|tm| unsafe { tm.GetFocus().ok()?.GetTop().ok() });
+                    if let Some(ctx) = ctx {
+                        self.apply(&ctx, r);
+                    }
+                }
+                self.refresh_langbar();
+                return;
+            }
+            Action::OpenSettings => Command::OpenSettings,
+            Action::ToggleGame => Command::ToggleGame,
+            Action::Restart => Command::Restart,
+        };
+        self.call(&Request::Command(command));
+        self.refresh_langbar();
     }
 }
 
@@ -263,6 +315,16 @@ fn update_document(
         let range = comp.GetRange()?;
         range.SetText(ec, TF_ST_CORRECTION, &wide(&preedit.text))?;
 
+        // 底線：整段組字 + 選字目標（字元位置換成 UTF-16）
+        let utf16 = |chars: usize| -> i32 {
+            preedit.text.chars().take(chars).map(char::len_utf16).sum::<usize>() as i32
+        };
+        let target = preedit
+            .target
+            .map(|(start, len)| (utf16(start), utf16(start + len) - utf16(start)));
+        let atoms = this.tsf.borrow().atoms;
+        display::apply(ctx, ec, &range, atoms, target);
+
         // 組字區內的游標：從開頭往後移 cursor 個 UTF-16 單位
         let prefix: String = preedit.text.chars().take(preedit.cursor).collect();
         let caret = range.Clone()?;
@@ -286,6 +348,12 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             let tsf = std::mem::take(&mut *self.tsf.borrow_mut());
             if let Some(tm) = &tsf.thread_mgr {
                 unsafe {
+                    if let Some(button) = &tsf.langbar {
+                        if let Ok(mgr) = tm.cast::<ITfLangBarItemMgr>() {
+                            let _ = mgr.RemoveItem(button);
+                        }
+                        langbar::detach(button);
+                    }
                     if let Ok(km) = tm.cast::<ITfKeystrokeMgr>() {
                         let _ = km.UnadviseKeyEventSink(tsf.client_id);
                     }
@@ -320,12 +388,24 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
                     .AdviseSink(&ITfThreadMgrEventSink::IID, &thread_sink.cast::<IUnknown>()?)
                     .ok();
 
+                // 輸入法圖示：處理函式持有 TextService，Deactivate 時解除
+                let this = self.this();
+                let button = LangBarButton::create(Box::new(move |a| this.on_action(a)));
+                let langbar = tm
+                    .cast::<ITfLangBarItemMgr>()
+                    .ok()
+                    .and_then(|mgr| mgr.AddItem(&button).ok())
+                    .map(|_| button);
+
                 *self.tsf.borrow_mut() = Tsf {
                     thread_mgr: Some(tm),
                     client_id: tid,
                     thread_sink_cookie: cookie,
+                    atoms: Atoms::register().unwrap_or_default(),
+                    langbar,
                 };
             }
+            self.refresh_langbar();
             Ok(())
         })
     }
@@ -423,6 +503,22 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
 
     fn OnPopContext(&self, _pic: Ref<ITfContext>) -> Result<()> {
         Ok(())
+    }
+}
+
+impl ITfDisplayAttributeProvider_Impl for TextService_Impl {
+    fn EnumDisplayAttributeInfo(&self) -> Result<IEnumTfDisplayAttributeInfo> {
+        Ok(display::AttributeEnum::create())
+    }
+
+    fn GetDisplayAttributeInfo(&self, guid: *const GUID) -> Result<ITfDisplayAttributeInfo> {
+        guard(|| {
+            if guid.is_null() {
+                return Err(windows::Win32::Foundation::E_INVALIDARG.into());
+            }
+            display::info(unsafe { &*guid })
+                .ok_or_else(|| windows::Win32::Foundation::E_INVALIDARG.into())
+        })
     }
 }
 

@@ -13,8 +13,6 @@ mod settings;
 #[cfg(windows)]
 mod sync;
 #[cfg(windows)]
-mod tray;
-#[cfg(windows)]
 mod ui;
 
 #[cfg(windows)]
@@ -46,7 +44,7 @@ mod app {
     use zct_core::Engine;
     use zct_core::paths::DataRoot;
 
-    use crate::{conn, logger, settings, sync, tray, ui};
+    use crate::{conn, logger, settings, sync, ui};
 
     pub struct Shared {
         pub settings: Arc<settings::Settings>,
@@ -145,13 +143,7 @@ mod app {
         let sync = sync::spawn(data.clone(), settings.clone(), engine.clone())?;
 
         let game = Arc::new(AtomicBool::new(false));
-        let ui = ui::spawn(
-            theme.clone(),
-            tray::TrayCtx {
-                game: game.clone(),
-                engine: engine.clone(),
-            },
-        )?;
+        let ui = ui::spawn(theme.clone())?;
         let shared = Arc::new(Shared {
             settings,
             sync,

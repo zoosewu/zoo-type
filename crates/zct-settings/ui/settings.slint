@@ -65,8 +65,7 @@ export struct AppRuleRow {
 export struct Phrase {
     word: string,
     bopomofo: string,
-    pinned: bool,
-    banned: bool,
+    state: int,             // 0 一般 / 1 優先 / 2 封鎖
 }
 
 export struct Day {
@@ -214,7 +213,8 @@ export component SettingsWindow inherits Window {
     callback remove-app(int);
     callback filter-phrases(string);
     callback add-phrase(string, string);
-    callback phrase-action(Phrase, string);
+    callback phrase-state(Phrase, int);
+    pure callback suggest-reading(string) -> string;
     callback restore(string);
     callback refresh();
     callback sync-now();
@@ -382,8 +382,13 @@ export component SettingsWindow inherits Window {
                 spacing: 10px;
                 HorizontalLayout {
                     spacing: 8px;
-                    word := LineEdit { width: 160px; placeholder-text: "詞"; }
-                    reading := LineEdit { width: 220px; placeholder-text: "注音，以空白分隔"; }
+                    word := LineEdit {
+                        width: 160px;
+                        placeholder-text: "詞";
+                        // 打中文自動填入最常用的讀音，需要時再改
+                        edited(t) => { reading.text = root.suggest-reading(t); }
+                    }
+                    reading := LineEdit { width: 220px; placeholder-text: "注音（自動填入）"; }
                     Button {
                         text: "加入";
                         enabled: root.online && word.text != "" && reading.text != "";
@@ -402,12 +407,14 @@ export component SettingsWindow inherits Window {
                         spacing: 12px;
                         padding-left: 4px;
                         alignment: start;
-                        Text { width: 120px; text: p.word; vertical-alignment: center; color: p.banned ? Palette.foreground.with-alpha(0.4) : Palette.foreground; }
+                        Text { width: 120px; text: p.word; vertical-alignment: center; color: p.state == 2 ? Palette.foreground.with-alpha(0.4) : Palette.foreground; }
                         Text { width: 200px; text: p.bopomofo; vertical-alignment: center; color: Palette.foreground.with-alpha(0.7); }
-                        Text { width: 50px; vertical-alignment: center; text: p.banned ? "封鎖" : p.pinned ? "優先" : ""; }
-                        if p.pinned && !p.banned: Button { width: 96px; text: "取消優先"; clicked => { root.phrase-action(p, "unpin"); } }
-                        if !p.banned: Button { width: 96px; text: "封鎖"; clicked => { root.phrase-action(p, "ban"); } }
-                        if p.banned: Button { width: 96px; text: "解除封鎖"; clicked => { root.phrase-action(p, "unban"); } }
+                        ComboBox {
+                            width: 110px;
+                            model: ["一般", "優先", "封鎖"];
+                            current-index: p.state;
+                            selected => { root.phrase-state(p, self.current-index); }
+                        }
                     }
                 }
             }

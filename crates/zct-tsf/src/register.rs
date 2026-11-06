@@ -11,7 +11,8 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD,
+    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+    GUID_TFCAT_TIP_KEYBOARD,
     GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, ITfCategoryMgr,
     ITfInputProcessorProfileMgr,
 };
@@ -21,8 +22,10 @@ use crate::{CLSID_ZCT, LANGID_ZH_TW, PROFILE_ZCT, dll_instance};
 
 const DESCRIPTION: &str = "ZCT 注音";
 
-const CATEGORIES: [GUID; 3] = [
+const CATEGORIES: [GUID; 4] = [
     GUID_TFCAT_TIP_KEYBOARD,
+    // 組字區底線與選字目標標示
+    GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
     // Windows 8+ 的沙箱 App（Store App、開始選單）
     GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
     GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,

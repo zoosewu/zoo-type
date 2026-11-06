@@ -176,7 +176,7 @@ fn space_opens_candidates_and_digit_selects() {
     let mut h = Harness::new();
     h.type_str("wu0 fu4"); // 天氣
     h.press(Key::Left, Mods::NONE); // 游標移到「氣」前
-    let r = h.press(Key::Space, Mods::NONE);
+    let r = h.press(Key::Down, Mods::NONE);
     let page = r.candidates.expect("候選窗");
     assert!(!page.items.is_empty());
     println!("candidates: {:?}", page.items);
@@ -228,7 +228,7 @@ fn passthrough_keys_seen_by_test_key_down_cancel_shift_tap() {
 fn open_candidates_for_qi(h: &mut Harness) -> zct_core::CandidatePage {
     h.type_str("wu0 fu4"); // 天氣
     h.press(Key::Left, Mods::NONE); // 游標移到「氣」前
-    h.press(Key::Space, Mods::NONE).candidates.expect("候選窗")
+    h.press(Key::Down, Mods::NONE).candidates.expect("候選窗")
 }
 
 #[test]
@@ -270,7 +270,7 @@ fn cursor_moves_after_selected_phrase() {
     h.type_str("wu0 fu4"); // 天氣
     h.press(Key::Home, Mods::NONE);
     assert_eq!(h.s.preedit().cursor, 0);
-    h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
     h.press(Key::Char(b'1'), Mods::NONE);
     assert_eq!(h.s.preedit().cursor, 2);
 }
@@ -416,7 +416,7 @@ fn simplified_output_converts_commit_preedit_and_candidates() {
     assert_eq!(h.s.preedit().text, "天气");
     let page = {
         h.press(Key::Left, Mods::NONE);
-        h.press(Key::Space, Mods::NONE).candidates.unwrap()
+        h.press(Key::Down, Mods::NONE).candidates.unwrap()
     };
     assert!(page.items.contains(&"气".to_string()), "{:?}", page.items);
     h.press(Key::Esc, Mods::NONE);
@@ -733,18 +733,133 @@ fn english_commit(h: &mut Harness, keys: &str) -> Option<String> {
 }
 
 #[test]
-fn c_invalid_bopomofo_english_word_becomes_english() {
+fn c_english_word_stays_in_composition_until_enter() {
+    // 句首的英文也要留在組字區
     let mut h = Harness::with_config(no_auto_space());
-    assert_eq!(english_commit(&mut h, "hello ").as_deref(), Some("hello "));
-    assert!(!h.s.is_composing());
+    assert_eq!(english_commit(&mut h, "hello "), None);
+    assert_eq!(h.s.preedit().text, "hello ");
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("hello "));
 }
 
 #[test]
-fn c_mixed_sentence_with_pangu_spacing() {
-    // ㄨㄛˇ（我）+ hello + 空白
+fn c_mixed_sentence_in_composition() {
+    // 我 + 空白 + love + 空白 + 你（ㄋㄧˇ）
     let mut h = Harness::new();
-    let out = english_commit(&mut h, "ji3hello ");
-    assert_eq!(out.as_deref(), Some("我 hello "));
+    assert_eq!(english_commit(&mut h, "ji3 love su3"), None);
+    assert_eq!(h.s.preedit().text, "我 love 你");
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("我 love 你"));
+}
+
+#[test]
+fn c_misspelled_long_word_is_english_and_enter_triggers() {
+    // detault 不在單字表，但 4 個字母以上且組不成注音 → 英文；直接按 Enter 也算
+    let mut h = Harness::new();
+    h.type_str("detault");
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("detault"));
+}
+
+#[test]
+fn space_after_complete_syllables_is_a_space_not_menu() {
+    let mut h = Harness::new();
+    h.type_str("ji3"); // 我
+    let r = h.press(Key::Space, Mods::NONE);
+    assert!(r.candidates.is_none(), "空白不開候選窗");
+    assert_eq!(h.s.preedit().text, "我 ");
+}
+
+#[test]
+fn left_skips_whole_english_word() {
+    // 我 love 你：從最後往左 5 次到「我」前面
+    let mut h = Harness::new();
+    english_commit(&mut h, "ji3 love su3");
+    for _ in 0..5 {
+        h.press(Key::Left, Mods::NONE);
+    }
+    assert_eq!(h.s.preedit().cursor, 0);
+}
+
+#[test]
+fn backspace_deletes_space_then_whole_word() {
+    let mut h = Harness::new();
+    english_commit(&mut h, "ji3 love ");
+    assert_eq!(h.s.preedit().text, "我 love ");
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我 love");
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我 ");
+}
+
+#[test]
+fn backspace_on_unfinished_word_deletes_one_letter() {
+    let mut h = Harness::new();
+    english_commit(&mut h, "ji3 love ");
+    h.press(Key::Backspace, Mods::NONE); // 刪空白
+    h.press(Key::Left, Mods::NONE); // 移動後就不是「剛刪完空白」
+    h.press(Key::End, Mods::NONE);
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我 lov");
+}
+
+#[test]
+fn delete_removes_whole_word_before_cursor() {
+    let mut h = Harness::new();
+    english_commit(&mut h, "ji3 love su3");
+    h.press(Key::Home, Mods::NONE);
+    h.press(Key::Right, Mods::NONE); // 我|
+    h.press(Key::Right, Mods::NONE); // 空白|
+    h.press(Key::Delete, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我  你");
+}
+
+#[test]
+fn preedit_target_marks_char_after_cursor_but_not_at_end() {
+    let mut h = Harness::new();
+    h.type_str("wu0 fu4"); // 天氣
+    assert_eq!(h.s.preedit().target, None, "游標在最後不標示");
+    assert_eq!(h.s.preedit().len, 2);
+    h.press(Key::Left, Mods::NONE);
+    assert_eq!(h.s.preedit().target, Some((1, 1)));
+}
+
+#[test]
+fn candidates_end_with_extras_page_of_emoji_and_bopomofo() {
+    let mut h = Harness::new();
+    h.type_str("d9 vup "); // 開心
+    h.press(Key::Home, Mods::NONE);
+    let first = h.press(Key::Down, Mods::NONE).candidates.unwrap();
+    // 從第一頁往左 → 最後的額外選項頁
+    let extras = h.press(Key::Left, Mods::NONE).candidates.unwrap();
+    assert_eq!(extras.page, first.total_pages - 1);
+    assert_eq!(extras.items.last().map(String::as_str), Some("ㄎㄞ ㄒㄧㄣ"));
+    assert!(extras.items.len() > 1, "有 Emoji：{:?}", extras.items);
+    // 選注音
+    let n = extras.items.len();
+    let digit = b'0' + (n % 10) as u8;
+    assert_eq!(h.press(Key::Char(digit), Mods::NONE).commit.as_deref(), Some("ㄎㄞ ㄒㄧㄣ"));
+}
+
+#[test]
+fn pinned_candidates_are_marked() {
+    let mut h = Harness::new();
+    highlight_and(&mut h, "汽", Key::Enter, Mods::shift());
+    let page = candidates_for_qi(&mut h);
+    let _ = page;
+    let p = {
+        h.press(Key::Esc, Mods::NONE);
+        h.s.reset();
+        open_candidates_for_qi(&mut h)
+    };
+    assert_eq!(p.items[0], "汽");
+    assert!(p.pinned[0]);
+    assert!(!p.pinned[1]);
+}
+
+#[test]
+fn pinning_twice_does_not_overflow() {
+    let mut h = Harness::new();
+    highlight_and(&mut h, "汽", Key::Enter, Mods::shift());
+    highlight_and(&mut h, "汽", Key::Enter, Mods::shift());
+    assert_eq!(candidates_for_qi(&mut h)[0], "汽");
 }
 
 #[test]
@@ -752,11 +867,11 @@ fn c_does_not_trigger_on_valid_syllable_or_non_word() {
     let mut h = Harness::new();
     // fu = ㄑㄧ 合法音節 → 照常組成中文（七）
     h.type_str("fu ");
-    assert!(h.s.is_composing());
-    h.press(Key::Esc, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "七");
     h.s.reset();
-    // hellx 不是英文單字 → 不送出英文
-    assert_eq!(english_commit(&mut h, "hellx "), None);
+    // xx：兩個字母、不在單字表 → 不當英文
+    h.type_str("xx ");
+    assert!(!h.s.preedit().text.contains("xx"));
 }
 
 #[test]
@@ -771,27 +886,27 @@ fn c_can_be_disabled() {
 fn b_english_option_in_candidates() {
     let mut h = Harness::with_config(no_auto_space());
     h.type_str("fu "); // ㄑㄧ 一聲（七）
-    let page = h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    let page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
     assert_eq!(page.items.last().map(String::as_str), Some("fu"));
     let n = page.items.len();
-    // 用數字鍵選英文選項
+    // 用數字鍵選英文選項：最後一個音節換成英文，仍在組字區
     let digit = b'0' + (n % 10) as u8;
-    let r = h.press(Key::Char(digit), Mods::NONE);
-    assert_eq!(r.commit.as_deref(), Some("fu"));
-    assert!(!h.s.is_composing());
+    h.press(Key::Char(digit), Mods::NONE);
+    assert_eq!(h.s.preedit().text, "fu");
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("fu"));
 }
 
 #[test]
 fn b_english_option_keeps_previous_chinese() {
     let mut h = Harness::new();
     h.type_str("ji3fu "); // 我 + ㄑㄧ（七）
-    let page = h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    let page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
     let n = page.items.len();
     for _ in 0..n - 1 {
         h.press(Key::Down, Mods::NONE);
     }
-    let r = h.press(Key::Enter, Mods::NONE);
-    assert_eq!(r.commit.as_deref(), Some("我 fu"));
+    h.press(Key::Enter, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我fu");
 }
 
 #[test]
@@ -799,7 +914,7 @@ fn b_failed_syllable_does_not_leave_english_option() {
     // go = ㄕㄟ 沒有一聲，不會組成字；之後開「我」的候選窗不能出現 go，選了會把「我」刪掉
     let mut h = Harness::new();
     h.type_str("ji3go ");
-    let page = h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    let page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
     assert!(!page.items.contains(&"go".to_string()), "{:?}", page.items);
 }
 
@@ -807,13 +922,19 @@ fn b_failed_syllable_does_not_leave_english_option() {
 fn b_no_english_option_when_not_a_word() {
     let mut h = Harness::new();
     h.type_str("su3"); // ㄋㄧˇ（你）— 有聲調鍵，不是英文
-    let page = h.press(Key::Space, Mods::NONE).candidates.expect("候選窗");
+    let page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
     assert!(page.items.iter().all(|w| w != "su3"));
+}
+
+fn pangu() -> Config {
+    let mut c = Config::default();
+    c.mixed.auto_space = true;
+    c
 }
 
 #[test]
 fn e_space_before_english_in_english_mode() {
-    let mut h = Harness::new();
+    let mut h = Harness::with_config(pangu());
     h.type_str("ji3");
     h.press(Key::Enter, Mods::NONE); // 送出「我」
     h.tap_shift(); // 切到英文
@@ -826,7 +947,7 @@ fn e_space_before_english_in_english_mode() {
 
 #[test]
 fn e_space_before_chinese_after_english_passthrough() {
-    let mut h = Harness::new();
+    let mut h = Harness::with_config(pangu());
     h.tap_shift(); // 英文
     h.press(Key::Char(b'o'), Mods::NONE);
     h.press(Key::Char(b'k'), Mods::NONE);
@@ -849,8 +970,8 @@ fn e_cursor_movement_forgets_context() {
 
 // ---- M7：Emoji ----
 
-fn ctrl_alt() -> Mods {
-    Mods { ctrl: true, alt: true, ..Mods::NONE }
+fn ctrl_shift() -> Mods {
+    Mods { ctrl: true, shift: true, ..Mods::NONE }
 }
 
 #[test]
@@ -858,7 +979,7 @@ fn emoji_from_composed_keyword() {
     let mut h = Harness::new();
     h.type_str("d9 vup "); // ㄎㄞ ㄒㄧㄣ → 開心
     assert_eq!(h.s.preedit().text, "開心");
-    let r = h.press(Key::Char(b'e'), ctrl_alt());
+    let r = h.press(Key::Char(b';'), ctrl_shift());
     let page = r.candidates.expect("Emoji 候選");
     assert!(!page.items.is_empty());
     let first = page.items[0].clone();
@@ -870,7 +991,7 @@ fn emoji_from_composed_keyword() {
 #[test]
 fn emoji_without_composition_lists_common_and_esc_closes() {
     let mut h = Harness::new();
-    let page = h.press(Key::Char(b'e'), ctrl_alt()).candidates.expect("常用 Emoji");
+    let page = h.press(Key::Char(b';'), ctrl_shift()).candidates.expect("常用 Emoji");
     assert_eq!(page.items[0], zct_core::emoji::COMMON[0]);
     assert!(page.total_pages > 1);
     let r = h.press(Key::Right, Mods::NONE);
@@ -884,7 +1005,7 @@ fn emoji_without_composition_lists_common_and_esc_closes() {
 fn emoji_not_found_shows_notice() {
     let mut h = Harness::new();
     h.type_str("sk7"); // ㄋㄜ˙ → 呢（不在任何 Emoji 關鍵字中）
-    let r = h.press(Key::Char(b'e'), ctrl_alt());
+    let r = h.press(Key::Char(b';'), ctrl_shift());
     assert!(r.candidates.is_none());
     assert!(r.notice.unwrap().contains("找不到"));
     assert!(h.s.is_composing(), "找不到時保留原本的組字");
@@ -894,7 +1015,7 @@ fn emoji_not_found_shows_notice() {
 fn emoji_hotkey_passes_through_in_english_mode() {
     let mut h = Harness::new();
     h.tap_shift();
-    assert!(!h.press(Key::Char(b'e'), ctrl_alt()).eaten);
+    assert!(!h.press(Key::Char(b';'), ctrl_shift()).eaten);
 }
 
 // ---- M7：同步 ----
@@ -956,7 +1077,7 @@ fn type_zai(h: &mut Harness) -> String {
 fn ai_request_then_accept_suggestion() {
     let mut h = Harness::with_config(ai_on());
     let original = type_zai(&mut h);
-    let r = h.press(Key::Char(b'r'), ctrl_alt());
+    let r = h.press(Key::Char(b'\''), ctrl_shift());
     assert_eq!(r.ai_request.as_deref(), Some(original.as_str()));
     assert_eq!(r.notice.as_deref(), Some("AI 修正中…"));
     assert!(h.s.set_ai_suggestion(&original, "可以再".into()));
@@ -970,7 +1091,7 @@ fn ai_request_then_accept_suggestion() {
 fn ai_suggestion_can_be_dismissed() {
     let mut h = Harness::with_config(ai_on());
     let original = type_zai(&mut h);
-    h.press(Key::Char(b'r'), ctrl_alt());
+    h.press(Key::Char(b'\''), ctrl_shift());
     h.s.set_ai_suggestion(&original, "可以再".into());
     let r = h.press(Key::Esc, Mods::NONE);
     assert!(r.candidates.is_none());
@@ -981,7 +1102,7 @@ fn ai_suggestion_can_be_dismissed() {
 fn stale_ai_result_is_ignored() {
     let mut h = Harness::with_config(ai_on());
     let original = type_zai(&mut h);
-    h.press(Key::Char(b'r'), ctrl_alt());
+    h.press(Key::Char(b'\''), ctrl_shift());
     h.type_str("1j4"); // 結果回來前繼續打字
     assert!(!h.s.set_ai_suggestion(&original, "可以再".into()));
     assert!(h.s.candidates().is_none());
@@ -991,7 +1112,7 @@ fn stale_ai_result_is_ignored() {
 fn ai_same_as_original_is_not_shown() {
     let mut h = Harness::with_config(ai_on());
     let original = type_zai(&mut h);
-    h.press(Key::Char(b'r'), ctrl_alt());
+    h.press(Key::Char(b'\''), ctrl_shift());
     assert!(!h.s.set_ai_suggestion(&original, original.clone()));
 }
 
@@ -999,7 +1120,28 @@ fn ai_same_as_original_is_not_shown() {
 fn ai_disabled_shows_notice() {
     let mut h = Harness::new();
     type_zai(&mut h);
-    let r = h.press(Key::Char(b'r'), ctrl_alt());
+    let r = h.press(Key::Char(b'\''), ctrl_shift());
     assert!(r.ai_request.is_none());
     assert!(r.notice.unwrap().contains("未啟用"));
+}
+
+#[test]
+fn phrase_state_cycle_normal_pinned_banned() {
+    use zct_core::PhraseAction;
+    let dir = tempfile::tempdir().unwrap();
+    let e = open_engine(dir.path());
+    let state = |e: &zct_core::Engine| {
+        let p = e.phrases().into_iter().find(|p| p.word == "酷音").unwrap();
+        (p.is_pinned(), p.is_banned())
+    };
+    e.add_phrase("酷音", "ㄎㄨˋ ㄧㄣ").unwrap();
+    assert_eq!(state(&e), (true, false), "加入即優先");
+    e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Unpin).unwrap();
+    assert_eq!(state(&e), (false, false), "取消優先");
+    e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Ban).unwrap();
+    assert_eq!(state(&e), (false, true));
+    e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Pin).unwrap();
+    assert_eq!(state(&e), (true, false), "封鎖後可直接設回優先");
+    e.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Pin).unwrap();
+    assert_eq!(state(&e), (true, false), "重複設定優先不會溢位");
 }

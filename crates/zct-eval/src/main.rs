@@ -1,7 +1,7 @@
 //! 選字準確率評測
 //!
 //! ```sh
-//! sh scripts/fetch-dict.sh && sh scripts/fetch-eval.sh
+//! sh scripts/fetch-dict.sh && sh scripts/fetch-dict.sh
 //! cargo run -p zct-eval --release                      # 預設設定
 //! cargo run -p zct-eval --release -- --no-sort         # 關閉依頻率排序比較
 //! cargo run -p zct-eval --release -- --show 20         # 列出錯誤的片段
@@ -28,8 +28,8 @@ fn main() {
         }
     }
 
-    let readings = Readings::load(&root.join("assets/eval/tsi.csv"))
-        .expect("需要先執行 scripts/fetch-eval.sh");
+    let readings = Readings::load(&root.join("assets/dict/tsi.csv"))
+        .expect("需要先執行 scripts/fetch-dict.sh");
     let corpus = std::fs::read_to_string(&corpus_path).expect("讀不到語料");
     let learning = std::env::temp_dir().join(format!("zct-eval-{}", std::process::id()));
     let engine = Arc::new(

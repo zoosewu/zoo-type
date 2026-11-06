@@ -13,9 +13,9 @@ const BASELINE: f64 = 0.99;
 #[test]
 fn first_choice_accuracy_does_not_regress() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let (tsi, dict) = (root.join("assets/eval/tsi.csv"), root.join("assets/dict"));
+    let (tsi, dict) = (root.join("assets/dict/tsi.csv"), root.join("assets/dict"));
     if !tsi.exists() || !dict.join("static_dict.bin").exists() {
-        eprintln!("略過：沒有評測資料（執行 scripts/fetch-dict.sh 與 scripts/fetch-eval.sh）");
+        eprintln!("略過：沒有評測資料（執行 scripts/fetch-dict.sh 與 scripts/fetch-dict.sh）");
         return;
     }
     let readings = Readings::load(&tsi).unwrap();
