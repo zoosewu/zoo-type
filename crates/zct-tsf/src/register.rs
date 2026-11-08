@@ -14,13 +14,14 @@ use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
     GUID_TFCAT_TIP_KEYBOARD,
     GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, ITfCategoryMgr,
-    ITfInputProcessorProfileMgr,
+    ITfInputProcessorProfileMgr, ITfInputProcessorProfiles,
 };
-use windows::core::{GUID, HSTRING, Result};
+use windows::core::{GUID, HSTRING, Interface, Result};
 
 use crate::{CLSID_ZCT, LANGID_ZH_TW, PROFILE_ZCT, dll_instance};
 
-const DESCRIPTION: &str = "ZCT 注音";
+/// 輸入法名稱（Win + 空白鍵清單、設定 → 語言）
+const DESCRIPTION: &str = "動物園輸入法";
 
 const CATEGORIES: [GUID; 4] = [
     GUID_TFCAT_TIP_KEYBOARD,
@@ -107,6 +108,8 @@ pub fn register() -> Result<()> {
 
         let profiles: ITfInputProcessorProfileMgr =
             CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
+        // 圖示：DLL 內第 0 個圖示資源（白底黑字「動」，見 build.rs）；
+        // 工作列只認 DLL / EXE 的圖示資源，讀不到時會改顯示語言簡稱「繁體」
         let icon = wide(&dll_path());
         profiles.RegisterProfile(
             &CLSID_ZCT,
@@ -120,6 +123,11 @@ pub fn register() -> Result<()> {
             true,
             0,
         )?;
+        // 設為中文（台灣）的預設輸入法：Alt+Shift 切回中文時用的是這個，不是清單順序
+        // （寫在目前使用者的 HKCU；失敗不影響註冊）
+        if let Ok(old) = profiles.cast::<ITfInputProcessorProfiles>() {
+            let _ = old.SetDefaultLanguageProfile(LANGID_ZH_TW, &CLSID_ZCT, &PROFILE_ZCT);
+        }
 
         let cats: ITfCategoryMgr =
             CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER)?;

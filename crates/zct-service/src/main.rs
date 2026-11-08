@@ -57,6 +57,9 @@ mod app {
         /// 手動快捷鍵或系統匣開啟的全域遊戲模式
         pub game: Arc<AtomicBool>,
         pub ui: ui::UiHandle,
+        /// 診斷用：資料夾 local/ 下有 `debug-keys` 檔案時，記錄非字元鍵（Shift、Delete…）的事件；
+        /// 字母、數字、符號一律不記，避免記下使用者打的內容
+        pub debug_keys: bool,
     }
 
     /// 系統詞庫：正式安裝放在執行檔旁的 `dict/`；開發時可用 `ZCT_DICT` 指定
@@ -138,7 +141,9 @@ mod app {
             Ok(false) => {}
             Err(e) => log::warn!("遷移學習資料失敗：{e}"),
         }
-        let engine = Arc::new(Engine::open(&sys_dict_dir, &data.learning())?);
+        let mut engine = Engine::open(&sys_dict_dir, &data.learning())?;
+        engine.load_user_words(&data.root().join("dict").join("english.txt"));
+        let engine = Arc::new(engine);
         spawn_saver(engine.clone(), data.backup())?;
         let sync = sync::spawn(data.clone(), settings.clone(), engine.clone())?;
 
@@ -151,7 +156,11 @@ mod app {
             backup: data.backup(),
             game,
             ui,
+            debug_keys: data.local().join("debug-keys").exists(),
         });
+        if shared.debug_keys {
+            log::info!("按鍵診斷已開啟（只記錄非字元鍵）");
+        }
         spawn_watcher(shared.clone(), theme)?;
 
         let mut listener = zct_ipc::pipe::Listener::new()?;

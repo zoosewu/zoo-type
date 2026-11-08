@@ -98,6 +98,27 @@
 - [x] 空白鍵不開候選窗：注音未完成時是一聲，否則在組字區插入空白；↓ 開候選窗
 - [x] 英文放進組字區（不直接送出）；Enter 整句送出
 - [x] 自動英文：按空白 / Enter 時判斷；英文單字表或「4 個字母以上且組不成注音」
+  - M8.2 改為：只在空白鍵判斷、只認單字表（亂打的注音不會變英文）
+
+## M8.2：打字回饋修正
+- [x] 組字提示列每按一鍵閃一下：每鍵的 Hide（沒有候選）把提示列一起關掉 → 拆成 HideCandidates
+- [x] 組不成字的注音（ㄍㄧˇ）保留並發出系統提示音（chewing 原本直接清掉）
+- [x] 注音打到一半按 Backspace 取消整個音節（Delete 維持原本行為）；卡住時 Enter 丟掉注音送出其餘
+- [x] Win11 記事本直接呼叫 KeyUp（不經 OnTestKeyUp）→ Shift 放開被丟掉、不會切換；OnKeyUp 自行處理
+- [x] 組字中的數字鍵盤放進組字區（第 6 章）
+- [x] 組字中單按 Shift 切中英不送出，英文 / 數字放進組字區（主鍵盤數字也用這個方法）
+- [x] 英文判斷只在組字開頭或「中文 + 空白」之後
+- [ ] 服務程序還沒啟動時，最前面幾個按鍵會漏給 App（DLL 啟動服務的期間）
+- [x] 組字提示列預設關閉（使用者不想要第二層視窗）
+- [x] 選字時 ← → 展開多欄（每頁一欄，最多 6 欄），選擇框停在同一行
+- [x] 候選窗中 Tab 切換 Emoji / 注音頁（← → 不再繞到額外頁）
+- [x] 輸入法名稱改為「動物園輸入法」；繁簡提示改為「動 / 动」；圖示維持「中 / 英」但改為線條字，顏色跟著工作列深淺色
+- [x] 註冊時設為中文（台灣）預設輸入法（SetDefaultLanguageProfile；Alt+Shift 切回中文用的是語言預設，不是清單順序或上次選的）
+- [x] 英文判斷補上技術用語與縮寫（repo、config、api…），並支援自訂 dict/english.txt
+- [x] 用 Shift 在組字區打過的英文，送出後自動加入自訂單字；組字區中游標在英文單字上按 Shift+Delete 移除（檔案中 -字 代表排除）
+- [x] 輸入法清單 / 工作列圖示：白底黑字「動」zct.ico（scripts/make-icon.ps1 產生），取代 Windows 顯示的「繁體」
+- [ ] 設定程式詞庫頁加上英文單字清單（目前可用 Shift+Delete 或直接編輯 dict/english.txt）
+- [ ] 手動遊戲模式時 DLL 直接放行、不經 IPC（現在每鍵仍問服務程序，正常 <1ms，服務卡住最多 100ms）
 - [x] ← → 一次跳過一個英文單字；Backspace：完整單字（後面有空白）先刪空白、再刪整個單字；未完成單字刪一個字母；Delete 對稱
 - [x] 自動加空格（盤古之白）預設關閉
 - [x] 組字顯示 A：TSF 顯示屬性（整段底線 + 選字目標）；游標在最後時不標示目標
@@ -109,6 +130,67 @@
 - [x] Shift + 方向鍵加詞 → 設為優先，提示「已加入詞庫：…」
 - [x] 詞庫頁：狀態下拉選單（一般 / 優先 / 封鎖）；只打中文自動填注音；查「取消優先」沒反應
 - [x] 輸入法圖示（語言列）：中 / 英狀態、左鍵切換、右鍵選單；移除自製系統匣圖示
+
+## M8.3 選字品質與組字提示列（分支 `m8.3`）
+
+根因（2026-11-08）：「重開機」→「蟲開機」
+- 詞庫沒有「重開機 / 重開」；「重（ㄔㄨㄥˊ）」在語言模型的單字分數很低，排在罕用字之後
+- chewing 歷史學習很保守（選一次只到 10^-5），改過的字下次還是錯
+- 候選混入簡體字（种、烛、茧、蛊）
+
+### 選字修正的學習（保守：同一個修正兩次才生效）
+- [ ] 選字時記下「非預設的選擇」（讀音、字、位置），送出時確認還在才算一次修正
+- [ ] 同時記下與相鄰字組成的詞（重 + 開機 → 重開機）
+- [ ] 同一個修正累計兩次 → 加入使用者詞庫並適度加權；Shift+Delete 忘記
+- [ ] 修正次數存在學習資料夾（corrections.tsv），不隨 git 同步
+
+### 候選清單
+- [ ] 詞與單字合併成同一份清單：長的詞在前，單字接在後面；多欄展開也是同一份
+- [ ] 單字依整份詞庫（tsi.csv）估計的常用程度排序（含有該字該讀音的詞頻加總）
+- [ ] 只顯示繁體字（隱藏只屬於簡體的字；后、种 這類兩邊通用的保留）
+- [ ] 組字區與候選窗永遠顯示繁體；簡體模式只在送出時整句轉換
+- [ ] 選字評測（目前 99.35%）不得變差
+
+### 組字提示列快捷鍵
+- [ ] 快捷鍵（預設 Ctrl+Shift+F11，可在設定調整）：切換目前 App 的組字提示列，寫進 App 規則記住
+- [ ] 純終端機（WindowsTerminal、conhost、OpenConsole、wezterm、alacritty）預設開啟
+- [ ] 提示列畫出游標位置
+
+### 收尾
+- [ ] 整理 tasks/（todo 封存已完成項目、lessons 整理成可公開的規則）
+- [ ] 合併回 main，推到 git@github.com:zoosewu/zoo-type.git（只推 main；不打 release 標籤，等初版完成）
+
+## M10 Release 與 GitHub Actions（repo：zoo-type；分支 `m10`；初版完成前不發 release）
+
+前置：`m8.2` 確認工作列圖示後合併回 main，關掉按鍵診斷（刪除 local/debug-keys）
+
+### 1. 正式安裝程式（Inno Setup，`installer/zootype.iss`）
+- [ ] 安裝位置固定 `{autopf}\ZCT`（沿用現在的路徑，開發版與正式版可互相覆蓋）
+- [ ] 檔案：zct_tsf.dll、zct-service.exe、zct-settings.exe、dict/*、授權檔
+- [ ] 安裝：先結束 zct-service → 複製 → regsvr32（註冊 TSF、設為中文預設）→ 以原本使用者身分加入中文（台灣）鍵盤清單第一位 → 登入自動啟動 → 開始功能表「動物園輸入法 設定」
+- [ ] 升級：DLL 被 App 載入中無法覆蓋 → 舊檔改名、重新開機後刪除（Inno 的 restartreplace）
+- [ ] 解除安裝：結束服務 → regsvr32 /u → 從鍵盤清單移除 → 刪檔；使用者資料（%APPDATA%\zct）保留
+- [ ] 授權聲明：本專案 MIT/Apache-2.0；libchewing-data 詞庫 LGPL-2.1、語言模型 CC-BY-4.0；CLDR Emoji Unicode-3.0；dwyl 英文單字 Unlicense
+- [ ] install-dev.ps1 保留給開發用；安裝邏輯盡量共用（避免兩份行為不同）
+
+### 2. CI（`.github/workflows/ci.yml`，push / PR）
+- [ ] windows-latest：fetch-dict.sh → fmt 檢查 → clippy -D warnings → test → build release
+- [ ] 快取 cargo 與詞庫資料
+
+### 3. Release（`.github/workflows/release.yml`，推送 v* 標籤）
+- [ ] 檢查標籤版本 = Cargo.toml workspace 版本（不一致就失敗）
+- [ ] 建置 + 測試 → iscc 產生 `zootype-<版本>-windows-x64-setup.exe` → SHA256
+- [ ] 用 gh CLI 建立 GitHub Release，附上安裝檔與 SHA256，自動產生變更說明
+- [ ] 未做程式碼簽章：下載時 SmartScreen 會警告（README 說明；之後可考慮簽章）
+
+### 4. macOS（需要先完成 M6）
+- [ ] M6：InputMethodKit 前端（Swift）+ cbindgen C ABI 接 zct-core
+- [ ] release.yml 加 macos job：.app 打包成 .pkg（安裝到 ~/Library/Input Methods）
+- [ ] 簽章 / 公證需要 Apple Developer 帳號（未公證的 pkg 會被 Gatekeeper 擋，需手動允許）
+
+### 5. 驗證
+- [ ] 本機用 iscc 產生安裝檔，實際安裝 / 升級 / 解除安裝各一次
+- [ ] 推到 GitHub 後先推一個測試標籤（例如 v0.2.0-rc.1）確認 release 流程
 
 ## M9 選取文字加入詞庫、重新選字（規劃）
 - [ ] DLL 讀取 App 中被選取的文字（TSF edit session；不支援的 App 退回剪貼簿並還原）

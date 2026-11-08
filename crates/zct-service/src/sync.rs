@@ -20,7 +20,7 @@ const BRANCH: &str = "main";
 
 const GITIGNORE: &str = "# ZCT：單機資料不同步\nlocal/\n*.tmp\n";
 const GITATTRIBUTES: &str =
-    "# 詞庫與統計逐行合併，衝突的行兩邊都保留，讀入時以時間較新的為準\ndict/*.tsv merge=union\nstats/*.tsv merge=union\n";
+    "# 詞庫與統計逐行合併，衝突的行兩邊都保留，讀入時以時間較新的為準\ndict/*.tsv merge=union\ndict/english.txt merge=union\nstats/*.tsv merge=union\n";
 
 fn machine() -> String {
     std::env::var("COMPUTERNAME")

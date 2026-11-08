@@ -181,7 +181,7 @@ impl TextService_Impl {
     fn apply(&self, ctx: &ITfContext, r: KeyResult) {
         let has_composition = self.composition.borrow().is_some();
         let touches_doc = r.commit.is_some() || !r.preedit.text.is_empty() || has_composition;
-        if r.mode_changed.is_some() || r.toggle_game {
+        if r.mode_changed.is_some() || r.output_changed.is_some() || r.toggle_game {
             self.refresh_langbar();
         }
         let needs_caret = touches_doc
@@ -226,10 +226,16 @@ impl TextService_Impl {
     /// 向服務程序查詢中英與遊戲模式，更新輸入法圖示
     fn refresh_langbar(&self) {
         let button = self.tsf.borrow().langbar.clone();
-        if let (Some(button), Some(Response::Status { chinese, game })) =
-            (button, self.call(&Request::Status))
+        if let (
+            Some(button),
+            Some(Response::Status {
+                chinese,
+                simplified,
+                game,
+            }),
+        ) = (button, self.call(&Request::Status))
         {
-            langbar::set_state(&button, chinese, game);
+            langbar::set_state(&button, chinese, simplified, game);
         }
     }
 
@@ -461,15 +467,32 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         })
     }
 
-    fn OnKeyUp(&self, pic: Ref<ITfContext>, _w: WPARAM, _l: LPARAM) -> Result<BOOL> {
+    fn OnKeyUp(&self, pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
-            let pending = self.pending_up.borrow_mut().take();
-            match (pending, pic.as_ref()) {
-                (Some(r), Some(ctx)) => {
+            let r = match self.pending_up.borrow_mut().take() {
+                Some(r) => r,
+                // 有些 App（例如 Win11 記事本）直接呼叫 ITfKeystrokeMgr::KeyUp，不會先經過 OnTestKeyUp；
+                // 這時要在這裡處理放開事件，否則單按 Shift 永遠不會切換中英
+                None => {
+                    if self.not_input() {
+                        return Ok(false.into());
+                    }
+                    let ev = keys::event(w, l, true);
+                    let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
+                        return Ok(false.into());
+                    };
+                    if r.commit.is_none() && r.mode_changed.is_none() {
+                        return Ok(false.into());
+                    }
+                    r
+                }
+            };
+            match pic.as_ref() {
+                Some(ctx) => {
                     self.apply(ctx, r);
                     Ok(true.into())
                 }
-                _ => Ok(false.into()),
+                None => Ok(false.into()),
             }
         })
     }

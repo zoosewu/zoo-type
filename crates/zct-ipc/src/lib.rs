@@ -9,7 +9,7 @@ pub mod pipe;
 pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -73,7 +73,7 @@ pub enum Request {
     Restore { day: String },
     /// 立即在背景同步；結果寫在 `local/sync-status.txt` → `Ok`
     SyncNow,
-    /// 輸入法圖示顯示用：目前中英與遊戲模式 → `Status`
+    /// 輸入法圖示顯示用：目前中英、繁簡與遊戲模式 → `Status`
     Status,
     /// 點輸入法圖示切換中英 → `Key`（組字中會先送出）
     ToggleMode,
@@ -81,6 +81,8 @@ pub enum Request {
     Command(Command),
 }
 
+// 每次呼叫只傳一個回應，大小差異不影響效能；不裝箱讓序列化格式保持單純
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Response {
     Ok,
@@ -96,7 +98,11 @@ pub enum Response {
     Phrases(Vec<PhraseEntry>),
     Stats(Vec<DayStats>),
     Backups(Vec<String>),
-    Status { chinese: bool, game: bool },
+    Status {
+        chinese: bool,
+        simplified: bool,
+        game: bool,
+    },
     Error(String),
 }
 

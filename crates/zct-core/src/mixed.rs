@@ -4,7 +4,8 @@
 //! - B 英文候選：剛完成的音節，其按鍵剛好也是英文單字（例如 `go` = ㄕㄟ）→ 候選窗附上英文
 //! - E 盤古之白：中英文之間自動加空格
 
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 /// 大千排列：鍵 → 注音的種類
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,6 +53,113 @@ const COMMON_2: &[&str] = &[
     "no", "of", "ok", "on", "or", "so", "to", "up", "us", "we",
 ];
 
+/// C：鍵的形狀適合自動判斷成英文（3 個字母以上或常見兩字母單字、全小寫、組不成注音）
+pub fn auto_english_shape(keys: &str) -> bool {
+    let ok_len = keys.len() >= 3 || COMMON_2.contains(&keys);
+    ok_len && keys.bytes().all(|b| b.is_ascii_lowercase()) && !is_syllable(keys)
+}
+
+/// B：鍵的形狀可以當英文候選（2 個字母以上、全小寫）
+pub fn english_candidate_shape(keys: &str) -> bool {
+    keys.len() >= 2 && keys.bytes().all(|b| b.is_ascii_lowercase())
+}
+
+const USER_WORDS_HEADER: &str = "\
+# 自訂英文單字：一行一個，按空白時會判斷為英文（例如公司或專案的縮寫）
+# 在組字區用 Shift 打的英文，送出後會自動加進來
+# 「-單字」代表不要當英文（例如內建字典有、但你常打成注音的字）
+# 組字區中游標停在英文單字上按 Shift + Delete，也會把它移除
+";
+
+/// 使用者的英文單字：自動學到或手動加入的（added），以及排除的（removed，檔案中以 `-` 開頭）
+#[derive(Debug, Default)]
+pub struct UserWords {
+    path: Option<PathBuf>,
+    added: BTreeSet<String>,
+    removed: BTreeSet<String>,
+}
+
+impl UserWords {
+    /// 讀取使用者單字檔；不存在時建立說明範本，方便使用者找到
+    pub fn load(path: &Path) -> UserWords {
+        let mut words = UserWords {
+            path: Some(path.to_path_buf()),
+            ..Default::default()
+        };
+        match std::fs::read_to_string(path) {
+            Ok(text) => {
+                for line in text.lines().map(str::trim) {
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    match line.strip_prefix('-') {
+                        Some(w) => words.removed.insert(w.trim().to_ascii_lowercase()),
+                        None => words.added.insert(line.to_ascii_lowercase()),
+                    };
+                }
+            }
+            Err(_) if !path.exists() => words.save(),
+            Err(e) => log::warn!("讀不到自訂英文單字 {}：{e}", path.display()),
+        }
+        words
+    }
+
+    fn save(&self) {
+        let Some(path) = &self.path else { return };
+        let mut text = String::from(USER_WORDS_HEADER);
+        for w in &self.added {
+            text.push_str(w);
+            text.push('\n');
+        }
+        for w in &self.removed {
+            text.push('-');
+            text.push_str(w);
+            text.push('\n');
+        }
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::fs::write(path, text) {
+            log::warn!("寫入自訂英文單字失敗：{e}");
+        }
+    }
+
+    /// Some(true) 加入過、Some(false) 排除過、None 沒有設定（看字典）
+    pub fn verdict(&self, w: &str) -> Option<bool> {
+        if self.removed.contains(w) {
+            Some(false)
+        } else if self.added.contains(w) {
+            Some(true)
+        } else {
+            None
+        }
+    }
+
+    pub fn add(&mut self, w: &str) {
+        let w = w.to_ascii_lowercase();
+        let changed = self.removed.remove(&w) | self.added.insert(w);
+        if changed {
+            self.save();
+        }
+    }
+
+    /// `in_dictionary`：字典裡有這個字，需要記成排除才會生效
+    pub fn remove(&mut self, w: &str, in_dictionary: bool) {
+        let w = w.to_ascii_lowercase();
+        let mut changed = self.added.remove(&w);
+        if in_dictionary {
+            changed |= self.removed.insert(w);
+        }
+        if changed {
+            self.save();
+        }
+    }
+
+    pub fn added(&self) -> impl Iterator<Item = &str> {
+        self.added.iter().map(String::as_str)
+    }
+}
+
 /// 排序過的英文單字表（每行一字），以二分搜尋查詢
 #[derive(Debug, Default)]
 pub struct WordList {
@@ -66,7 +174,11 @@ impl WordList {
     }
 
     pub fn from_text(text: String) -> WordList {
-        let mut words: Vec<&str> = text.lines().map(str::trim).filter(|w| !w.is_empty()).collect();
+        let mut words: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|w| !w.is_empty() && !w.starts_with('#'))
+            .collect();
         words.sort_unstable();
         words.dedup();
         let mut packed = String::with_capacity(text.len());
@@ -102,6 +214,14 @@ impl WordList {
         false
     }
 
+    /// 加入更多單字（補充單字表、使用者自訂單字），一律轉小寫
+    pub fn extend(&mut self, more: &str) {
+        let mut text = std::mem::take(&mut self.text);
+        text.push('\n');
+        text.push_str(&more.to_ascii_lowercase());
+        *self = WordList::from_text(text);
+    }
+
     pub fn len(&self) -> usize {
         self.starts.len()
     }
@@ -112,13 +232,12 @@ impl WordList {
 
     /// C：適合自動判斷成英文的單字（3 個字母以上，或常見的兩字母單字）
     pub fn auto_english(&self, keys: &str) -> bool {
-        let ok_len = keys.len() >= 3 || COMMON_2.contains(&keys);
-        ok_len && keys.bytes().all(|b| b.is_ascii_lowercase()) && !is_syllable(keys) && self.contains(keys)
+        auto_english_shape(keys) && self.contains(keys)
     }
 
     /// B：可以當英文候選的單字
     pub fn candidate(&self, keys: &str) -> bool {
-        keys.len() >= 2 && keys.bytes().all(|b| b.is_ascii_lowercase()) && self.contains(keys)
+        english_candidate_shape(keys) && self.contains(keys)
     }
 }
 

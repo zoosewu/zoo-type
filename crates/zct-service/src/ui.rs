@@ -99,7 +99,12 @@ pub enum UiCmd {
         page: CandidatePage,
         anchor: Option<Rect>,
     },
+    /// 隱藏候選窗與組字提示列（失焦、重設、連線結束）
     Hide {
+        owner: u64,
+    },
+    /// 只隱藏候選窗（每次按鍵後沒有候選時；組字提示列由 Composition 控制）
+    HideCandidates {
         owner: u64,
     },
     /// 狀態提示：中 / A / 全形 / 半形
@@ -209,6 +214,7 @@ struct Ui {
     comp: Popup,
     rx: Receiver<UiCmd>,
     owner: Option<u64>,
+    comp_owner: Option<u64>,
     last_anchor: Option<Rect>,
 }
 
@@ -300,6 +306,7 @@ impl Ui {
                 comp: make()?,
                 rx,
                 owner: None,
+                comp_owner: None,
                 last_anchor: None,
             })
         }
@@ -317,13 +324,12 @@ impl Ui {
                     self.show_candidates(&page, anchor)
                 }
                 UiCmd::Hide { owner } => {
-                    if self.owner == Some(owner) {
-                        self.owner = None;
-                        unsafe {
-                            let _ = ShowWindow(self.cand.hwnd, SW_HIDE);
-                            let _ = ShowWindow(self.comp.hwnd, SW_HIDE);
-                        }
-                    }
+                    self.hide_candidates(owner);
+                    self.hide_composition(owner);
+                    Ok(())
+                }
+                UiCmd::HideCandidates { owner } => {
+                    self.hide_candidates(owner);
                     Ok(())
                 }
                 UiCmd::Composition {
@@ -332,15 +338,11 @@ impl Ui {
                     anchor,
                 } => match preedit.filter(|p| !p.text.is_empty() && self.theme.composition_bar) {
                     Some(p) => {
-                        self.owner = Some(owner);
+                        self.comp_owner = Some(owner);
                         self.show_composition(&p, anchor)
                     }
                     None => {
-                        if self.owner == Some(owner) || self.owner.is_none() {
-                            unsafe {
-                                let _ = ShowWindow(self.comp.hwnd, SW_HIDE);
-                            }
-                        }
+                        self.hide_composition(owner);
                         Ok(())
                     }
                 },
@@ -381,6 +383,7 @@ impl Ui {
             return Ok(());
         };
         let (runs, highlight, dip) = match self.theme.layout {
+            _ if !page.columns.is_empty() => self.layout_columns(page)?,
             Layout::Vertical => self.layout_vertical(page)?,
             Layout::Horizontal => self.layout_horizontal(page)?,
         };
@@ -442,6 +445,81 @@ impl Ui {
             x += w + ROW_PAD_X * 2.0;
         }
         Ok((runs, highlight, (x + PAD_X, row_h + PAD_Y * 2.0)))
+    }
+
+    /// 展開多欄：每一頁一欄並排，目前這一欄有數字與選擇框，其他欄淡色；底部顯示頁碼
+    fn layout_columns(&self, page: &CandidatePage) -> Result<Laid> {
+        let active = page.page.saturating_sub(page.first_column);
+        let (_, num_w, _) = self.layout("0★", &self.num_fmt)?;
+        let mut cols = Vec::new();
+        let mut row_h: f32 = 0.0;
+        for (c, items) in page.columns.iter().enumerate() {
+            // 目前這欄用 page.items（含 ★ 與英文選項）
+            let items = if c == active { &page.items } else { items };
+            let mut rows = Vec::new();
+            let mut text_w: f32 = 0.0;
+            for (i, item) in items.iter().enumerate() {
+                let num = if c == active {
+                    let mark = if page.pinned.get(i).copied().unwrap_or(false) { "★" } else { "" };
+                    Some(self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?)
+                } else {
+                    None
+                };
+                let text = self.layout(item, &self.text_fmt)?;
+                row_h = row_h.max(text.2);
+                text_w = text_w.max(text.1);
+                rows.push((num, text));
+            }
+            cols.push((rows, text_w));
+        }
+        let row_h = row_h + ROW_PAD_Y * 2.0;
+
+        let mut runs = Vec::new();
+        let mut highlight = None;
+        let mut x = PAD_X;
+        let mut bottom = PAD_Y;
+        for (c, (rows, text_w)) in cols.into_iter().enumerate() {
+            let col_w = ROW_PAD_X + num_w + GAP_NUM + text_w + ROW_PAD_X;
+            let mut y = PAD_Y;
+            for (i, (num, (text, _, th))) in rows.into_iter().enumerate() {
+                if c == active && i == page.highlight {
+                    highlight = Some(D2D_RECT_F {
+                        left: x,
+                        top: y,
+                        right: x + col_w,
+                        bottom: y + row_h,
+                    });
+                }
+                if let Some((num, nw, nh)) = num {
+                    runs.push(Run {
+                        layout: num,
+                        x: x + ROW_PAD_X + num_w - nw,
+                        y: y + (row_h - nh) / 2.0,
+                        dim: true,
+                    });
+                }
+                runs.push(Run {
+                    layout: text,
+                    x: x + ROW_PAD_X + num_w + GAP_NUM,
+                    y: y + (row_h - th) / 2.0,
+                    dim: c != active,
+                });
+                y += row_h;
+            }
+            bottom = bottom.max(y);
+            x += col_w;
+        }
+        let width = x - PAD_X;
+        let (layout, w, h) =
+            self.layout(&format!("{}/{}", page.page + 1, page.total_pages), &self.num_fmt)?;
+        runs.push(Run {
+            layout,
+            x: PAD_X + width - ROW_PAD_X - w,
+            y: bottom + ROW_PAD_Y,
+            dim: true,
+        });
+        let height = bottom + h + ROW_PAD_Y * 2.0;
+        Ok((runs, highlight, (PAD_X * 2.0 + width, height + PAD_Y)))
     }
 
     /// 直式：每列「數字 候選字」，選擇框標示目前項目，多頁時底部顯示頁碼
@@ -507,6 +585,25 @@ impl Ui {
             hl.right = PAD_X + width;
         }
         Ok((runs, highlight, (PAD_X * 2.0 + width, y + PAD_Y)))
+    }
+
+    /// 只隱藏自己顯示的視窗，避免舊連線蓋掉新連線的畫面
+    fn hide_candidates(&mut self, owner: u64) {
+        if self.owner == Some(owner) {
+            self.owner = None;
+            unsafe {
+                let _ = ShowWindow(self.cand.hwnd, SW_HIDE);
+            }
+        }
+    }
+
+    fn hide_composition(&mut self, owner: u64) {
+        if self.comp_owner == Some(owner) {
+            self.comp_owner = None;
+            unsafe {
+                let _ = ShowWindow(self.comp.hwnd, SW_HIDE);
+            }
+        }
     }
 
     /// 組字提示列：「組字內容（選字目標反白）　N 字」，放在游標上方

@@ -38,9 +38,26 @@ fn static_hint(r: &KeyResult) -> Option<&'static str> {
         });
     }
     r.output_changed.map(|o| match o {
-        Output::Traditional => "繁",
-        Output::Simplified => "简",
+        Output::Traditional => "動",
+        Output::Simplified => "动",
     })
+}
+
+/// 按鍵診斷：只記錄非字元鍵，絕不記錄字母、數字與符號
+fn debug_key(shared: &Shared, id: u64, stage: &str, ev: &zct_core::KeyEvent, result: &str) {
+    use zct_core::Key;
+    if !shared.debug_keys || matches!(ev.key, Key::Char(_) | Key::Numpad(_)) {
+        return;
+    }
+    log::info!(
+        "[{id}] 按鍵診斷 {stage} {:?} {} shift={} ctrl={} alt={} t={} {result}",
+        ev.key,
+        if ev.released { "放開" } else { "按下" },
+        ev.mods.shift,
+        ev.mods.ctrl,
+        ev.mods.alt,
+        ev.time_ms,
+    );
 }
 
 fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> {
@@ -81,6 +98,7 @@ fn spawn_ai(id: u64, original: String, shared: &Shared, mailbox: AiMailbox) {
                     total_pages: 1,
                     highlight: 0,
                     pinned: vec![false],
+                    ..Default::default()
                 },
                 anchor: None,
             }),
@@ -176,12 +194,36 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
             }
             Request::TestKeyDown(ev) => match session.as_mut() {
-                Some(s) => Response::Eat(s.test_key_down(&ev)),
+                Some(s) => {
+                    let eat = s.test_key_down(&ev);
+                    debug_key(shared, id, "test", &ev, &format!("eat={eat}"));
+                    Response::Eat(eat)
+                }
                 None => Response::Eat(false),
             },
             Request::Key(ev) => match session.as_mut() {
                 Some(s) => {
                     let r = s.process_key(&ev);
+                    debug_key(
+                        shared,
+                        id,
+                        "key",
+                        &ev,
+                        &format!(
+                            "eaten={} mode={:?} composing={}",
+                            r.eaten,
+                            r.mode_changed,
+                            !r.preedit.text.is_empty()
+                        ),
+                    );
+                    if r.bell {
+                        // 系統預設提示音；非同步播放，不會卡住按鍵處理
+                        unsafe {
+                            let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(
+                                windows::Win32::UI::WindowsAndMessaging::MB_OK,
+                            );
+                        }
+                    }
                     if let Some(text) = &r.ai_request {
                         spawn_ai(id, text.clone(), shared, mailbox.clone());
                     }
@@ -209,7 +251,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                             page,
                             anchor: rect,
                         }),
-                        None => shared.ui.send(UiCmd::Hide { owner: id }),
+                        None => shared.ui.send(UiCmd::HideCandidates { owner: id }),
                     }
                     if let Some(text) = hint {
                         shared.ui.send(UiCmd::Hint { text, anchor: rect });
@@ -249,6 +291,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             },
             Request::Status => Response::Status {
                 chinese: session.as_ref().is_none_or(|s| s.mode() == InputMode::Chinese),
+                simplified: session.as_ref().is_some_and(|s| s.output() == Output::Simplified),
                 game: shared.game.load(Ordering::Relaxed),
             },
             Request::ToggleMode => match session.as_mut() {
