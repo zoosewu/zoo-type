@@ -81,9 +81,12 @@ pub fn pipe_name() -> Result<HSTRING> {
 }
 
 /// 加上後綴的管道名稱（測試用，避免與正在執行的服務程序衝突）
+///
+/// 名稱帶協定版本：新舊版本並存時，舊 DLL 連到舊服務程序、新 DLL 連到新服務程序
 pub fn pipe_name_with(suffix: &str) -> Result<HSTRING> {
     Ok(HSTRING::from(format!(
-        r"\\.\pipe\zct-{}{suffix}",
+        r"\\.\pipe\zct-v{}-{}{suffix}",
+        crate::PROTOCOL_VERSION,
         current_user_sid()?
     )))
 }

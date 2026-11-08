@@ -14,9 +14,16 @@ mod settings;
 mod sync;
 #[cfg(windows)]
 mod ui;
+#[cfg(windows)]
+mod version;
 
 #[cfg(windows)]
 fn main() {
+    // 安裝程式用：寫 current.txt 時需要協定版本
+    if std::env::args().any(|a| a == "--protocol") {
+        println!("{}", zct_ipc::PROTOCOL_VERSION);
+        return;
+    }
     if let Err(e) = app::run() {
         log::error!("服務程序結束：{e}");
         eprintln!("zct-service: {e}");
@@ -35,16 +42,17 @@ mod app {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 
+    use windows::core::HSTRING;
+
     use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
     use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::UI::HiDpi::{
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
     };
-    use windows::core::w;
     use zct_core::Engine;
     use zct_core::paths::DataRoot;
 
-    use crate::{conn, logger, settings, sync, ui};
+    use crate::{conn, logger, settings, sync, ui, version};
 
     pub struct Shared {
         pub settings: Arc<settings::Settings>,
@@ -116,12 +124,72 @@ mod app {
             .map(|_| ())
     }
 
-    pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-        // 單一實例：同一個登入工作階段只跑一個服務程序
-        let _mutex = unsafe { CreateMutexW(None, true, w!("Local\\zct-service"))? };
-        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-            return Ok(());
+    /// 已有更新的版本：協定相同就讓位給新版；不同就改為唯讀，沒有連線時結束
+    fn handle_stale(engine: Option<&Engine>) {
+        match version::state() {
+            version::State::Current => {}
+            version::State::Stale {
+                same_protocol: true,
+                current_exe,
+            } => {
+                log::info!("已有新版（協定相同），改由新版服務：{}", current_exe.display());
+                // 新版還沒啟動時（舊 DLL 叫起了舊服務程序）先啟動新版；它會等這個程序結束才拿到 mutex
+                let _ = std::process::Command::new(&current_exe).spawn();
+                std::process::exit(0);
+            }
+            version::State::Stale {
+                same_protocol: false, ..
+            } => {
+                if !version::read_only() {
+                    log::info!("已有新版（協定不同），繼續服務舊 App，但不再寫入使用者資料");
+                    version::set_read_only();
+                }
+                if let Some(engine) = engine {
+                    engine.freeze();
+                }
+                if version::active() == 0 {
+                    log::info!("舊版沒有連線，結束");
+                    std::process::exit(0);
+                }
+            }
         }
+    }
+
+    /// 每 30 秒檢查是否已安裝新版本
+    fn spawn_version_watch(engine: Arc<Engine>) -> std::io::Result<()> {
+        std::thread::Builder::new()
+            .name("version".into())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    handle_stale(Some(&engine));
+                }
+            })
+            .map(|_| ())
+    }
+
+    pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+        // 單一實例：同一個登入工作階段、同一個協定版本只跑一個服務程序
+        let name = HSTRING::from(format!("Local\\zct-service-v{}", zct_ipc::PROTOCOL_VERSION));
+        let mut mutex = unsafe { CreateMutexW(None, true, &name)? };
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            // 舊版讓位時：等它結束（最多 3 秒）再接手
+            let _ = unsafe { windows::Win32::Foundation::CloseHandle(mutex) };
+            let mut acquired = false;
+            for _ in 0..30 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                mutex = unsafe { CreateMutexW(None, true, &name)? };
+                if unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+                    acquired = true;
+                    break;
+                }
+                let _ = unsafe { windows::Win32::Foundation::CloseHandle(mutex) };
+            }
+            if !acquired {
+                return Ok(());
+            }
+        }
+        let _mutex = mutex;
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
@@ -129,6 +197,7 @@ mod app {
         let data = DataRoot::discover().ok_or("找不到資料根目錄")?;
         logger::init(&data.local().join("logs").join("service.log"));
         log::info!("啟動，資料根目錄：{}", data.root().display());
+        handle_stale(None);
 
         // 設定檔寫錯時仍要能打字：settings 會記錄錯誤並改用上一份正確的設定或預設值
         let settings = Arc::new(settings::Settings::new(&data));
@@ -143,8 +212,12 @@ mod app {
         }
         let mut engine = Engine::open(&sys_dict_dir, &data.learning())?;
         engine.load_user_words(&data.root().join("dict").join("english.txt"));
+        if version::read_only() {
+            engine.freeze();
+        }
         let engine = Arc::new(engine);
         spawn_saver(engine.clone(), data.backup())?;
+        spawn_version_watch(engine.clone())?;
         let sync = sync::spawn(data.clone(), settings.clone(), engine.clone())?;
 
         let game = Arc::new(AtomicBool::new(false));

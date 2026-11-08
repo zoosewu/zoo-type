@@ -167,6 +167,7 @@ fn run_command(cmd: Command, shared: &Shared) {
 }
 
 pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
+    let _active = crate::version::ActiveGuard::new();
     let mut session: Option<Session> = None;
     let mailbox: AiMailbox = Arc::new(Mutex::new(None));
     // 最近一次按鍵結果與狀態提示，等 DLL 回報游標位置後再決定候選窗怎麼顯示

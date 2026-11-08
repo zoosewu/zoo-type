@@ -642,6 +642,11 @@ impl Engine {
     }
 
     /// 把某天的備份複製回學習資料夾，並停止存檔；呼叫端接著要結束程序，重新啟動時載入
+    /// 停止存檔（還原備份後、或已有更新版本時的舊版服務程序）
+    pub fn freeze(&self) {
+        self.frozen.store(true, Ordering::SeqCst);
+    }
+
     pub fn restore(&self, backup_dir: &Path, day: &str) -> std::io::Result<()> {
         if day.contains(['/', '\\', '.']) {
             return Err(std::io::Error::other("無效的日期"));

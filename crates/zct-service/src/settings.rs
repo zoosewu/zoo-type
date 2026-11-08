@@ -43,6 +43,9 @@ impl Settings {
     /// 目前的設定；檔案變更時重新讀取。格式錯誤時沿用上一份正確的設定（第一次則用預設值）
     /// 組字提示列快捷鍵：把這個 App 的設定寫進 apps.toml（沒有規則就新增一條）
     pub fn set_composition_bar(&self, exe: &str, on: bool) -> Result<(), String> {
+        if crate::version::read_only() {
+            return Err("舊版服務程序不寫設定（已安裝新版）".into());
+        }
         let (_, mut apps) = self.current();
         match apps
             .apps

@@ -1,14 +1,19 @@
 ﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  解除安裝開發版：從鍵盤清單移除、解除 TSF 註冊、停止服務程序、刪除檔案。
+  解除安裝開發版：從鍵盤清單移除、解除 TSF 註冊、停止服務程序、刪除所有版本的檔案。
   使用者資料（%APPDATA%\zct 或自訂的資料根目錄）不會被刪除。
+  仍被 App 載入的檔案排到重開機時刪除。
 #>
 $ErrorActionPreference = 'Continue'
 
-$dest = Join-Path $env:ProgramFiles 'ZCT'
-$dll = Join-Path $dest 'zct_tsf.dll'
+$base = Join-Path $env:ProgramFiles 'ZCT'
 $tip = '0404:{68E048CC-2635-4A97-8A2F-1599AF3AFCF5}{D890A24E-551E-4D5F-A0F1-745BE13B6287}'
+
+Add-Type -Namespace Zct -Name Native -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern bool MoveFileEx(string existing, string replacement, int flags);
+'@
 
 Write-Host '從鍵盤清單移除'
 $list = Get-WinUserLanguageList
@@ -17,8 +22,13 @@ foreach ($lang in $list) {
 }
 Set-WinUserLanguageList $list -Force
 
-if (Test-Path $dll) {
-    Write-Host '解除 TSF 註冊'
+# 目前註冊的 DLL：current.txt 的版本資料夾，或舊的安裝方式放在根目錄的
+$dlls = @()
+$current = Join-Path $base 'current.txt'
+if (Test-Path $current) { $dlls += Join-Path (Join-Path $base ((Get-Content $current)[0])) 'zct_tsf.dll' }
+$dlls += Join-Path $base 'zct_tsf.dll'
+foreach ($dll in $dlls | Where-Object { Test-Path $_ }) {
+    Write-Host "解除 TSF 註冊：$dll"
     Start-Process regsvr32.exe -ArgumentList '/u', '/s', "`"$dll`"" -Wait
 }
 
@@ -27,10 +37,12 @@ Get-Process zct-service, zct-settings -ErrorAction SilentlyContinue | Stop-Proce
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'ZCT 設定.lnk') -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 300
 
-# 仍被 App 載入的 DLL 無法刪除：改名，登出或重開機後再手動刪除
-Get-ChildItem $dest -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | ForEach-Object {
-    try { Remove-Item $_.FullName -Force -Recurse }
-    catch { if ($_.TargetObject -notlike '*.old') { Move-Item $_.TargetObject "$($_.TargetObject).old" -ErrorAction SilentlyContinue } }
+try {
+    Remove-Item $base -Recurse -Force -ErrorAction Stop
+    Write-Host "已刪除：$base"
+} catch {
+    $paths = @(Get-ChildItem $base -Recurse -Force -ErrorAction SilentlyContinue | Sort-Object { $_.FullName.Length } -Descending | ForEach-Object FullName) + $base
+    foreach ($p in $paths) { [void][Zct.Native]::MoveFileEx($p, $null, 4) }
+    Write-Host "部分檔案仍被 App 使用，重開機後刪除：$base"
 }
-try { Remove-Item $dest -Force -Recurse } catch { Write-Host "部分檔案仍被使用中，登出後可刪除：$dest" }
 Write-Host '完成'

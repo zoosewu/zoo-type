@@ -178,7 +178,8 @@ pub fn spawn(data: DataRoot, settings: Arc<Settings>, engine: Arc<Engine>) -> st
                 Err(RecvTimeoutError::Disconnected) => return,
             };
             let cfg = settings.current().0.sync;
-            if !cfg.enabled && !manual {
+            // 已安裝新版時舊版不同步，避免用舊資料覆蓋
+            if (!cfg.enabled && !manual) || crate::version::read_only() {
                 continue;
             }
             // 先存檔，確保匯出的是最新的詞庫
