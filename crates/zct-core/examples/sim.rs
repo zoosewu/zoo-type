@@ -10,12 +10,16 @@ use zct_core::{Key, KeyEvent, Mods, Session, SessionOptions, Side};
 
 fn main() {
     let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/dict");
-    let user = std::env::temp_dir().join("zct-sim");
+    // ZCT_SIM_LEARNING：指定學習資料夾（例如使用者資料的複本），重現個人化後的選字
+    let user = std::env::var_os("ZCT_SIM_LEARNING")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("zct-sim"));
     let t0 = Instant::now();
     let engine = zct_core::Engine::open(std::path::Path::new(dict), &user)
         .expect("需要先執行 scripts/fetch-dict.sh");
+    let engine = std::sync::Arc::new(engine);
     let mut s = Session::new(&SessionOptions {
-        engine: std::sync::Arc::new(engine),
+        engine: engine.clone(),
         config: Config::default(),
         rule: None,
     })
@@ -71,5 +75,9 @@ fn main() {
                 send(&mut s, key, Mods::NONE, format!("{:?}", c as char));
             }
         }
+    }
+    // 學習紀錄平常由服務程序定期存檔；這裡結束前存一次，下次執行才看得到
+    if let Err(e) = engine.save() {
+        eprintln!("存檔失敗：{e}");
     }
 }

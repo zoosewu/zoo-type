@@ -97,6 +97,8 @@ pub struct Engine {
     words: crate::mixed::WordList,
     /// 使用者的英文單字（自動學到、手動加入、排除）；執行中會變動
     user_words: std::sync::RwLock<crate::mixed::UserWords>,
+    /// 上次切換的全形 / 半形：所有 App、切到別的輸入法再切回來都沿用
+    width: Mutex<Option<crate::config::Width>>,
     /// Emoji 關鍵字（CLDR 繁中註解）；沒有檔案時只能用常用 Emoji
     emoji: crate::emoji::EmojiIndex,
     dir: PathBuf,
@@ -201,6 +203,7 @@ impl Engine {
         Ok(Engine {
             words,
             user_words: Default::default(),
+            width: Mutex::new(None),
             emoji,
             string_table,
             static_dict,
@@ -214,6 +217,15 @@ impl Engine {
             frozen: AtomicBool::new(false),
             stats: Mutex::new(load_stats(&dir.join(STATS))),
         })
+    }
+
+    /// 上次切換的全形 / 半形（尚未切換過時為 None，用設定檔的預設）
+    pub fn width(&self) -> Option<crate::config::Width> {
+        *self.width.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub(crate) fn set_width(&self, w: crate::config::Width) {
+        *self.width.lock().unwrap_or_else(|e| e.into_inner()) = Some(w);
     }
 
     /// 使用者的英文單字檔（資料資料夾 `dict/english.txt`，隨 git 同步）

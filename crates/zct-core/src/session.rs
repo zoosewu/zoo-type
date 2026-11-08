@@ -140,6 +140,8 @@ pub struct Session {
     engine: Arc<Engine>,
     editor: Editor,
     eff: Effective,
+    /// App 規則明確指定的全半形（優先於上次切換的狀態）
+    rule_width: Option<Width>,
     mode: InputMode,
     width: Width,
     output: Output,
@@ -196,7 +198,8 @@ impl Session {
             editor,
             eff,
             mode: eff.default_mode,
-            width: eff.width,
+            width: initial_width(opts, &eff),
+            rule_width: opts.rule.as_ref().and_then(|r| r.punctuation),
             output: eff.output,
             global_game: false,
             shift: ShiftTap::new(opts.config.toggle.shift, opts.config.toggle.shift_tap_max_ms),
@@ -905,6 +908,7 @@ impl Session {
                 }
             } else if self.hotkeys.width.matches(ev) && self.chinese_hotkey(ev) {
                 self.width = self.width.toggled();
+                self.engine.set_width(self.width);
                 r.width_changed = Some(self.width);
             } else if self.hotkeys.output.matches(ev) && self.chinese_hotkey(ev) {
                 self.output = self.output.toggled();
@@ -926,10 +930,19 @@ impl Session {
                 // 組字中的數字鍵盤：放進組字區（「第 6 章」整句一起選字、送出）
                 self.insert_latin(&(c as char).to_string());
             } else if let Some(text) = self.direct_text(ev) {
-                // 組字中先送出組字，順序才正確
-                let composed = self.flush();
-                self.join(&mut commit, &composed);
-                self.join(&mut commit, &text);
+                if text.bytes().all(|b| b.is_ascii_punctuation())
+                    && !self.editor.is_empty()
+                    && !self.editor.entering_syllable()
+                    && !self.editor.is_selecting()
+                {
+                    // 組字中的半形符號：放進組字區，與全形符號一致
+                    self.insert_latin(&text);
+                } else {
+                    // 組字中先送出組字，順序才正確
+                    let composed = self.flush();
+                    self.join(&mut commit, &composed);
+                    self.join(&mut commit, &text);
+                }
             } else if let Some(notice) = self.learning_key(ev) {
                 r.notice = Some(notice);
             } else if !self.navigate_candidates(ev) {
@@ -1311,7 +1324,10 @@ impl Session {
         self.reset();
         if self.eff.on_focus == OnFocus::Reset {
             self.mode = self.eff.default_mode;
-            self.width = self.eff.width;
+            self.width = match self.rule_width {
+                Some(w) => w,
+                None => self.engine.width().unwrap_or(self.eff.width),
+            };
         }
     }
 
@@ -1468,4 +1484,12 @@ fn contains_word(text: &str, word: &str) -> bool {
         let after = text[i + word.len()..].chars().next();
         !before.is_some_and(|c| c.is_ascii_alphabetic()) && !after.is_some_and(|c| c.is_ascii_alphabetic())
     })
+}
+
+/// 全半形初始值：App 規則明確指定 > 上次切換的狀態 > 設定檔預設
+fn initial_width(opts: &SessionOptions, eff: &Effective) -> Width {
+    match opts.rule.as_ref().and_then(|r| r.punctuation) {
+        Some(w) => w,
+        None => opts.engine.width().unwrap_or(eff.width),
+    }
 }

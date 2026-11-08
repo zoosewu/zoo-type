@@ -364,13 +364,14 @@ fn half_width_keeps_bopomofo_keys() {
 }
 
 #[test]
-fn half_width_symbol_commits_composition_first() {
+fn half_width_symbol_joins_composition() {
     let mut h = Harness::new();
     half(&mut h);
     h.type_str("wu0 fu4");
     let r = h.press(Key::Char(b'/'), Mods::shift());
-    assert_eq!(r.commit.as_deref(), Some("天氣?"));
-    assert!(!h.s.is_composing());
+    assert_eq!(r.commit, None);
+    assert_eq!(h.s.preedit().text, "天氣?");
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("天氣?"));
 }
 
 #[test]
@@ -1383,4 +1384,26 @@ fn forget_hotkey_on_english_word_stops_auto_english() {
     let mut h2 = again(&h);
     h2.type_str("repo ");
     assert_ne!(h2.s.preedit().text, "repo ");
+}
+
+#[test]
+fn halfwidth_symbol_stays_in_composition() {
+    // 半形模式下，組字中打的半形符號留在組字區，Enter 才一起送出
+    let mut h = Harness::new();
+    h.press(Key::Space, Mods::shift()); // 切半形
+    h.type_str("ji3"); // 我
+    let r = h.press(Key::Char(b'1'), Mods::shift()); // !
+    assert!(r.commit.is_none());
+    assert_eq!(h.s.preedit().text, "我!");
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("我!"));
+}
+
+#[test]
+fn width_is_remembered_across_sessions() {
+    // 切到別的輸入法再切回來（新的 session）全半形維持
+    let mut h = Harness::new();
+    let r = h.press(Key::Space, Mods::shift());
+    let w = r.width_changed.expect("切換全半形");
+    let h2 = again(&h);
+    assert_eq!(h2.s.width(), w);
 }
