@@ -1520,3 +1520,13 @@ fn simplified_only_chars_use_taiwan_usage() {
     }
     assert_eq!(e.to_traditional("我的手机"), "我的手機");
 }
+
+#[test]
+fn composition_bar_hotkey_is_reported_in_any_mode() {
+    let mut h = Harness::new();
+    let ctrl_shift = Mods { ctrl: true, shift: true, ..Mods::NONE };
+    let r = h.press(Key::F(11), ctrl_shift);
+    assert!(r.eaten && r.toggle_composition_bar);
+    h.tap_shift(); // 英文模式也能切換
+    assert!(h.press(Key::F(11), ctrl_shift).toggle_composition_bar);
+}

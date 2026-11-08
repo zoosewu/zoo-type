@@ -37,6 +37,7 @@ export struct Hotkeys {
     pin: string,
     emoji: string,
     ai: string,
+    bar: string,
 }
 
 export struct Theme {
@@ -60,6 +61,7 @@ export struct AppRuleRow {
     on-focus: int,          // 0 / 1 記住 / 2 重設
     game: int,              // 0 關 / 1 鎖定英文 / 2 保留狀態
     detect: int,            // 0 / 1 開 / 2 關
+    bar: int,               // 組字提示列：0 沿用 / 1 開 / 2 關
 }
 
 export struct Phrase {
@@ -286,9 +288,10 @@ export component SettingsWindow inherits Window {
                     { label: "固頂（候選窗）", idx: 4 },
                     { label: "Emoji", idx: 5 },
                     { label: "AI 修正", idx: 6 },
+                    { label: "組字提示列（目前 App）", idx: 7 },
                 ]: Row {
                     label: item.label;
-                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : item.idx == 4 ? root.hotkeys.pin : item.idx == 5 ? root.hotkeys.emoji : root.hotkeys.ai;
+                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : item.idx == 4 ? root.hotkeys.pin : item.idx == 5 ? root.hotkeys.emoji : item.idx == 6 ? root.hotkeys.ai : root.hotkeys.bar;
                     LineEdit {
                         width: 220px;
                         text: parent.value;
@@ -301,6 +304,7 @@ export component SettingsWindow inherits Window {
                             if item.idx == 4 { root.hotkeys.pin = t; }
                             if item.idx == 5 { root.hotkeys.emoji = t; }
                             if item.idx == 6 { root.hotkeys.ai = t; }
+                            if item.idx == 7 { root.hotkeys.bar = t; }
                         }
                     }
                     Text {
@@ -372,6 +376,7 @@ export component SettingsWindow inherits Window {
                     Row { label: "輸出"; ComboBox { width: 160px; model: ["沿用全域", "繁體", "簡體"]; current-index <=> root.app-edit.output; } }
                     Row { label: "遊戲模式"; ComboBox { width: 160px; model: ["關", "鎖定英文", "保留中英狀態"]; current-index <=> root.app-edit.game; } }
                     Row { label: "自動偵測"; ComboBox { width: 160px; model: ["沿用全域", "開", "關"]; current-index <=> root.app-edit.detect; } }
+                    Row { label: "組字提示列"; ComboBox { width: 160px; model: ["沿用全域", "開", "關"]; current-index <=> root.app-edit.bar; } }
                     HorizontalLayout { alignment: start; Button { text: "套用"; clicked => { root.apply-app(); } } }
                 }
             }

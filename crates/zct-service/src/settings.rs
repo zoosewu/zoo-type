@@ -41,6 +41,25 @@ impl Settings {
     }
 
     /// 目前的設定；檔案變更時重新讀取。格式錯誤時沿用上一份正確的設定（第一次則用預設值）
+    /// 組字提示列快捷鍵：把這個 App 的設定寫進 apps.toml（沒有規則就新增一條）
+    pub fn set_composition_bar(&self, exe: &str, on: bool) -> Result<(), String> {
+        let (_, mut apps) = self.current();
+        match apps
+            .apps
+            .iter_mut()
+            .find(|r| r.windows.as_deref().is_some_and(|w| w.eq_ignore_ascii_case(exe)))
+        {
+            Some(rule) => rule.composition_bar = Some(on),
+            None => apps.apps.push(zct_core::AppRule {
+                name: exe.trim_end_matches(".exe").to_owned(),
+                windows: Some(exe.to_owned()),
+                composition_bar: Some(on),
+                ..Default::default()
+            }),
+        }
+        apps.save(&self.apps_path).map_err(|e| e.to_string())
+    }
+
     pub fn current(&self) -> (Config, AppRules) {
         let stamp = Stamp {
             config: mtime(&self.config_path),

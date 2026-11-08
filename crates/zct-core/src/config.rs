@@ -158,6 +158,8 @@ pub struct HotkeyConfig {
     pub emoji: Binding,
     /// AI 修正組字內容中的同音錯字
     pub ai: Binding,
+    /// 切換目前 App 的組字提示列（寫進 App 規則記住；看不到組字的終端機用）
+    pub composition_bar: Binding,
 }
 
 impl Default for HotkeyConfig {
@@ -171,6 +173,7 @@ impl Default for HotkeyConfig {
             // 不用 Ctrl+Alt：RichEdit（Win11 記事本）、Word 內建 Ctrl+Alt+E = €，部分鍵盤配置也把 Ctrl+Alt 當 AltGr
             emoji: Binding::key("ctrl+shift+;"),
             ai: Binding::key("ctrl+shift+'"),
+            composition_bar: Binding::key("ctrl+shift+f11"),
         }
     }
 }
@@ -341,7 +344,9 @@ pub struct ThemeConfig {
     pub text: Color,
     pub number: Color,
     pub highlight: Color,
-    /// 組字提示列：游標上方另開視窗顯示組字內容（預設關閉；App 自己畫的底線不明顯時可以打開）
+    /// 組字提示列：游標上方另開視窗顯示組字內容與游標（全域預設，預設關閉）
+    ///
+    /// 個別 App 用快捷鍵（預設 Ctrl+Shift+F11）切換並記在 App 規則；純終端機預設開啟。
     pub composition_bar: bool,
 }
 

@@ -75,6 +75,8 @@ pub struct KeyResult {
     pub ai_request: Option<String>,
     /// 要發出提示音（例如組不成字的注音：保留注音並提示，與微軟新注音相同）
     pub bell: bool,
+    /// 使用者按了組字提示列快捷鍵：由服務程序切換這個 App 的設定並記住
+    pub toggle_composition_bar: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -357,7 +359,10 @@ impl Session {
         if self.emoji.is_some() {
             return !ev.mods.has_command_modifier();
         }
-        if self.hotkeys.game_mode.matches(ev) || self.chinese_hotkey(ev) {
+        if self.hotkeys.game_mode.matches(ev)
+            || self.hotkeys.composition_bar.matches(ev)
+            || self.chinese_hotkey(ev)
+        {
             return true;
         }
         if self.game_mode() == GameMode::English {
@@ -879,6 +884,8 @@ impl Session {
                 r.notice = Some(self.request_ai(&mut r.ai_request));
             } else if self.hotkeys.emoji.matches(ev) && self.chinese_hotkey(ev) {
                 r.notice = self.open_emoji();
+            } else if self.hotkeys.composition_bar.matches(ev) {
+                r.toggle_composition_bar = true;
             } else if self.hotkeys.game_mode.matches(ev) {
                 let text = self.flush();
                 self.join(&mut commit, &text);

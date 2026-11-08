@@ -197,6 +197,8 @@ struct Popup {
     runs: Vec<Run>,
     /// 選擇框（DIP）
     highlight: Option<D2D_RECT_F>,
+    /// 游標（DIP，組字提示列用）
+    caret: Option<D2D_RECT_F>,
     /// 實體像素
     size: (u32, u32),
     scale: f32,
@@ -290,6 +292,7 @@ impl Ui {
                     target: None,
                     runs: Vec::new(),
                     highlight: None,
+                    caret: None,
                     size: (1, 1),
                     scale: 1.0,
                 })
@@ -336,7 +339,7 @@ impl Ui {
                     owner,
                     preedit,
                     anchor,
-                } => match preedit.filter(|p| !p.text.is_empty() && self.theme.composition_bar) {
+                } => match preedit.filter(|p| !p.text.is_empty()) {
                     Some(p) => {
                         self.comp_owner = Some(owner);
                         self.show_composition(&p, anchor)
@@ -657,9 +660,20 @@ impl Ui {
         if let Some(hl) = &mut highlight {
             hl.bottom = PAD_Y + row_h;
         }
+        // 游標：游標前文字的寬度
+        let x0 = PAD_X + ROW_PAD_X;
+        let before: String = chars[..p.cursor.min(chars.len())].iter().collect();
+        let caret_x = if before.is_empty() { x0 } else { x0 + self.layout(&before, &self.text_fmt)?.1 };
+        let caret = D2D_RECT_F {
+            left: caret_x - 0.5,
+            top: PAD_Y + ROW_PAD_Y,
+            right: caret_x + 1.0,
+            bottom: PAD_Y + row_h - ROW_PAD_Y,
+        };
         let (d2d, colors, comp) = (&self.d2d, self.colors, &mut self.comp);
         comp.runs = runs;
         comp.highlight = highlight;
+        comp.caret = Some(caret);
         place_at(comp, anchor, (width, row_h + PAD_Y * 2.0), true)?;
         render(d2d, &colors, comp)
     }
@@ -789,6 +803,9 @@ fn render(d2d: &ID2D1Factory, c: &Colors, p: &mut Popup) -> Result<()> {
                 },
                 &hl,
             );
+        }
+        if let Some(rect) = p.caret {
+            t.FillRectangle(&rect, &fg);
         }
         for run in &p.runs {
             let brush = if run.dim { &dim } else { &fg };

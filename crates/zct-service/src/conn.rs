@@ -60,6 +60,24 @@ fn debug_key(shared: &Shared, id: u64, stage: &str, ev: &zct_core::KeyEvent, res
     );
 }
 
+/// 預設開啟組字提示列的純終端機（App 自己不顯示或常被 TUI 藏起組字）
+const TERMINALS: &[&str] = &[
+    "WindowsTerminal.exe",
+    "OpenConsole.exe",
+    "conhost.exe",
+    "wezterm-gui.exe",
+    "alacritty.exe",
+    "mintty.exe",
+];
+
+/// 這個 App 要不要顯示組字提示列：App 規則 > 純終端機 > 全域設定
+fn composition_bar_for(exe: &str, shared: &Shared) -> bool {
+    let (config, apps) = shared.settings.current();
+    apps.find(exe)
+        .and_then(|r| r.composition_bar)
+        .unwrap_or_else(|| TERMINALS.iter().any(|t| t.eq_ignore_ascii_case(exe)) || config.theme.composition_bar)
+}
+
 fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> {
     let (config, apps) = shared.settings.current();
     let rule = apps.find(exe).cloned();
@@ -153,6 +171,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let mailbox: AiMailbox = Arc::new(Mutex::new(None));
     // 最近一次按鍵結果與狀態提示，等 DLL 回報游標位置後再決定候選窗怎麼顯示
     let mut last: Option<(KeyResult, Option<String>)> = None;
+    // 這個連線的 App 與組字提示列設定（連線時決定，快捷鍵切換）
+    let mut app = String::new();
+    let mut bar = false;
 
     loop {
         let req = match conn.recv() {
@@ -177,6 +198,8 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     Response::Error(format!("protocol {PROTOCOL_VERSION} expected"))
                 } else {
                     log::info!("[{id}] 連線：{exe}（pid {pid}）");
+                    bar = composition_bar_for(&exe, shared);
+                    app = exe.clone();
                     match open_session(id, &exe, shared) {
                         Ok(s) => {
                             let (detect_legacy, detect_fullscreen) = s.detection();
@@ -233,7 +256,16 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                         log::info!("[{id}] 遊戲模式：{}", if on { "開" } else { "關" });
                         on
                     });
-                    last = Some((r.clone(), hint(&r, game)));
+                    let mut tip = hint(&r, game);
+                    if r.toggle_composition_bar {
+                        bar = !bar;
+                        if let Err(e) = shared.settings.set_composition_bar(&app, bar) {
+                            log::warn!("[{id}] 寫入 App 規則失敗：{e}");
+                        }
+                        log::info!("[{id}] 組字提示列：{}（{app}）", if bar { "開" } else { "關" });
+                        tip = Some(format!("組字提示列：{}", if bar { "開" } else { "關" }));
+                    }
+                    last = Some((r.clone(), tip));
                     Response::Key(r)
                 }
                 None => Response::Key(KeyResult::default()),
@@ -242,7 +274,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 if let Some((r, hint)) = last.take() {
                     shared.ui.send(UiCmd::Composition {
                         owner: id,
-                        preedit: Some(r.preedit.clone()),
+                        preedit: bar.then(|| r.preedit.clone()),
                         anchor: rect,
                     });
                     match r.candidates {

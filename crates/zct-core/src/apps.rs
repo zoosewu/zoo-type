@@ -37,6 +37,8 @@ pub struct AppRule {
     pub game_mode: Option<GameMode>,
     /// `false`：這個 App 不做啟發式偵測（例如遊戲聊天框是自己畫的，被誤判成不能打字）
     pub detect: Option<bool>,
+    /// 組字提示列（None：純終端機開，其他沿用全域設定）；快捷鍵切換時自動寫入
+    pub composition_bar: Option<bool>,
 }
 
 impl AppRule {
