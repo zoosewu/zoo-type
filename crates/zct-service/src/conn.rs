@@ -174,6 +174,8 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     // 這個連線的 App 與組字提示列設定（連線時決定，快捷鍵切換）
     let mut app = String::new();
     let mut bar = false;
+    // 組字提示列的位置：組字開始時的游標位置，組字結束前不跟著游標移動
+    let mut bar_anchor: Option<zct_ipc::Rect> = None;
 
     loop {
         let req = match conn.recv() {
@@ -272,10 +274,15 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             },
             Request::Caret(rect) => {
                 if let Some((r, hint)) = last.take() {
+                    if r.preedit.text.is_empty() {
+                        bar_anchor = None;
+                    } else if bar_anchor.is_none() {
+                        bar_anchor = rect;
+                    }
                     shared.ui.send(UiCmd::Composition {
                         owner: id,
                         preedit: bar.then(|| r.preedit.clone()),
-                        anchor: rect,
+                        anchor: bar_anchor.or(rect),
                     });
                     match r.candidates {
                         Some(page) => shared.ui.send(UiCmd::Show {
@@ -351,6 +358,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     }
                 }
                 last = None;
+                bar_anchor = None;
                 shared.ui.send(UiCmd::Hide { owner: id });
                 Response::Ok
             }

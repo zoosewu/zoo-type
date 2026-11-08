@@ -52,6 +52,9 @@ pub struct TextService {
     pending_up: RefCell<Option<KeyResult>>,
     ipc: RefCell<Ipc>,
     fullscreen: FullscreenCache,
+    /// 最後一次從 App 取得的游標位置：App 暫時回報不出來時沿用（VS Code 終端機打注音途中常取不到），
+    /// 避免視窗跳到備用位置再跳回來；焦點換到別的輸入框時清掉
+    last_rect: Cell<Option<Rect>>,
 }
 
 impl TextService {
@@ -62,6 +65,7 @@ impl TextService {
             pending_up: RefCell::default(),
             ipc: RefCell::default(),
             fullscreen: FullscreenCache::default(),
+            last_rect: Cell::new(None),
         }
     }
 
@@ -211,7 +215,11 @@ impl TextService_Impl {
                     TF_ES_SYNC | TF_ES_READWRITE,
                 );
             }
-            rect.set(rect_out.get().or_else(fallback_rect));
+            let got = rect_out.get();
+            if got.is_some() {
+                self.last_rect.set(got);
+            }
+            rect.set(got.or(self.last_rect.get()).or_else(fallback_rect));
         }
         self.call(&Request::Caret(rect.get()));
     }
@@ -219,6 +227,7 @@ impl TextService_Impl {
     fn reset(&self, req: Request) {
         self.composition.borrow_mut().take();
         self.pending_up.borrow_mut().take();
+        self.last_rect.set(None);
         self.call(&req);
         self.refresh_langbar();
     }
