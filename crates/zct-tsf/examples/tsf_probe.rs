@@ -86,6 +86,11 @@ fn vk_of(name: &str) -> Option<VIRTUAL_KEY> {
                 return None;
             }
         }
+        // F1–F24
+        f if f.starts_with('f') => match f[1..].parse::<u16>() {
+            Ok(n @ 1..=24) => VIRTUAL_KEY(VK_F1.0 + n - 1),
+            _ => return None,
+        },
         _ => return None,
     })
 }
