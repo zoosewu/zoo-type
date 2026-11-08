@@ -448,17 +448,19 @@ fn game_hotkey_requests_toggle_in_any_mode() {
 }
 
 #[test]
-fn simplified_output_converts_commit_preedit_and_candidates() {
+fn simplified_output_shows_traditional_and_converts_on_commit() {
+    // 簡體模式：組字區與候選窗一律顯示繁體，送出時整句轉成簡體
     let mut c = Config::default();
     c.input.output = Output::Simplified;
     let mut h = Harness::with_config(c);
     h.type_str("wu0 fu4");
-    assert_eq!(h.s.preedit().text, "天气");
+    assert_eq!(h.s.preedit().text, "天氣");
     let page = {
         h.press(Key::Left, Mods::NONE);
         h.press(Key::Down, Mods::NONE).candidates.unwrap()
     };
-    assert!(page.items.contains(&"气".to_string()), "{:?}", page.items);
+    assert!(page.items.contains(&"氣".to_string()), "{:?}", page.items);
+    assert!(!page.items.contains(&"气".to_string()), "簡體字不出現：{:?}", page.items);
     h.press(Key::Esc, Mods::NONE);
     assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("天气"));
 }
@@ -1406,4 +1408,125 @@ fn width_is_remembered_across_sessions() {
     let w = r.width_changed.expect("切換全半形");
     let h2 = again(&h);
     assert_eq!(h2.s.width(), w);
+}
+
+/// 打 ㄔㄨㄥˊ ㄎㄞ ㄐㄧ，把第一個字改成「重」後送出
+fn correct_chong(h: &mut Harness) -> Option<String> {
+    h.type_str("tj/6d9 ru ");
+    h.press(Key::Home, Mods::NONE);
+    let mut page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
+    for _ in 0..page.total_pages {
+        if let Some(i) = page.items.iter().position(|w| w == "重") {
+            h.press(Key::Char(b'0' + ((i + 1) % 10) as u8), Mods::NONE);
+            return h.press(Key::Enter, Mods::NONE).commit;
+        }
+        page = h.press(Key::Right, Mods::NONE).candidates.expect("候選窗");
+    }
+    None
+}
+
+#[test]
+fn correction_is_learned_on_second_time() {
+    let mut h = Harness::new();
+    h.type_str("tj/6d9 ru ");
+    assert_eq!(h.s.preedit().text, "蟲開機", "詞庫預設（若詞庫更新後已正確，這個測試要換例子）");
+    h.press(Key::Esc, Mods::NONE);
+    h.s.reset();
+
+    assert_eq!(correct_chong(&mut h).as_deref(), Some("重開機"));
+    let mut h2 = again(&h);
+    h2.type_str("tj/6d9 ru ");
+    assert_eq!(h2.s.preedit().text, "蟲開機", "改一次還不學（保守）");
+    h2.s.reset();
+
+    assert_eq!(correct_chong(&mut h2).as_deref(), Some("重開機"));
+    let mut h3 = again(&h2);
+    h3.type_str("tj/6d9 ru ");
+    assert_eq!(h3.s.preedit().text, "重開機", "改兩次學起來");
+    // 學的是「重開機」這個詞，單獨的 ㄔㄨㄥˊ 不受影響
+    h3.s.reset();
+    h3.type_str("tj/6");
+    assert_eq!(h3.s.preedit().text, "蟲");
+}
+
+#[test]
+fn correction_undone_before_commit_is_not_counted() {
+    let mut h = Harness::new();
+    for _ in 0..2 {
+        h.type_str("tj/6d9 ru ");
+        h.press(Key::Home, Mods::NONE);
+        let page = h.press(Key::Down, Mods::NONE).candidates.unwrap();
+        let _ = page;
+        h.press(Key::Right, Mods::NONE);
+        h.press(Key::Char(b'2'), Mods::NONE); // 改成第二頁某個字
+        h.s.reset(); // 沒送出
+    }
+    let mut h2 = again(&h);
+    h2.type_str("tj/6d9 ru ");
+    assert_eq!(h2.s.preedit().text, "蟲開機");
+}
+
+#[test]
+fn single_char_candidates_rank_common_reading_and_hide_simplified() {
+    // ㄔㄨㄥˊ：「重」（重新、重複…）排第一；簡體字（烛、蛊）不出現
+    let mut h = Harness::new();
+    h.type_str("tj/6");
+    let page = h.press(Key::Down, Mods::NONE).candidates.unwrap();
+    assert_eq!(page.items[0], "重", "{:?}", page.items);
+    let mut all = page.items.clone();
+    for _ in 1..page.total_pages {
+        all.extend(h.press(Key::Right, Mods::NONE).candidates.unwrap().items);
+    }
+    for c in ["烛", "蛊"] {
+        assert!(!all.contains(&c.to_string()), "{c}：{all:?}");
+    }
+    assert!(all.contains(&"种".to_string()), "繁體也用的字保留：{all:?}");
+}
+
+#[test]
+fn phrase_and_single_candidates_are_one_list() {
+    // 天氣：詞（天氣、天啟…）在前，單字（天、添…）接在後面，同一份清單
+    let mut h = Harness::new();
+    h.type_str("wu0 fu4");
+    h.press(Key::Home, Mods::NONE);
+    let first = h.press(Key::Down, Mods::NONE).candidates.unwrap();
+    assert_eq!(first.items[0].chars().count(), 2, "{:?}", first.items);
+    let mut all = first.items.clone();
+    for _ in 1..first.total_pages {
+        all.extend(h.press(Key::Right, Mods::NONE).candidates.unwrap().items);
+    }
+    let single = all.iter().position(|w| w.chars().count() == 1).expect("有單字");
+    assert!(all[single..].iter().all(|w| w.chars().count() == 1), "單字在詞之後：{all:?}");
+    // 選單字「添」：換算回 chewing 的單字那一組
+    let i = all.iter().position(|w| w == "添").expect("添");
+    h.press(Key::Esc, Mods::NONE);
+    h.press(Key::Down, Mods::NONE);
+    for _ in 0..i {
+        h.press(Key::Down, Mods::NONE);
+    }
+    h.press(Key::Enter, Mods::NONE);
+    assert!(h.s.preedit().text.starts_with('添'), "{}", h.s.preedit().text);
+}
+
+#[test]
+fn simplified_only_chars_use_taiwan_usage() {
+    let dir = tempfile::tempdir().unwrap();
+    let e = open_engine(dir.path());
+    assert_eq!(e.simplified_only('机'), Some('機'));
+    assert_eq!(e.simplified_only('烛'), Some('燭'));
+    // 台灣也常用的寫法保留
+    for c in ['秘', '群', '后', '种', '機'] {
+        assert_eq!(e.simplified_only(c), None, "{c}");
+    }
+    assert_eq!(e.to_traditional("我的手机"), "我的手機");
+}
+
+#[test]
+fn composition_bar_hotkey_is_reported_in_any_mode() {
+    let mut h = Harness::new();
+    let ctrl_shift = Mods { ctrl: true, shift: true, ..Mods::NONE };
+    let r = h.press(Key::F(11), ctrl_shift);
+    assert!(r.eaten && r.toggle_composition_bar);
+    h.tap_shift(); // 英文模式也能切換
+    assert!(h.press(Key::F(11), ctrl_shift).toggle_composition_bar);
 }

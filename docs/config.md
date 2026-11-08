@@ -35,6 +35,7 @@ forget = "shift+delete"    # 候選窗中：忘記選擇框所在詞的學習紀
 pin = "shift+enter"        # 候選窗中：固頂選擇框所在的詞並選它
 emoji = "ctrl+shift+;"     # Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
 ai = "ctrl+shift+'"         # AI 修正組字內容中的同音錯字
+composition_bar = "ctrl+shift+f11"  # 切換目前 App 的組字提示列（自動寫進 apps.toml 記住）
 
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
@@ -66,6 +67,7 @@ background = "#FFFFFF"
 text = "#1A1A1A"
 number = "#7A7A7A"
 highlight = "#CCE4F7"      # 選擇框
+composition_bar = false    # 組字提示列的全域預設（游標上方另開視窗顯示組字內容與游標）
 
 [candidates]
 per_page = 9               # 每頁候選字數（1–10）
@@ -126,6 +128,7 @@ game_mode = "english"
 | `punctuation` | 同 `[input]` |
 | `output` | 同 `[input]` |
 | `on_focus` | 同 `[input]` |
+| `composition_bar` | 組字提示列：`true` / `false`；沒寫時純終端機（Windows Terminal、conhost、wezterm…）開啟、其他沿用 `[theme]`。在 App 中按組字提示列快捷鍵會自動寫入 |
 | `detect` | `false`：這個 App 不做自動偵測（見下方說明；例如遊戲聊天框是自己畫的，被誤判成不能打字） |
 | `game_mode` | `"off"` 不啟用；`"english"` 鎖定英文，按鍵全部交給 App；`"keep"` 保留中英狀態但 Shift 不切換（例如在遊戲聊天室打中文） |
 

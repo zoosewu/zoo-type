@@ -117,6 +117,7 @@ fn hotkeys_from(c: &Config) -> Hotkeys {
         pin: binding_text(&h.pin),
         emoji: binding_text(&h.emoji),
         ai: binding_text(&h.ai),
+        bar: binding_text(&h.composition_bar),
     }
 }
 
@@ -128,6 +129,7 @@ fn apply_hotkeys(c: &mut Config, h: &Hotkeys) -> Result<(), String> {
     c.hotkeys.pin = parse_binding(&h.pin)?;
     c.hotkeys.emoji = parse_binding(&h.emoji)?;
     c.hotkeys.ai = parse_binding(&h.ai)?;
+    c.hotkeys.composition_bar = parse_binding(&h.bar)?;
     Ok(())
 }
 
@@ -187,6 +189,7 @@ fn row_from(r: &AppRule) -> AppRuleRow {
             _ => 0,
         },
         detect: index_of(r.detect, &DETECT),
+        bar: index_of(r.composition_bar, &DETECT),
     }
 }
 
@@ -206,6 +209,7 @@ fn rule_from(r: &AppRuleRow) -> AppRule {
             _ => None,
         },
         detect: pick(r.detect, &DETECT),
+        composition_bar: pick(r.bar, &DETECT),
     }
 }
 
@@ -720,6 +724,7 @@ mod tests {
             on_focus: Some(OnFocus::Reset),
             game_mode: Some(GameMode::Keep),
             detect: Some(false),
+            composition_bar: Some(true),
         };
         assert_eq!(rule_from(&row_from(&rule)), rule);
         assert_eq!(rule_from(&row_from(&AppRule::default())), AppRule::default());

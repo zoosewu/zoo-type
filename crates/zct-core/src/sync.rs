@@ -15,6 +15,8 @@ use crate::engine::{Engine, PhraseEntry};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhraseState {
     Normal,
+    /// 選字修正學到的（加權介於一般與固頂之間）
+    Learned,
     Pinned,
     Banned,
 }
@@ -25,6 +27,8 @@ impl PhraseState {
             PhraseState::Banned
         } else if p.is_pinned() {
             PhraseState::Pinned
+        } else if p.is_learned() {
+            PhraseState::Learned
         } else {
             PhraseState::Normal
         }
@@ -33,6 +37,7 @@ impl PhraseState {
     fn as_str(self) -> &'static str {
         match self {
             PhraseState::Normal => "normal",
+            PhraseState::Learned => "learned",
             PhraseState::Pinned => "pinned",
             PhraseState::Banned => "banned",
         }
@@ -41,6 +46,7 @@ impl PhraseState {
     fn parse(s: &str) -> Option<PhraseState> {
         Some(match s {
             "normal" => PhraseState::Normal,
+            "learned" => PhraseState::Learned,
             "pinned" => PhraseState::Pinned,
             "banned" => PhraseState::Banned,
             _ => return None,
