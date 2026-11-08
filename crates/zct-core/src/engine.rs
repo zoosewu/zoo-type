@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 const USER_DICT: &str = "user_dict.csv";
 const HISTORY: &str = "history_dict.bin";
 const STATS: &str = "stats.tsv";
+/// 選字修正的累計次數（讀音 + 字），同一個修正兩次才學起來；單機資料，不同步
+const CORRECTIONS: &str = "corrections.tsv";
 
 #[derive(Debug)]
 pub struct EngineError(String);
@@ -42,7 +44,7 @@ pub struct PhraseEntry {
     pub word: String,
     /// 注音，字與字之間以空白分隔，例如 `ㄊㄧㄢ ㄑㄧˋ`
     pub bopomofo: String,
-    /// 加權：`10` 一般自訂詞、大於 10 固頂、`-100` 封鎖（不出現在候選）
+    /// 加權：`10` 一般自訂詞、`LEARNED` 選字修正學到的、`PINNED` 以上固頂、`-100` 封鎖（不出現在候選）
     pub boost: i8,
 }
 
@@ -50,9 +52,18 @@ impl PhraseEntry {
     pub const BANNED: i8 = UserDict::MIN;
     /// chewing 新加入的自訂詞的加權
     pub const NORMAL: i8 = 10;
+    /// 選字修正學到的詞：只要進了使用者詞庫就足以勝過語言模型的預設（實測「重開機」10 就夠），
+    /// 比手動加的一般詞高一些，離固頂很遠
+    pub const LEARNED: i8 = 30;
+    /// 固頂（Shift + Enter）
+    pub const PINNED: i8 = 100;
 
     pub fn is_pinned(&self) -> bool {
-        self.boost > Self::NORMAL
+        self.boost >= Self::PINNED
+    }
+
+    pub fn is_learned(&self) -> bool {
+        self.boost > Self::NORMAL && self.boost < Self::PINNED
     }
 
     pub fn is_banned(&self) -> bool {
@@ -102,10 +113,16 @@ pub struct Engine {
     /// Emoji 關鍵字（CLDR 繁中註解）；沒有檔案時只能用常用 Emoji
     emoji: crate::emoji::EmojiIndex,
     dir: PathBuf,
+    /// 系統詞庫資料夾（`tsi.csv` 在這裡，用來估計單字的常用程度）
+    sys_dir: PathBuf,
+    /// 單字的常用程度；第一次用到才載入
+    char_usage: std::sync::OnceLock<CharUsage>,
     dirty: AtomicBool,
     /// 還原備份後停止存檔，避免記憶體中的舊資料蓋掉剛還原的檔案
     frozen: AtomicBool,
     stats: Mutex<Vec<DayStats>>,
+    /// 選字修正累計次數：`詞 \t 注音` → 次數
+    corrections: Mutex<std::collections::BTreeMap<String, u32>>,
 }
 
 /// UTC 日期，避免為此引入時間函式庫
@@ -137,6 +154,51 @@ fn write_atomic(path: &Path, f: impl FnOnce(&mut BufWriter<File>) -> std::io::Re
         w.get_ref().sync_all()?;
     }
     std::fs::rename(&tmp, path)
+}
+
+/// 單字使用量（由 tsi.csv 的詞頻加總）
+#[derive(Debug, Default)]
+struct CharUsage {
+    /// （字, 讀音）→ 含有這個字這個讀音的詞的頻率加總
+    by_reading: std::collections::HashMap<(char, String), u64>,
+    /// 字 → 所有讀音合計
+    total: std::collections::HashMap<char, u64>,
+}
+
+/// 讀 libchewing-data 的 tsi.csv（`詞,頻率,注音`），把詞頻加到詞中每個字
+fn load_char_usage(path: &Path) -> CharUsage {
+    let mut usage = CharUsage::default();
+    let Ok(text) = std::fs::read_to_string(path) else {
+        log::warn!("沒有 tsi.csv，單字候選維持 chewing 的順序");
+        return usage;
+    };
+    for line in text.lines().filter(|l| !l.starts_with('#')) {
+        let mut it = line.split(',');
+        let (Some(word), Some(freq), Some(bopomofo)) = (it.next(), it.next(), it.next()) else {
+            continue;
+        };
+        let Ok(freq) = freq.trim().parse::<u64>() else { continue };
+        let readings: Vec<&str> = bopomofo.split(' ').collect();
+        if readings.len() != word.chars().count() {
+            continue;
+        }
+        for (c, r) in word.chars().zip(readings) {
+            *usage.by_reading.entry((c, r.to_owned())).or_insert(0) += freq;
+            *usage.total.entry(c).or_insert(0) += freq;
+        }
+    }
+    usage
+}
+
+fn load_corrections(path: &Path) -> std::collections::BTreeMap<String, u32> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let (key, n) = l.rsplit_once('\t')?;
+            Some((key.to_owned(), n.trim().parse().ok()?))
+        })
+        .collect()
 }
 
 fn load_stats(path: &Path) -> Vec<DayStats> {
@@ -213,9 +275,12 @@ impl Engine {
             user_dict,
             history,
             dir: dir.to_path_buf(),
+            sys_dir: sys_dir.to_path_buf(),
+            char_usage: std::sync::OnceLock::new(),
             dirty: AtomicBool::new(false),
             frozen: AtomicBool::new(false),
             stats: Mutex::new(load_stats(&dir.join(STATS))),
+            corrections: Mutex::new(load_corrections(&dir.join(CORRECTIONS))),
         })
     }
 
@@ -226,6 +291,39 @@ impl Engine {
 
     pub(crate) fn set_width(&self, w: crate::config::Width) {
         *self.width.lock().unwrap_or_else(|e| e.into_inner()) = Some(w);
+    }
+
+    /// 單字在這個讀音下的常用程度
+    ///
+    /// 語言模型給破音字的單字分數常常偏低（「重（ㄔㄨㄥˊ）」排在罕用字之後），
+    /// 因為使用量都記在詞裡（重新、重複…）；改用「含有這個字這個讀音的詞的頻率加總」排序單字候選。
+    /// 沒有 tsi.csv 時全部是 0（維持 chewing 原本的順序）。
+    pub fn char_usage(&self, c: char, reading: &str) -> u64 {
+        self.usage()
+            .by_reading
+            .get(&(c, reading.to_owned()))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn usage(&self) -> &CharUsage {
+        self.char_usage
+            .get_or_init(|| load_char_usage(&self.sys_dir.join("tsi.csv")))
+    }
+
+    /// 只屬於簡體的字 → 對應的繁體字（繁體模式要隱藏或換掉的字）
+    ///
+    /// 條件：OpenCC 字表標成只屬於簡體（見 [`crate::hanzi`]），而且在台灣詞庫裡的使用量
+    /// 不到對應繁體字的 1/10。「秘 / 祕」「群 / 羣」這類台灣也常用的寫法因此保留。
+    pub fn simplified_only(&self, c: char) -> Option<char> {
+        let t = crate::hanzi::traditional_of(c)?;
+        let total = |c: char| self.usage().total.get(&c).copied().unwrap_or(0);
+        (total(c) * 10 < total(t)).then_some(t)
+    }
+
+    /// 把只屬於簡體的字換成繁體（一對一，字數不變，游標位置不受影響）
+    pub fn to_traditional(&self, text: &str) -> String {
+        text.chars().map(|c| self.simplified_only(c).unwrap_or(c)).collect()
     }
 
     /// 使用者的英文單字檔（資料資料夾 `dict/english.txt`，隨 git 同步）
@@ -335,15 +433,69 @@ impl Engine {
     /// 忘記一個詞的學習紀錄，並取消固頂（自訂詞仍保留，加權回到一般值）
     pub(crate) fn forget(&self, syllables: &[Syllable], word: &str) {
         self.history.remove(syllables, word);
-        if let Some(boost) = self.boost_of(syllables, word)
-            && boost > PhraseEntry::NORMAL
+        if self
+            .boost_of(syllables, word)
+            .is_some_and(|b| b > PhraseEntry::NORMAL)
         {
-            // deboost 每次 -10
-            for _ in 0..(boost - PhraseEntry::NORMAL) / 10 {
-                self.user_dict.deboost(syllables, word);
+            self.set_boost(syllables, word, PhraseEntry::NORMAL);
+        }
+        self.corrections_lock().remove(&correction_key(syllables, word));
+        self.mark_dirty();
+    }
+
+    /// 把使用者詞庫中的加權設成 `target`（10、20 … 100）
+    ///
+    /// chewing 只提供 insert（設為 10）、boost（+100，上限 100）、deboost（-10），而且是 i8：
+    /// 加權 28 以上再 boost 會溢位成負數（「取消優先」失效的根因），所以先降到 10 再往上調。
+    /// 每一步都讀回實際值，不自己推算。
+    fn set_boost(&self, syllables: &[Syllable], word: &str, target: i8) {
+        match self.boost_of(syllables, word) {
+            Some(b) if b != PhraseEntry::BANNED => {}
+            _ => self.user_dict.insert(syllables, word),
+        }
+        let cur = || self.boost_of(syllables, word).unwrap_or(PhraseEntry::NORMAL);
+        // 次數上限只是保險，正常情況幾次就結束
+        for _ in 0..30 {
+            if cur() <= PhraseEntry::NORMAL {
+                break;
+            }
+            self.user_dict.deboost(syllables, word);
+        }
+        if target > cur() {
+            self.user_dict.boost(syllables, word);
+        }
+        for _ in 0..30 {
+            if cur() <= target {
+                break;
+            }
+            self.user_dict.deboost(syllables, word);
+        }
+    }
+
+    fn corrections_lock(&self) -> std::sync::MutexGuard<'_, std::collections::BTreeMap<String, u32>> {
+        self.corrections.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 使用者把自動選的字改成 `word` 並送出：同一個修正第二次時學起來（回傳 true）
+    pub(crate) fn note_correction(&self, syllables: &[Syllable], word: &str) -> bool {
+        let n = {
+            let mut c = self.corrections_lock();
+            let n = c.entry(correction_key(syllables, word)).or_insert(0);
+            *n += 1;
+            *n
+        };
+        self.mark_dirty();
+        if n < 2 {
+            return false;
+        }
+        match self.boost_of(syllables, word) {
+            // 封鎖的詞不自動學；已經學過或固頂的不動
+            Some(b) if b == PhraseEntry::BANNED || b >= PhraseEntry::LEARNED => false,
+            _ => {
+                self.set_boost(syllables, word, PhraseEntry::LEARNED);
+                true
             }
         }
-        self.mark_dirty();
     }
 
     /// 固頂：在使用者詞庫中大幅加權
@@ -351,14 +503,11 @@ impl Engine {
     /// chewing 的 boost 是 `i8 + 100` 之後才夾在上限，加權超過 27 時再 boost 會溢位
     /// （debug 版 panic、release 版繞回負數，詞反而被降權），所以已經固頂的詞不再加權。
     pub(crate) fn pin(&self, syllables: &[Syllable], word: &str) {
-        match self.boost_of(syllables, word) {
-            Some(b) if b > PhraseEntry::NORMAL => {}
-            Some(b) if b != PhraseEntry::BANNED => self.user_dict.boost(syllables, word),
-            // 新詞或被封鎖的詞 → insert 成一般自訂詞（10）→ 再加權到 100
-            _ => {
-                self.user_dict.insert(syllables, word);
-                self.user_dict.boost(syllables, word);
-            }
+        if !self
+            .boost_of(syllables, word)
+            .is_some_and(|b| b >= PhraseEntry::PINNED)
+        {
+            self.set_boost(syllables, word, PhraseEntry::PINNED);
         }
         self.mark_dirty();
     }
@@ -467,7 +616,10 @@ impl Engine {
                 self.history.remove(syl.as_ref(), word);
             }
             (PhraseState::Pinned, _) => self.pin(syl.as_ref(), word),
-            (PhraseState::Normal, Some(PhraseState::Pinned)) => self.forget(syl.as_ref(), word),
+            (PhraseState::Learned, _) => self.set_boost(syl.as_ref(), word, PhraseEntry::LEARNED),
+            (PhraseState::Normal, Some(PhraseState::Pinned | PhraseState::Learned)) => {
+                self.forget(syl.as_ref(), word)
+            }
             // 不在詞庫或被封鎖 → 一般自訂詞
             (PhraseState::Normal, _) => self.user_dict.insert(syl.as_ref(), word),
         }
@@ -529,6 +681,13 @@ impl Engine {
                     writeln!(w, "{}\t{}\t{}", s.day, s.chars, s.corrections)?;
                 }
                 Ok(())
+            })?;
+            let corrections = self.corrections_lock().clone();
+            write_atomic(&self.dir.join(CORRECTIONS), |w| {
+                for (key, n) in &corrections {
+                    writeln!(w, "{key}\t{n}")?;
+                }
+                Ok(())
             })
         })();
         if r.is_err() {
@@ -581,6 +740,12 @@ impl Engine {
         Ok(moved)
     }
 
+}
+
+/// 修正次數的鍵：`詞 \t 注音`
+fn correction_key(syllables: &[Syllable], word: &str) -> String {
+    let bopomofo: Vec<String> = syllables.iter().map(|s| s.to_string()).collect();
+    format!("{word}\t{}", bopomofo.join(" "))
 }
 
 #[cfg(test)]
