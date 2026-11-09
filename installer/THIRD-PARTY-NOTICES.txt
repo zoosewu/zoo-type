@@ -1,0 +1,55 @@
+﻿動物園輸入法（ZCT）第三方元件與資料授權聲明
+=============================================
+
+本程式本身以 MIT 或 Apache-2.0 授權（擇一），見 LICENSE-MIT、LICENSE-APACHE。
+原始碼：https://github.com/zoosewu/zoo-type
+
+以下為隨附或內含的第三方元件與資料。
+
+
+程式庫
+------
+
+libchewing（chewing crate）
+  授權：LGPL-2.1-or-later
+  來源：https://codeberg.org/chewing/libchewing
+  說明：注音轉換引擎，靜態連結於 zct-service.exe。本程式完整原始碼公開於上方網址，
+        可替換為修改過的 libchewing 後重新建置（LGPL-2.1 第 6 節）。
+
+Slint
+  授權：GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+  來源：https://slint.dev
+  說明：設定程式（zct-settings.exe）的使用者介面。
+
+ferrous-opencc / OpenCC
+  授權：Apache-2.0
+  來源：https://github.com/apoint123/ferrous-opencc 、https://github.com/BYVoid/OpenCC
+  說明：繁簡轉換；判斷簡體字使用 OpenCC 的 STCharacters 字表。
+
+其他 Rust 相依套件
+  授權：MIT、Apache-2.0、BSD-3-Clause、ISC、Zlib、Unicode-3.0、BSL-1.0、Unlicense 等寬鬆授權
+  清單：原始碼中的 Cargo.lock
+
+
+資料
+----
+
+libchewing-data（dict\ 中的詞庫與語言模型）
+  授權：詞庫 LGPL-2.1-or-later；語言模型 CC-BY-4.0
+  來源：https://codeberg.org/chewing/libchewing-data
+
+Unicode CLDR 繁體中文 Emoji 註解（dict\emoji-zh-Hant.json）
+  授權：Unicode-3.0
+  來源：https://github.com/unicode-org/cldr-json
+
+英文單字表（dict\english.txt）
+  授權：Unlicense（公眾領域）
+  來源：https://github.com/dwyl/english-words
+
+
+安裝程式
+--------
+
+Inno Setup
+  授權：Inno Setup License
+  來源：https://jrsoftware.org/isinfo.php
