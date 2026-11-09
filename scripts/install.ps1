@@ -8,6 +8,9 @@
   System：需要系統管理員權限的部分（註冊 TSF、current.txt、清除舊版）
   User：每個使用者各自的設定（開機自動啟動、開始功能表、鍵盤清單），要以使用者本人的身分執行
   All：兩者（開發版：系統管理員就是使用者本人）
+.PARAMETER DataRoot
+  初次安裝時使用者選的學習資料位置（User 部分使用）。和預設的 %APPDATA%\zct 不同時寫進
+  %APPDATA%\zct\location.toml；已有 location.toml 時一律不覆蓋（更新時沿用原本的位置）。
 .DESCRIPTION
   新舊版本並存（見 crates/zct-service/src/version.rs）：
   - 根目錄的 current.txt 記錄目前版本資料夾與協定版本
@@ -15,7 +18,8 @@
 #>
 param(
     [Parameter(Mandatory)] [string]$Dest,
-    [ValidateSet('All', 'System', 'User')] [string]$Part = 'All'
+    [ValidateSet('All', 'System', 'User')] [string]$Part = 'All',
+    [string]$DataRoot
 )
 $ErrorActionPreference = 'Stop'
 
@@ -95,7 +99,27 @@ public static extern bool MoveFileEx(string existing, string replacement, int fl
     if ($legacy.Count -gt 0) { Remove-Old $legacy '舊的安裝方式留下的檔案' }
 }
 
+# 學習資料位置：寫進 %APPDATA%\zct\location.toml（zct-core 的 paths.rs 依此尋找資料根目錄）
+function Set-DataRoot([string]$path) {
+    $pointerDir = Join-Path $env:APPDATA 'zct'
+    $pointer = Join-Path $pointerDir 'location.toml'
+    if (-not $path) { return }
+    if (Test-Path $pointer) {
+        Write-Host "沿用原本的學習資料位置（$pointer）"
+        return
+    }
+    $full = [IO.Path]::GetFullPath($path).TrimEnd('\')
+    if ($full -ieq $pointerDir) { return }
+    New-Item -ItemType Directory -Force -Path $pointerDir, $full | Out-Null
+    # TOML 基本字串：反斜線與雙引號要跳脫
+    $escaped = $full.Replace('\', '\\').Replace('"', '\"')
+    # 不加 BOM（PowerShell 5.1 的 -Encoding UTF8 會加；zct-core 雖然也能讀，仍以標準格式為準）
+    [IO.File]::WriteAllText($pointer, "data_root = `"$escaped`"`r`n", (New-Object Text.UTF8Encoding $false))
+    Write-Host "學習資料位置：$full"
+}
+
 function Install-User {
+    Set-DataRoot $DataRoot
     Write-Host '建立開始功能表捷徑'
     $startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) '動物園輸入法 設定.lnk'
     # 舊名稱的捷徑

@@ -37,8 +37,9 @@ pub fn resolve(env_home: Option<PathBuf>, pointer_dir: &Path) -> PathBuf {
         return home;
     }
     let pointer = pointer_dir.join(POINTER_FILE);
+    // 用記事本或 PowerShell 5.1 寫的檔案開頭可能有 BOM，toml 不接受
     if let Ok(text) = std::fs::read_to_string(&pointer)
-        && let Ok(p) = toml::from_str::<Pointer>(&text)
+        && let Ok(p) = toml::from_str::<Pointer>(text.trim_start_matches('\u{feff}'))
     {
         return if p.data_root.is_absolute() {
             p.data_root
@@ -97,6 +98,17 @@ impl DataRoot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_with_bom() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(POINTER_FILE),
+            "\u{feff}data_root = \"D:\\\\My Data\\\\學習資料\"\r\n",
+        )
+        .unwrap();
+        assert_eq!(resolve(None, dir.path()), PathBuf::from("D:\\My Data\\學習資料"));
+    }
 
     #[test]
     fn env_wins() {

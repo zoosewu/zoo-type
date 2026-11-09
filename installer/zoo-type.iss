@@ -55,6 +55,36 @@ Source: "..\scripts\uninstall.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversi
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall.ps1"" -Base ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "ZctUninstall"
 
 [Code]
+var
+  DataPage: TInputDirWizardPage;
+  { 精靈啟動時判斷一次，之後顯示頁面與執行安裝步驟都用同一個結果 }
+  IsExistingUser: Boolean;
+
+{ 已經用過（有 location.toml 或任何資料）：不再詢問，沿用原本的學習資料位置 }
+function ExistingUser: Boolean;
+var
+  Dir: String;
+begin
+  Dir := ExpandConstant('{userappdata}\zct');
+  Result := FileExists(Dir + '\location.toml') or FileExists(Dir + '\config.toml') or DirExists(Dir + '\local');
+end;
+
+procedure InitializeWizard;
+begin
+  IsExistingUser := ExistingUser;
+  DataPage := CreateInputDirPage(wpLicense, '學習資料位置',
+    '使用者詞庫、學習紀錄與設定要存在哪裡？',
+    '之後更新會沿用這個位置。若要用 git 或雲端硬碟同步，可以選在同步資料夾裡。',
+    False, '');
+  DataPage.Add('');
+  DataPage.Values[0] := ExpandConstant('{userappdata}\zct');
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = DataPage.ID) and IsExistingUser;
+end;
+
 { 執行共用的安裝核心；失敗時提示（靜默安裝時可用 /SUPPRESSMSGBOXES 略過） }
 procedure RunPart(Part: String; AsOriginalUser: Boolean);
 var
@@ -64,6 +94,9 @@ var
 begin
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\install.ps1') +
     '" -Dest "' + ExpandConstant('{app}\{#Version}') + '" -Part ' + Part;
+  { 初次安裝才帶學習資料位置；更新時沿用 location.toml }
+  if (Part = 'User') and not IsExistingUser then
+    Params := Params + ' -DataRoot "' + DataPage.Values[0] + '"';
   if AsOriginalUser then
     Ok := ExecAsOriginalUser('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, Code)
   else
