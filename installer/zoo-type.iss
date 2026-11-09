@@ -21,8 +21,9 @@ AppPublisher=zoosewu
 AppPublisherURL=https://github.com/zoosewu/zoo-type
 AppSupportURL=https://github.com/zoosewu/zoo-type/issues
 AppUpdatesURL=https://github.com/zoosewu/zoo-type/releases
-; 安裝位置固定（與開發版相同，可互相覆蓋）
-DefaultDirName={autopf}\ZCT
+; 安裝位置固定（與開發版相同，可互相覆蓋）；改名前是 {autopf}\ZCT，不沿用舊位置
+DefaultDirName={autopf}\ZooType
+UsePreviousAppDir=no
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
@@ -35,7 +36,7 @@ OutputDir=..\target\installer
 OutputBaseFilename=zoo-type-{#Version}-windows-x64-setup
 SetupIconFile=..\crates\zct-tsf\res\zct.ico
 UninstallDisplayName=動物園輸入法
-UninstallDisplayIcon={app}\{#Version}\zct_tsf.dll
+UninstallDisplayIcon={app}\{#Version}\zoo_type.dll
 LicenseFile=..\LICENSE-MIT
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -61,12 +62,15 @@ var
   IsExistingUser: Boolean;
 
 { 已經用過（有 location.toml 或任何資料）：不再詢問，沿用原本的學習資料位置 }
-function ExistingUser: Boolean;
-var
-  Dir: String;
+function HasData(Dir: String): Boolean;
 begin
-  Dir := ExpandConstant('{userappdata}\zct');
   Result := FileExists(Dir + '\location.toml') or FileExists(Dir + '\config.toml') or DirExists(Dir + '\local');
+end;
+
+function ExistingUser: Boolean;
+begin
+  { 改名前的資料夾是 zct（服務程序第一次啟動時會搬到 ZooType） }
+  Result := HasData(ExpandConstant('{userappdata}\ZooType')) or HasData(ExpandConstant('{userappdata}\zct'));
 end;
 
 procedure InitializeWizard;
@@ -77,7 +81,7 @@ begin
     '之後更新會沿用這個位置。若要用 git 或雲端硬碟同步，可以選在同步資料夾裡。',
     False, '');
   DataPage.Add('');
-  DataPage.Values[0] := ExpandConstant('{userappdata}\zct');
+  DataPage.Values[0] := ExpandConstant('{userappdata}\ZooType');
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;

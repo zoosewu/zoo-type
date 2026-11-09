@@ -6,7 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "zct_tsf"
+# 產出 zoo_type.dll（安裝後使用者看得到的檔名）
+name = "zoo_type"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

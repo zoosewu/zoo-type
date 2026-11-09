@@ -113,7 +113,7 @@ impl Ipc {
             return;
         }
         let Some(dir) = dll_dir() else { return };
-        let exe = dir.join("zct-service.exe");
+        let exe = dir.join("zoo-type-service.exe");
         if !exe.exists() {
             return;
         }

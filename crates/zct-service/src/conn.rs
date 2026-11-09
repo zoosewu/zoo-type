@@ -102,7 +102,7 @@ fn spawn_ai(id: u64, original: String, shared: &Shared, mailbox: AiMailbox) {
     let endpoint = zct_ai::Endpoint {
         base_url: cfg.endpoint.clone(),
         model: cfg.model.clone(),
-        api_key: zct_ipc::secret::read(zct_ipc::secret::AI_API_KEY),
+        api_key: zct_ipc::secret::read_ai_key(),
         timeout: Duration::from_secs(cfg.timeout_seconds.max(1)),
     };
     std::thread::spawn(move || {
@@ -144,14 +144,14 @@ fn run_command(cmd: Command, shared: &Shared) {
         Command::OpenSettings => {
             let exe = std::env::current_exe()
                 .ok()
-                .and_then(|p| p.parent().map(|d| d.join("zct-settings.exe")));
+                .and_then(|p| p.parent().map(|d| d.join("zoo-type-settings.exe")));
             match exe.filter(|p| p.exists()) {
                 Some(exe) => {
                     if let Err(e) = std::process::Command::new(exe).spawn() {
                         log::warn!("無法開啟設定程式：{e}");
                     }
                 }
-                None => log::warn!("找不到設定程式 zct-settings.exe"),
+                None => log::warn!("找不到設定程式 zoo-type-settings.exe"),
             }
         }
         Command::ToggleGame => {

@@ -1,7 +1,7 @@
 ﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  開發用安裝：把 release 建置結果放進 Program Files\ZCT\dev-<日期時間>-<commit>，再執行共用的 install.ps1。
+  開發用安裝：把 release 建置結果放進 Program Files\ZooType\dev-<日期時間>-<commit>，再執行共用的 install.ps1。
 .DESCRIPTION
   先以一般權限執行：cargo build --release --workspace、scripts/fetch-dict.sh
   再以系統管理員身分執行本腳本。
@@ -13,9 +13,9 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root 'target\release'
 $dict = Join-Path $root 'assets\dict'
-$base = Join-Path $env:ProgramFiles 'ZCT'
+$base = Join-Path $env:ProgramFiles 'ZooType'
 
-foreach ($f in @("$release\zct_tsf.dll", "$release\zct-service.exe", "$release\zct-settings.exe", "$dict\static_dict.bin")) {
+foreach ($f in @("$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe", "$dict\static_dict.bin")) {
     if (-not (Test-Path $f)) { throw "找不到 $f；請先 cargo build --release 並執行 scripts/fetch-dict.sh" }
 }
 
@@ -25,9 +25,9 @@ if (& git -C $root status --porcelain 2>$null) { $commit = "$commit-dirty" }
 $dest = Join-Path $base "dev-$(Get-Date -Format yyyyMMdd-HHmmss)-$commit"
 
 Write-Host "安裝到 $dest"
-Get-Process zct-settings -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process zoo-type-settings, zct-settings -ErrorAction SilentlyContinue | Stop-Process -Force
 New-Item -ItemType Directory -Force -Path $dest, "$dest\dict" | Out-Null
-Copy-Item "$release\zct_tsf.dll", "$release\zct-service.exe", "$release\zct-settings.exe" $dest
+Copy-Item "$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe" $dest
 Copy-Item "$dict\*" "$dest\dict"
 
 & (Join-Path $PSScriptRoot 'install.ps1') -Dest $dest -Part All

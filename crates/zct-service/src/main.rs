@@ -194,9 +194,14 @@ mod app {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
 
+        // 改名前的 %APPDATA%\zct 搬到 %APPDATA%\ZooType（找資料根目錄之前）
+        let migrated = zct_core::paths::migrate_legacy();
         let data = DataRoot::discover().ok_or("找不到資料根目錄")?;
         logger::init(&data.local().join("logs").join("service.log"));
         log::info!("啟動，資料根目錄：{}", data.root().display());
+        if let Some(m) = migrated {
+            log::info!("{m}");
+        }
         handle_stale(None);
 
         // 設定檔寫錯時仍要能打字：settings 會記錄錯誤並改用上一份正確的設定或預設值

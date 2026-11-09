@@ -32,14 +32,14 @@ if (-not $Iscc) {
 }
 if (-not $Iscc) { throw '找不到 ISCC.exe（Inno Setup 6）' }
 
-foreach ($f in @("$release\zct_tsf.dll", "$release\zct-service.exe", "$release\zct-settings.exe", "$dict\static_dict.bin", "$dict\tsi.csv")) {
+foreach ($f in @("$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe", "$dict\static_dict.bin", "$dict\tsi.csv")) {
     if (-not (Test-Path $f)) { throw "找不到 $f；請先 cargo build --release --workspace 並執行 scripts/fetch-dict.sh" }
 }
 
 Write-Host "整理檔案：$stage"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage, "$stage\dict" | Out-Null
-Copy-Item "$release\zct_tsf.dll", "$release\zct-service.exe", "$release\zct-settings.exe" $stage
+Copy-Item "$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe" $stage
 Copy-Item "$dict\*" "$stage\dict"
 Copy-Item (Join-Path $root 'LICENSE-MIT'), (Join-Path $root 'LICENSE-APACHE') $stage
 Copy-Item (Join-Path $root 'installer\THIRD-PARTY-NOTICES.txt') $stage

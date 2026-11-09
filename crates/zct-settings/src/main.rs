@@ -234,7 +234,7 @@ impl Service {
         let hello = Request::Hello {
             version: PROTOCOL_VERSION,
             pid: std::process::id(),
-            exe: "zct-settings.exe".into(),
+            exe: "zoo-type-settings.exe".into(),
         };
         match c.call(&hello, Duration::from_secs(2)) {
             Ok(Response::Welcome { .. }) => Some(c),
@@ -249,7 +249,7 @@ impl Service {
         }
         if let Some(exe) = std::env::current_exe()
             .ok()
-            .and_then(|p| p.parent().map(|d| d.join("zct-service.exe")))
+            .and_then(|p| p.parent().map(|d| d.join("zoo-type-service.exe")))
             .filter(|p| p.exists())
         {
             let _ = std::process::Command::new(exe).spawn();
@@ -331,6 +331,8 @@ fn load_readings() -> Option<zct_core::readings::Readings> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 改名前的 %APPDATA%\zct 搬到 %APPDATA%\ZooType（服務程序也會做，先開哪個都一樣）
+    let _ = zct_core::paths::migrate_legacy();
     let data = DataRoot::discover().ok_or("找不到資料根目錄")?;
     let ui = SettingsWindow::new()?;
     // --page N：直接開啟某一頁（系統匣與開發截圖用）
@@ -356,7 +358,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_theme(theme_from(&config));
     ui.set_sync(sync_from(&config));
     ui.set_ai(ai_from(&config));
-    ui.set_has_api_key(zct_ipc::secret::read(zct_ipc::secret::AI_API_KEY).is_some());
+    ui.set_has_api_key(zct_ipc::secret::read_ai_key().is_some());
     let apps = Rc::new(VecModel::from(rules.apps.iter().map(row_from).collect::<Vec<_>>()));
     ui.set_apps(ModelRc::from(apps.clone()));
     ui.set_apps_rows(table_rows(&apps));
@@ -566,7 +568,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => format!("無法儲存 API Key：{e}"),
                 }
             };
-            ui.set_has_api_key(zct_ipc::secret::read(target).is_some());
+            ui.set_has_api_key(zct_ipc::secret::read_ai_key().is_some());
             ui.set_ai_status(msg.into());
         });
     }
@@ -578,7 +580,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let ep = zct_ai::Endpoint {
                 base_url: a.endpoint.to_string(),
                 model: a.model.to_string(),
-                api_key: zct_ipc::secret::read(zct_ipc::secret::AI_API_KEY),
+                api_key: zct_ipc::secret::read_ai_key(),
                 timeout: Duration::from_secs(a.timeout.max(1) as u64),
             };
             let msg = match zct_ai::ping(&ep) {

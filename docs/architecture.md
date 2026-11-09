@@ -1,6 +1,8 @@
 # 動物園輸入法 架構設計
 
-> 程式內部代號為 ZCT（crate 名稱 `zct-*`、安裝資料夾 `ZCT`、資料資料夾 `%APPDATA%\zct`）。
+> 程式內部代號為 ZCT（crate 名稱 `zct-*`、環境變數 `ZCT_HOME` 等）。使用者看得到的名稱：安裝資料夾 `C:\Program Files\ZooType`、
+> 資料資料夾 `%APPDATA%\ZooType`、程式 `zoo_type.dll`、`zoo-type-service.exe`、`zoo-type-settings.exe`。
+> 改名前的 `ZCT` / `%APPDATA%\zct` 會在安裝與第一次啟動時自動搬移或清除。
 
 > 對應需求：[requirements.md](requirements.md)　查證：[research.md](research.md)
 
@@ -8,8 +10,8 @@
 
 ```
 Windows
-┌──────────── App 程序 ────────────┐        ┌──────────── zct-service.exe（每位使用者一個）────────────┐
-│ zct_tsf.dll（薄層）               │  pipe  │ 引擎（chewing Editor，每個輸入 context 一個 session）     │
+┌──────────── App 程序 ────────────┐        ┌──────── zoo-type-service.exe（每位使用者一個）──────────┐
+│ zoo_type.dll（薄層）              │  pipe  │ 引擎（chewing Editor，每個輸入 context 一個 session）     │
 │  - 收按鍵、本地快速放行判斷        │◀──────▶│ 輸入狀態（中 / 英、遊戲模式、App 規則）                    │
 │  - composition / commit           │  同步   │ 候選窗 / 提示窗繪製（Direct2D）                           │
 │  - GetTextExt 回報游標座標        │  逾時   │ 學習資料（SQLite）、設定熱重載、git 同步（背景）、AI（背景）│
@@ -71,7 +73,7 @@ impl Session {
 
 ```
 指標檔（位置固定）：
-  Windows  %APPDATA%\zct\location.toml
+  Windows  %APPDATA%\ZooType\location.toml
   macOS    ~/Library/Application Support/zct/location.toml
   內容：data_root = "D:/MyData/zct"
 覆寫：環境變數 ZCT_HOME

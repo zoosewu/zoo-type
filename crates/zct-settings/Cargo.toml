@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+# 產出 zoo-type-settings.exe（安裝後使用者看得到的檔名）
+[[bin]]
+name = "zoo-type-settings"
+path = "src/main.rs"
+
 [dependencies]
 slint = "1.18.1"
 zct-core.workspace = true
@@ -12,4 +17,5 @@ zct-ipc.workspace = true
 zct-ai = { path = "../zct-ai" }
 
 [build-dependencies]
+embed-resource = "3"
 slint-build = "1.18.1"

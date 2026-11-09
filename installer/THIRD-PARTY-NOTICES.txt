@@ -13,13 +13,13 @@
 libchewing（chewing crate）
   授權：LGPL-2.1-or-later
   來源：https://codeberg.org/chewing/libchewing
-  說明：注音轉換引擎，靜態連結於 zct-service.exe。本程式完整原始碼公開於上方網址，
+  說明：注音轉換引擎，靜態連結於 zoo-type-service.exe。本程式完整原始碼公開於上方網址，
         可替換為修改過的 libchewing 後重新建置（LGPL-2.1 第 6 節）。
 
 Slint
   授權：GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
   來源：https://slint.dev
-  說明：設定程式（zct-settings.exe）的使用者介面。
+  說明：設定程式（zoo-type-settings.exe）的使用者介面。
 
 ferrous-opencc / OpenCC
   授權：Apache-2.0

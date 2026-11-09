@@ -6310,6 +6310,7 @@ dependencies = [
 name = "zct-service"
 version = "0.1.0"
 dependencies = [
+ "embed-resource",
  "log",
  "windows",
  "windows-numerics",
@@ -6322,6 +6323,7 @@ dependencies = [
 name = "zct-settings"
 version = "0.1.0"
 dependencies = [
+ "embed-resource",
  "slint",
  "slint-build",
  "zct-ai",

@@ -1,8 +1,8 @@
 # 設定檔
 
-設定檔放在**資料根目錄**，Windows 預設是 `%APPDATA%\zct\`。
+設定檔放在**資料根目錄**，Windows 預設是 `%APPDATA%\ZooType\`（初次安裝時可以選別的位置，之後更新會沿用）。
 
-要放到自訂資料夾（例如要用 git 同步），在 `%APPDATA%\zct\location.toml` 寫：
+要放到自訂資料夾（例如要用 git 同步），在 `%APPDATA%\ZooType\location.toml` 寫：
 
 ```toml
 data_root = "D:/Sync/zct"

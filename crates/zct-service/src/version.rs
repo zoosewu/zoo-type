@@ -84,7 +84,7 @@ fn parse(text: &str, own: &str, root: &std::path::Path) -> State {
     }
     State::Stale {
         same_protocol: protocol == PROTOCOL_VERSION,
-        current_exe: root.join(dir).join("zct-service.exe"),
+        current_exe: root.join(dir).join("zoo-type-service.exe"),
     }
 }
 
@@ -102,7 +102,7 @@ mod tests {
             parse(&format!("0.3.0\n{p}\n"), "0.2.0", root),
             State::Stale {
                 same_protocol: true,
-                current_exe: root.join("0.3.0").join("zct-service.exe"),
+                current_exe: root.join("0.3.0").join("zoo-type-service.exe"),
             }
         );
         assert!(matches!(
