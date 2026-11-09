@@ -1,4 +1,6 @@
-# ZCT 架構設計
+# 動物園輸入法 架構設計
+
+> 程式內部代號為 ZCT（crate 名稱 `zct-*`、安裝資料夾 `ZCT`、資料資料夾 `%APPDATA%\zct`）。
 
 > 對應需求：[requirements.md](requirements.md)　查證：[research.md](research.md)
 
@@ -13,7 +15,7 @@ Windows
 │  - GetTextExt 回報游標座標        │  逾時   │ 學習資料（SQLite）、設定熱重載、git 同步（背景）、AI（背景）│
 └──────────────────────────────────┘        └───────────────────────────────────────────────────────────┘
 
-macOS：ZCT.app（IMK 程序）直接內嵌 zct-core，不需要 IPC
+macOS：動物園輸入法.app（IMK 程序）直接內嵌 zct-core，不需要 IPC
 設定 GUI：zct-settings（Slint），只讀寫資料根目錄的檔案，服務程序監看檔案變更後熱重載
 ```
 
