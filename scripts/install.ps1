@@ -6,7 +6,7 @@
   版本資料夾，例如 C:\Program Files\ZCT\0.1.0；裡面要有 zct_tsf.dll、zct-service.exe、zct-settings.exe、dict\
 .PARAMETER Part
   System：需要系統管理員權限的部分（註冊 TSF、current.txt、清除舊版）
-  User：每個使用者各自的設定（開機自動啟動、開始功能表、鍵盤清單），要以使用者本人的身分執行
+  User：每個使用者各自的設定（開機自動啟動、鍵盤清單、學習資料位置），要以使用者本人的身分執行
   All：兩者（開發版：系統管理員就是使用者本人）
 .PARAMETER DataRoot
   初次安裝時使用者選的學習資料位置（User 部分使用）。和預設的 %APPDATA%\zct 不同時寫進
@@ -120,15 +120,10 @@ function Set-DataRoot([string]$path) {
 
 function Install-User {
     Set-DataRoot $DataRoot
-    Write-Host '建立開始功能表捷徑'
-    $startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) '動物園輸入法 設定.lnk'
-    # 舊名稱的捷徑
-    Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'ZCT 設定.lnk') -ErrorAction SilentlyContinue
-    $shell = New-Object -ComObject WScript.Shell
-    $lnk = $shell.CreateShortcut($startMenu)
-    $lnk.TargetPath = Join-Path $Dest 'zct-settings.exe'
-    $lnk.WorkingDirectory = $Dest
-    $lnk.Save()
+    # 不建立開始功能表捷徑：設定程式從工作列輸入法圖示的右鍵選單開啟；清掉舊版建立的捷徑
+    foreach ($n in '動物園輸入法 設定.lnk', 'ZCT 設定.lnk') {
+        Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) $n) -ErrorAction SilentlyContinue
+    }
 
     Write-Host '設定登入時自動啟動服務程序'
     Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ZCT' -Value "`"$(Join-Path $Dest 'zct-service.exe')`""

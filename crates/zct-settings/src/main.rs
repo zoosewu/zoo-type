@@ -362,6 +362,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_apps_rows(table_rows(&apps));
 
     let service = Service::start();
+    ui.set_version(env!("CARGO_PKG_VERSION").into());
     ui.set_online(service.client.is_some());
     ui.set_status(
         config_error

@@ -97,7 +97,7 @@ impl LangBarButton_Impl {
             let game = if self.game.get() { MF_STRING | MF_CHECKED } else { MF_STRING };
             let _ = AppendMenuW(menu, game, ID_GAME as usize, w!("遊戲模式"));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-            let _ = AppendMenuW(menu, MF_STRING, ID_RESTART as usize, w!("重新啟動 ZCT"));
+            let _ = AppendMenuW(menu, MF_STRING, ID_RESTART as usize, w!("重新啟動動物園輸入法"));
             let owner: HWND = {
                 let f = GetFocus();
                 if f.is_invalid() { GetForegroundWindow() } else { f }

@@ -56,9 +56,9 @@ impl ITfDisplayAttributeInfo_Impl for AttributeInfo_Impl {
 
     fn GetDescription(&self) -> Result<BSTR> {
         Ok(BSTR::from(if self.guid == ATTR_TARGET {
-            "ZCT 選字目標"
+            "動物園輸入法 選字目標"
         } else {
-            "ZCT 組字"
+            "動物園輸入法 組字"
         }))
     }
 

@@ -111,7 +111,7 @@ begin
   begin
     { 系統部分：註冊輸入法、current.txt、清除舊版（系統管理員） }
     RunPart('System', False);
-    { 使用者部分：鍵盤清單、開機自動啟動、開始功能表（以安裝者本人的身分） }
+    { 使用者部分：鍵盤清單、開機自動啟動、學習資料位置（以安裝者本人的身分） }
     RunPart('User', True);
   end;
 end;

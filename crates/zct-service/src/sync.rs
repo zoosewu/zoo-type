@@ -18,7 +18,7 @@ use crate::settings::Settings;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const BRANCH: &str = "main";
 
-const GITIGNORE: &str = "# ZCT：單機資料不同步\nlocal/\n*.tmp\n";
+const GITIGNORE: &str = "# 動物園輸入法：單機資料不同步\nlocal/\n*.tmp\n";
 const GITATTRIBUTES: &str =
     "# 詞庫與統計逐行合併，衝突的行兩邊都保留，讀入時以時間較新的為準\ndict/*.tsv merge=union\ndict/english.txt merge=union\nstats/*.tsv merge=union\n";
 
@@ -130,7 +130,7 @@ pub fn run_once(root: &Path, cfg: &SyncConfig, engine: &Engine) -> Result<String
         if has_identity {
             git.ok(&["commit", "-m", &msg])?;
         } else {
-            git.ok(&["-c", "user.name=ZCT", "-c", "user.email=zct@localhost", "commit", "-m", &msg])?;
+            git.ok(&["-c", "user.name=動物園輸入法", "-c", "user.email=zct@localhost", "commit", "-m", &msg])?;
         }
     }
     if remote.is_empty() {
