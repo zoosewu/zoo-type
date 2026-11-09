@@ -57,3 +57,11 @@
 - 規則：
   - 改了 IPC 格式就要提醒使用者重開哪些 App（看服務程序 log 的「協定版本不符」）
   - 發佈正式版前完成協定向下相容（M10），自動更新後舊 App 才能繼續用
+
+## PowerShell 的 $null 傳給 C# string 參數會變成空字串（2026-11-09）
+- 現象：install-dev.ps1 用 `MoveFileEx(path, $null, DELAY_UNTIL_REBOOT)` 排程刪除舊版，結果什麼都沒排；回傳值被 `[void]` 吃掉，沒有任何錯誤
+- 原因：PowerShell 呼叫 .NET / P/Invoke 時把 `$null` 轉成 `""`，MoveFileEx 收到空字串而失敗
+- 規則：
+  - 要傳 null 給 string 參數時用 `[NullString]::Value`
+  - P/Invoke 的回傳值不要用 `[void]` 丟掉；失敗時印出 `GetLastWin32Error()`
+  - 腳本的實際效果要檢查（例如 PendingFileRenameOperations），不能只看腳本有沒有跑完

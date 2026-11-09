@@ -27,7 +27,14 @@ Add-Type -Namespace Zct -Name Native -MemberDefinition @'
 [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
 public static extern bool MoveFileEx(string existing, string replacement, int flags);
 '@
-$MOVEFILE_DELAY_UNTIL_REBOOT = 4
+
+# 排到重開機時刪除（被 App 載入中的檔案無法立即刪除）
+# 注意：PowerShell 把 $null 傳給 string 參數時會變成空字串，MoveFileEx 會因此失敗，必須用 [NullString]::Value
+function Remove-AtReboot([string]$path) {
+    if (-not [Zct.Native]::MoveFileEx($path, [NullString]::Value, 4)) {
+        Write-Warning "無法排程刪除 $path（錯誤 $([Runtime.InteropServices.Marshal]::GetLastWin32Error())）"
+    }
+}
 
 # 檔案是否被 App 載入或正在執行（無法以獨占方式開啟）
 function Test-InUse([string]$path) {
@@ -43,11 +50,11 @@ function Remove-OldVersion([string]$path) {
         Write-Host "  已刪除：$path"
         return
     }
-    foreach ($f in $files) { [void][Zct.Native]::MoveFileEx($f.FullName, $null, $MOVEFILE_DELAY_UNTIL_REBOOT) }
+    foreach ($f in $files) { Remove-AtReboot $f.FullName }
     Get-ChildItem $path -Recurse -Directory -Force | Sort-Object { $_.FullName.Length } -Descending | ForEach-Object {
-        [void][Zct.Native]::MoveFileEx($_.FullName, $null, $MOVEFILE_DELAY_UNTIL_REBOOT)
+        Remove-AtReboot $_.FullName
     }
-    [void][Zct.Native]::MoveFileEx($path, $null, $MOVEFILE_DELAY_UNTIL_REBOOT)
+    Remove-AtReboot $path
     Write-Host "  使用中，重開機後刪除：$path"
 }
 
@@ -121,7 +128,7 @@ if ($legacy.Count -gt 0) {
             Remove-Item $item.FullName -Recurse -Force
         } else {
             $paths = @(Get-ChildItem $item.FullName -Recurse -Force -ErrorAction SilentlyContinue | Sort-Object { $_.FullName.Length } -Descending | ForEach-Object FullName) + $item.FullName
-            foreach ($p in $paths) { [void][Zct.Native]::MoveFileEx($p, $null, $MOVEFILE_DELAY_UNTIL_REBOOT) }
+            foreach ($p in $paths) { Remove-AtReboot $p }
         }
     }
     if ($busy.Count -eq 0) { Write-Host '  已刪除舊的安裝方式留下的檔案' } else { Write-Host '  舊的安裝方式留下的檔案使用中，重開機後刪除' }

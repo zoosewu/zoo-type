@@ -15,6 +15,14 @@ Add-Type -Namespace Zct -Name Native -MemberDefinition @'
 public static extern bool MoveFileEx(string existing, string replacement, int flags);
 '@
 
+# 排到重開機時刪除（被 App 載入中的檔案無法立即刪除）
+# 注意：PowerShell 把 $null 傳給 string 參數時會變成空字串，MoveFileEx 會因此失敗，必須用 [NullString]::Value
+function Remove-AtReboot([string]$path) {
+    if (-not [Zct.Native]::MoveFileEx($path, [NullString]::Value, 4)) {
+        Write-Warning "無法排程刪除 $path（錯誤 $([Runtime.InteropServices.Marshal]::GetLastWin32Error())）"
+    }
+}
+
 Write-Host '從鍵盤清單移除'
 $list = Get-WinUserLanguageList
 foreach ($lang in $list) {
@@ -42,7 +50,7 @@ try {
     Write-Host "已刪除：$base"
 } catch {
     $paths = @(Get-ChildItem $base -Recurse -Force -ErrorAction SilentlyContinue | Sort-Object { $_.FullName.Length } -Descending | ForEach-Object FullName) + $base
-    foreach ($p in $paths) { [void][Zct.Native]::MoveFileEx($p, $null, 4) }
+    foreach ($p in $paths) { Remove-AtReboot $p }
     Write-Host "部分檔案仍被 App 使用，重開機後刪除：$base"
 }
 Write-Host '完成'
