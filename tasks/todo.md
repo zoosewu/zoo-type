@@ -22,14 +22,15 @@
 - [x] install-dev.ps1：裝到 `dev-<日期時間>-<commit>`、不強制結束服務程序；舊版整個資料夾刪除或排到重開機刪除
 - [x] 實機驗證（2026-11-09）：連續安裝兩次；開著的 VS Code 照常輸入、舊服務程序幾秒內讓位、log 沒有「協定版本不符」、使用中的舊版排到重開機刪除
 
-### 1. 正式安裝程式（Inno Setup，`installer/zootype.iss`）
-- [ ] 安裝位置固定 `{autopf}\ZCT`（沿用現在的路徑，開發版與正式版可互相覆蓋）
-- [ ] 檔案：zct_tsf.dll、zct-service.exe、zct-settings.exe、dict/*、授權檔
-- [ ] 安裝：先結束 zct-service → 複製 → regsvr32（註冊 TSF、設為中文預設）→ 以原本使用者身分加入中文（台灣）鍵盤清單第一位 → 登入自動啟動 → 開始功能表「動物園輸入法 設定」
-- [ ] 升級：裝到新的版本資料夾（與 install-dev.ps1 相同邏輯），不覆蓋被載入中的檔案
-- [ ] 解除安裝：結束服務 → regsvr32 /u → 從鍵盤清單移除 → 刪檔；使用者資料（%APPDATA%\zct）保留
-- [ ] 授權聲明：本專案 MIT/Apache-2.0；libchewing-data 詞庫 LGPL-2.1、語言模型 CC-BY-4.0；CLDR Emoji Unicode-3.0；dwyl 英文單字 Unlicense
-- [ ] install-dev.ps1 保留給開發用；安裝邏輯盡量共用（避免兩份行為不同）
+### 1. 正式安裝程式（Inno Setup，`installer/zoo-type.iss`）
+- [x] 安裝位置固定 `{autopf}\ZCT\<版本>`（與開發版相同的根目錄，可互相覆蓋）
+- [x] 檔案：zct_tsf.dll、zct-service.exe、zct-settings.exe、dict/*、授權檔、THIRD-PARTY-NOTICES.txt
+- [x] 安裝：複製到版本資料夾 → install.ps1 System（regsvr32、current.txt、清除舊版）→ install.ps1 User 以安裝者本人身分（鍵盤清單第一位、登入自動啟動、開始功能表「動物園輸入法 設定」）；不要求關閉程式
+- [x] 升級：裝到新的版本資料夾（與 install-dev.ps1 共用 install.ps1），不覆蓋被載入中的檔案
+- [x] 解除安裝：uninstall.ps1（結束服務 → regsvr32 /u → 從鍵盤清單移除 → 刪除或排程刪除）；使用者資料保留
+- [x] 授權聲明：installer/THIRD-PARTY-NOTICES.txt（libchewing LGPL 靜態連結 → 原始碼公開即符合）
+- [ ] Slint 授權：Royalty-free 2.0 需二選一 —— 設定程式「關於」畫面放 AboutSlint，或在下載頁放 Slint 標誌（待使用者決定）
+- [x] install-dev.ps1 保留給開發用；安裝邏輯共用 scripts/install.ps1、uninstall.ps1
 
 ### 2. CI（`.github/workflows/ci.yml`，push / PR）
 - [ ] windows-latest：fetch-dict.sh → fmt 檢查 → clippy -D warnings → test → build release
@@ -54,7 +55,8 @@
 - [ ] `scripts/release.ps1 <版本>`：改版號、commit、打標籤
 
 ### 6. 驗證
-- [ ] 本機用 iscc 產生安裝檔，實際安裝 / 升級 / 解除安裝各一次
+- [x] 本機產生安裝檔並實際安裝（2026-11-09）：資料夾、current.txt、註冊、鍵盤清單、自動啟動、捷徑、解除安裝登記、舊版排程刪除都正確
+- [ ] 解除安裝 / 從正式版升級各測一次
 - [ ] 推到 GitHub 後先推一個測試標籤（例如 v0.2.0-rc.1）確認 release 流程
 
 ## M9 選取文字加入詞庫、重新選字（規劃）
