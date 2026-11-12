@@ -44,14 +44,16 @@ pub struct PhraseEntry {
     pub word: String,
     /// 注音，字與字之間以空白分隔，例如 `ㄊㄧㄢ ㄑㄧˋ`
     pub bopomofo: String,
-    /// 加權：`10` 一般自訂詞、`LEARNED` 選字修正學到的、`PINNED` 以上固頂、`-100` 封鎖（不出現在候選）
+    /// 加權：`0` 一般自訂詞、`LEARNED` 選字修正學到的、`PINNED` 以上固頂、`-100` 封鎖（不出現在候選）
     pub boost: i8,
 }
 
 impl PhraseEntry {
     pub const BANNED: i8 = UserDict::MIN;
-    /// chewing 新加入的自訂詞的加權
-    pub const NORMAL: i8 = 10;
+    /// chewing 新加入的自訂詞的加權（0.14.0-rc.1 起是 0，之前是 10）
+    pub const NORMAL: i8 = 0;
+    /// chewing 0.14.0-rc.1 之前的一般自訂詞加權；讀檔時換成 `NORMAL`
+    const LEGACY_NORMAL: i8 = 10;
     /// 選字修正學到的詞：只要進了使用者詞庫就足以勝過語言模型的預設（實測「重開機」10 就夠），
     /// 比手動加的一般詞高一些，離固頂很遠
     pub const LEARNED: i8 = 30;
@@ -264,7 +266,7 @@ impl Engine {
                 crate::emoji::EmojiIndex::default()
             });
 
-        Ok(Engine {
+        let engine = Engine {
             words,
             user_words: Default::default(),
             width: Mutex::new(None),
@@ -283,7 +285,27 @@ impl Engine {
             frozen: AtomicBool::new(false),
             stats: Mutex::new(load_stats(&dir.join(STATS))),
             corrections: Mutex::new(load_corrections(&dir.join(CORRECTIONS))),
-        })
+        };
+        engine.migrate_normal_boost();
+        Ok(engine)
+    }
+
+    /// chewing 0.14.0-rc.1 起一般自訂詞的加權從 10 改成 0：舊檔的 10 換成 0
+    ///
+    /// 現在的流程不會留下 10（`set_boost` 只設 0、`LEARNED`、`PINNED`），重複執行也安全。
+    fn migrate_normal_boost(&self) {
+        let old: Vec<_> = self
+            .user_dict
+            .entries()
+            .filter(|(syl, word)| self.boost_of(syl.as_ref(), word) == Some(PhraseEntry::LEGACY_NORMAL))
+            .collect();
+        for (syl, word) in &old {
+            self.set_boost(syl.as_ref(), word, PhraseEntry::NORMAL);
+        }
+        if !old.is_empty() {
+            log::info!("自訂詞加權換成新版的一般值：{} 筆", old.len());
+            self.mark_dirty();
+        }
     }
 
     /// 上次切換的全形 / 半形（尚未切換過時為 None，用設定檔的預設）
@@ -445,10 +467,10 @@ impl Engine {
         self.mark_dirty();
     }
 
-    /// 把使用者詞庫中的加權設成 `target`（10、20 … 100）
+    /// 把使用者詞庫中的加權設成 `target`（0、10 … 100）
     ///
-    /// chewing 只提供 insert（設為 10）、boost（+100，上限 100）、deboost（-10），而且是 i8：
-    /// 加權 28 以上再 boost 會溢位成負數（「取消優先」失效的根因），所以先降到 10 再往上調。
+    /// chewing 只提供 insert（設為 0）、boost（+100，上限 100）、deboost（-10），而且是 i8：
+    /// 加權 28 以上再 boost 會溢位成負數（「取消優先」失效的根因），所以先降到 0 再往上調。
     /// 每一步都讀回實際值，不自己推算。
     fn set_boost(&self, syllables: &[Syllable], word: &str, target: i8) {
         match self.boost_of(syllables, word) {

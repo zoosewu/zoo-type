@@ -6,7 +6,7 @@
 ## 1. 注音引擎：libchewing ✅ 採用
 
 - 主開發在 Codeberg：https://codeberg.org/chewing/libchewing （GitHub 為鏡像）
-- 穩定版 0.13.1（2026-07-15）；master 為 0.14.0-alpha.4（API 與詞庫格式大改）
+- 穩定版 0.13.1（2026-07-15）；master 為 0.14.0-alpha.4（API 與詞庫格式大改）；本專案自 2026-11-13 改用 0.14.0-rc.1
 - crates.io：`chewing`（純 Rust、`#![deny(unsafe_code)]`），可直接當 Rust crate 使用
 - 授權：**LGPL-2.1-or-later** → 開源專案靜態連結可行；修改 libchewing 本身須維持 LGPL
 - 能力：

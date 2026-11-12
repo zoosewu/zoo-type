@@ -9,7 +9,7 @@
 - [ ] 設定程式詞庫頁加上英文單字清單（目前可用 Shift+Delete 或直接編輯 dict/english.txt）（原 M8.2：打字回饋修正）
 - [ ] 手動遊戲模式時 DLL 直接放行、不經 IPC（現在每鍵仍問服務程序，正常 <1ms，服務卡住最多 100ms）（原 M8.2：打字回饋修正）
 - [ ] tsf_probe 會把快捷鍵切換的結果寫進使用者真正的 `apps.toml` → 改用獨立的資料資料夾（`ZCT_HOME`）
-- [ ] 升級 chewing 0.14.0-rc.1（待使用者決定）：要改無效音節偵測、Enter 丟掉卡住的注音、自訂詞預設加權 10 → 0；之後刪掉 vendor/chewing
+- [x] 升級 chewing 0.14.0-rc.1（2026-11-13）：打錯的注音由 chewing 保留（含聲調）；注音打到一半按 Enter 連同注音送出；一般自訂詞加權 10 → 0（讀檔時轉換）
 - [ ] 實測「右 Alt + 注音鍵」：TSF 是否把 Alt 組合鍵交給輸入法、放開 Alt 會不會讓 App 選單取得焦點
 
 ## M10 Release 與 GitHub Actions（repo：zoo-type；分支 `m10`；初版完成前不發 release）

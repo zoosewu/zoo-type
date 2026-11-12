@@ -883,7 +883,10 @@ fn invalid_syllable_stays_with_bell() {
     h.type_str("eu");
     let r = h.press(Key::Char(b'3'), Mods::NONE);
     assert!(r.bell);
-    assert_eq!(h.s.preedit().text, "ㄍㄧ");
+    assert_eq!(h.s.preedit().text, "ㄍㄧˇ", "聲調也留著");
+    // 換一個聲調就直接取代
+    h.press(Key::Char(b'4'), Mods::NONE);
+    assert_eq!(h.s.preedit().text, "ㄍㄧˋ");
     // Backspace 清掉整個注音後照常打字
     h.press(Key::Backspace, Mods::NONE);
     assert_eq!(h.s.preedit().text, "");
@@ -1359,24 +1362,24 @@ fn expanded_state_resets_after_selection() {
 }
 
 #[test]
-fn enter_drops_stuck_syllable_and_commits_rest() {
-    // 我ㄍㄟ（組不成字卡住）+ Enter → 送出「我」
+fn enter_commits_stuck_syllable_as_bopomofo() {
+    // 我ㄍㄟ（組不成字卡住）+ Enter → 連同注音一起送出（chewing 0.14 的行為）
     let mut h = Harness::new();
     h.type_str("ji3eo");
     assert!(h.press(Key::Space, Mods::NONE).bell);
     let r = h.press(Key::Enter, Mods::NONE);
     assert!(r.eaten);
-    assert_eq!(r.commit.as_deref(), Some("我"));
+    assert_eq!(r.commit.as_deref(), Some("我ㄍㄟ"));
     assert!(!h.s.is_composing());
 }
 
 #[test]
-fn enter_with_only_stuck_syllable_clears_without_newline() {
+fn enter_with_only_half_typed_syllable_commits_bopomofo() {
     let mut h = Harness::new();
     h.type_str("eu3"); // ㄍㄧˇ 卡住
     let r = h.press(Key::Enter, Mods::NONE);
     assert!(r.eaten, "不要把 Enter 交給 App 換行");
-    assert!(r.commit.is_none());
+    assert_eq!(r.commit.as_deref(), Some("ㄍㄧˇ"));
     assert!(!h.s.is_composing());
 }
 
@@ -1637,4 +1640,22 @@ fn current_char_is_first_in_menu() {
     let again = h.press(Key::Down, Mods::NONE).candidates.unwrap();
     assert_eq!(again.items[0], chosen, "{:?}", again.items);
     assert_eq!(again.items[1], first.items[0], "原本的第一個接在後面：{:?}", again.items);
+}
+
+#[test]
+fn legacy_normal_boost_is_migrated() {
+    // chewing 0.14.0-rc.1 之前一般自訂詞是 10，現在是 0；學到的與固頂不動
+    let dir = tempfile::tempdir().unwrap();
+    let learning = dir.path().join("learning");
+    std::fs::create_dir_all(&learning).unwrap();
+    std::fs::write(
+        learning.join("user_dict.csv"),
+        "酷音,ㄎㄨˋ ㄧㄣ,10\n這穗,ㄓㄜˋ ㄙㄨㄟˋ,30\n天氣,ㄊㄧㄢ ㄑㄧˋ,100\n",
+    )
+    .unwrap();
+    let engine = open_engine(&learning);
+    let boost = |w: &str| engine.phrases().into_iter().find(|p| p.word == w).unwrap().boost;
+    assert_eq!(boost("酷音"), zct_core::PhraseEntry::NORMAL);
+    assert_eq!(boost("這穗"), zct_core::PhraseEntry::LEARNED);
+    assert_eq!(boost("天氣"), zct_core::PhraseEntry::PINNED);
 }

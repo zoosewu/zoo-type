@@ -733,7 +733,9 @@ dependencies = [
 
 [[package]]
 name = "chewing"
-version = "0.14.0-alpha.4"
+version = "0.14.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61601a2c001c64c7cfc1b477c35ab852e6dd0a3265cecf8291e0f83a2e6603e5"
 dependencies = [
  "bstr",
  "der",

@@ -864,20 +864,23 @@ impl Session {
                 self.learn_corrections();
             }
             // 正在打的注音：Backspace 取消整個音節（「相ㄑㄧㄣ」→「相」）；
-            // 卡住（組不成字）時按 Enter 丟掉這個音節，其餘照常送出（「我ㄍㄟ」→「我」）
+            // Enter 連同注音符號一起送出（「我ㄍㄟ」→「我ㄍㄟ」）
             let pending_syllable = !ev.mods.has_command_modifier()
                 && self.emoji.is_none()
                 && self.ai_suggestion().is_none()
                 && self.editor.entering_syllable()
                 && !self.editor.is_selecting();
-            if pending_syllable && matches!(ev.key, Key::Backspace | Key::Enter) {
+            if pending_syllable && ev.key == Key::Backspace {
                 self.editor.cancel_entering_syllable();
                 self.raw.clear();
                 self.english_alt = None;
-                // 只有卡住的注音時，Enter 也不交給 App（不要多換一行）
-                if ev.key == Key::Backspace || self.editor.is_empty() {
-                    return self.finish(r, commit);
-                }
+                return self.finish(r, commit);
+            }
+            if pending_syllable && ev.key == Key::Enter && !ev.mods.shift {
+                // chewing 的 Enter 先把注音變成組字區裡的符號，下面再照常送出整句
+                self.chewing_key(Key::Enter);
+                self.raw.clear();
+                self.english_alt = None;
             }
             if ev.key == Key::Down && !self.editor.is_selecting() && self.emoji.is_none() {
                 // 游標停在英文上時沒有候選可選
@@ -963,20 +966,20 @@ impl Session {
                     Some(chewing_ev) => {
                         let was_composing = self.is_composing();
                         let behavior = self.editor.process_keyevent(chewing_ev);
-                        // 音節組不成字（例如 ㄍㄧˇ）：chewing 會直接清掉注音；
-                        // 改成保留注音並提示，讓使用者自己修正（與微軟新注音相同）
+                        // 音節組不成字（例如 ㄍㄧˇ）：chewing 保留注音（含聲調）讓使用者修正，這裡加上提示音
                         // 注意：組字超過 39 字時 chewing 會自動送出前面的字，長度一樣不變，
-                        // 所以還要確認這次沒有自動送出（否則字送出了、注音卻被補回去）
+                        // 所以還要確認這次沒有自動送出
                         if completed
                             && was_entering
-                            && !self.editor.entering_syllable()
+                            && self.editor.entering_syllable()
                             && self.editor.len() == len_before
                             && self.editor.display_commit().is_empty()
                         {
-                            for b in raw_before.bytes() {
-                                self.chewing_key(Key::Char(b));
-                            }
+                            // 原始按鍵維持和畫面上的注音一致（聲調鍵也留著）
                             self.raw = raw_before;
+                            if let Key::Char(c) = key {
+                                self.raw.push(c as char);
+                            }
                             self.english_alt = None;
                             r.bell = true;
                         } else if completed && self.editor.len() != len_before + 1 {
