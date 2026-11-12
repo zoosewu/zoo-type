@@ -1159,6 +1159,20 @@ impl Session {
                 kind: MenuKind::Word { group, index },
             }));
         }
+        // 目前畫面上從游標開始的那個詞（或字）排第一：打開選單直接按 Enter 不會改掉原本的內容
+        //（犒 → 犒、靠…；天氣 → 天氣、…；游標在詞中間時是那個單字）
+        let current = self
+            .editor
+            .intervals()
+            .find(|it| it.start == start)
+            .map(|it| it.text.to_string())
+            .or_else(|| self.editor.display().chars().nth(start).map(String::from));
+        if let Some(current) = current
+            && let Some(i) = items.iter().position(|it| it.word == current)
+        {
+            let it = items.remove(i);
+            items.insert(0, it);
+        }
         // B：英文選項放在第一頁最後一格
         if self.english_applicable()
             && let Some(w) = &self.english_alt

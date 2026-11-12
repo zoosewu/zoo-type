@@ -1485,7 +1485,9 @@ fn single_char_candidates_rank_common_reading_and_hide_simplified() {
     let mut h = Harness::new();
     h.type_str("tj/6");
     let page = h.press(Key::Down, Mods::NONE).candidates.unwrap();
-    assert_eq!(page.items[0], "重", "{:?}", page.items);
+    // 目前畫面上的字（自動選的「蟲」）排第一，其餘依常用程度：「重」緊接在後
+    assert_eq!(page.items[0], h.s.preedit().text, "{:?}", page.items);
+    assert_eq!(page.items[1], "重", "{:?}", page.items);
     let mut all = page.items.clone();
     for _ in 1..page.total_pages {
         all.extend(h.press(Key::Right, Mods::NONE).candidates.unwrap().items);
@@ -1563,4 +1565,18 @@ fn auto_commit_of_long_composition_leaves_no_bopomofo() {
     committed.push_str(&r.commit.unwrap_or_default());
     assert_eq!(committed.chars().count(), 45, "{committed}");
     assert!(committed.chars().all(|c| c == '我'));
+}
+
+#[test]
+fn current_char_is_first_in_menu() {
+    // 「犒」這類改選過的字：再打開選單時，現在的字排第一（犒、靠…）
+    let mut h = Harness::new();
+    h.type_str("d;4"); // ㄎㄠˋ
+    let first = h.press(Key::Down, Mods::NONE).candidates.unwrap();
+    let chosen = first.items[1].clone();
+    h.press(Key::Char(b'2'), Mods::NONE);
+    assert_eq!(h.s.preedit().text, chosen);
+    let again = h.press(Key::Down, Mods::NONE).candidates.unwrap();
+    assert_eq!(again.items[0], chosen, "{:?}", again.items);
+    assert_eq!(again.items[1], first.items[0], "原本的第一個接在後面：{:?}", again.items);
 }
