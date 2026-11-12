@@ -957,10 +957,13 @@ impl Session {
                         let behavior = self.editor.process_keyevent(chewing_ev);
                         // 音節組不成字（例如 ㄍㄧˇ）：chewing 會直接清掉注音；
                         // 改成保留注音並提示，讓使用者自己修正（與微軟新注音相同）
+                        // 注意：組字超過 39 字時 chewing 會自動送出前面的字，長度一樣不變，
+                        // 所以還要確認這次沒有自動送出（否則字送出了、注音卻被補回去）
                         if completed
                             && was_entering
                             && !self.editor.entering_syllable()
                             && self.editor.len() == len_before
+                            && self.editor.display_commit().is_empty()
                         {
                             for b in raw_before.bytes() {
                                 self.chewing_key(Key::Char(b));

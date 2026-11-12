@@ -1530,3 +1530,24 @@ fn composition_bar_hotkey_is_reported_in_any_mode() {
     h.tap_shift(); // 英文模式也能切換
     assert!(h.press(Key::F(11), ctrl_shift).toggle_composition_bar);
 }
+
+#[test]
+fn auto_commit_of_long_composition_leaves_no_bopomofo() {
+    // chewing 組字超過 39 字時會自動送出前面的字：長度不變，不能誤判成「注音組不成字」而把注音補回去
+    let mut h = Harness::new();
+    let mut committed = String::new();
+    for _ in 0..45 {
+        for r in h.type_str("ji3") {
+            if let Some(c) = r.commit {
+                committed.push_str(&c);
+            }
+        }
+        let text = h.s.preedit().text;
+        assert!(!text.contains('ㄨ') && !text.contains('ㄛ'), "注音殘留：{text}");
+    }
+    assert!(!committed.is_empty(), "超過長度要自動送出");
+    let r = h.press(Key::Enter, Mods::NONE);
+    committed.push_str(&r.commit.unwrap_or_default());
+    assert_eq!(committed.chars().count(), 45, "{committed}");
+    assert!(committed.chars().all(|c| c == '我'));
+}
