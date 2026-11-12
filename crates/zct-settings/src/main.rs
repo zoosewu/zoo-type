@@ -13,6 +13,7 @@ use slint::{Model, ModelRc, SharedString, StandardListViewItem, VecModel};
 use zct_core::config::{Color, GameMode, InputMode, Layout, OnFocus, Output, ShiftToggle, Width};
 use zct_core::hotkey::{Binding, Hotkey};
 use zct_core::paths::DataRoot;
+use zct_core::symbols::SymbolStyle;
 use zct_core::{AppRule, AppRules, Config, PhraseAction, PhraseEntry};
 use zct_ipc::pipe::Client;
 use zct_ipc::{Command, PROTOCOL_VERSION, Request, Response};
@@ -41,6 +42,8 @@ fn general_from(c: &Config) -> General {
         auto_english: c.mixed.auto_english,
         english_candidate: c.mixed.english_candidate,
         auto_space: c.mixed.auto_space,
+        symbol_style: (c.punctuation.shift == SymbolStyle::Chinese) as i32,
+        right_alt: c.punctuation.right_alt,
     }
 }
 
@@ -63,6 +66,8 @@ fn apply_general(c: &mut Config, g: &General) {
     c.mixed.auto_english = g.auto_english;
     c.mixed.english_candidate = g.english_candidate;
     c.mixed.auto_space = g.auto_space;
+    c.punctuation.shift = if g.symbol_style == 1 { SymbolStyle::Chinese } else { SymbolStyle::Keyboard };
+    c.punctuation.right_alt = g.right_alt;
 }
 
 fn ai_from(c: &Config) -> AiSettings {

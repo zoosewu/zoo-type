@@ -19,6 +19,7 @@ pub fn mods() -> Mods {
         alt: down(VK_MENU),
         meta: down(VK_LWIN) || down(VK_RWIN),
         caps_lock: unsafe { GetKeyState(VK_CAPITAL.0 as i32) } & 1 != 0,
+        right_alt: down(VK_RMENU),
     }
 }
 

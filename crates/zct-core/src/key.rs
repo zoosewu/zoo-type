@@ -59,6 +59,8 @@ pub struct Mods {
     /// Windows 鍵 / macOS Command
     pub meta: bool,
     pub caps_lock: bool,
+    /// 按著的是右 Alt（`alt` 也是 true）；「右 Alt + 注音鍵」打那個鍵本身的符號
+    pub right_alt: bool,
 }
 
 impl Mods {
@@ -68,6 +70,7 @@ impl Mods {
         alt: false,
         meta: false,
         caps_lock: false,
+        right_alt: false,
     };
 
     pub fn shift() -> Mods {

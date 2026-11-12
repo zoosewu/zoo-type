@@ -31,6 +31,7 @@ impl Hotkey {
             alt: self.alt,
             meta: self.meta,
             caps_lock: false,
+            right_alt: false,
         }
     }
 }

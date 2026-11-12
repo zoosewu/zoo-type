@@ -321,20 +321,22 @@ impl Session {
         if let Some((_, out)) = table.iter().find(|(hk, _)| hk.matches(&plain)) {
             return Some(out.clone());
         }
-        self.halfwidth_symbol(ev).map(|c| (c as char).to_string())
-    }
-
-    /// 半形模式下，這個鍵要輸出的 ASCII 標點；字母、注音鍵與 ` 符號選單不受影響
-    fn halfwidth_symbol(&self, ev: &KeyEvent) -> Option<u8> {
-        if self.width != Width::Half {
+        let Key::Char(c) = ev.key else { return None };
+        let right_alt = self.right_alt_symbol(ev);
+        if ev.mods.has_command_modifier() && !right_alt {
             return None;
         }
-        match ev.key {
-            Key::Char(c) if ev.mods.shift && !c.is_ascii_alphabetic() => Some(shifted(c)),
-            // 大千排列中不是注音的鍵
-            Key::Char(c @ (b'[' | b']' | b'\\' | b'\'' | b'=')) if !ev.mods.shift => Some(c),
-            _ => None,
-        }
+        crate::symbols::symbol(c, ev.mods.shift, right_alt, self.width, self.punct.style).map(String::from)
+    }
+
+    /// 開啟「右 Alt + 注音鍵」時，這是不是右 Alt + , . / ; -
+    fn right_alt_symbol(&self, ev: &KeyEvent) -> bool {
+        self.punct.right_alt
+            && ev.mods.right_alt
+            && !ev.mods.ctrl
+            && !ev.mods.meta
+            && !ev.mods.shift
+            && matches!(ev.key, Key::Char(c) if crate::symbols::BOPOMOFO_SYMBOL_KEYS.contains(&c))
     }
 
     /// 只判斷「按下」事件是否會被吃掉，不改變任何狀態（給 TSF `OnTestKeyDown` 用）
@@ -362,6 +364,10 @@ impl Session {
         }
         if self.game_mode() == GameMode::English {
             return false;
+        }
+        // 右 Alt + 注音鍵：打那個鍵本身的符號（設定開啟時）
+        if self.mode == InputMode::Chinese && self.right_alt_symbol(ev) && !self.editor.is_selecting() {
+            return true;
         }
         // P3：沒有綁定的 Ctrl / Alt / Meta 組合鍵一律交給 App
         if ev.mods.has_command_modifier() {
@@ -534,7 +540,7 @@ impl Session {
         c == 0 || self.sym_space(c - 1)
     }
 
-    /// 把英文字母或空白放進組字區（chewing 英文模式下會插入為一般字元）
+    /// 把英文字母、空白或符號放進組字區（chewing 英文模式下會插入為一般字元）
     ///
     /// chewing 在組字區是空的時候，英文會直接送出而不是放進組字區；
     /// 這時先放一個「，」占位，插入英文後再刪掉它。
@@ -545,8 +551,16 @@ impl Session {
         }
         self.editor
             .set_editor_options(|o| o.language_mode = LanguageMode::English);
-        for b in text.bytes() {
-            self.editor.process_keyevent(ascii_event(b));
+        for ch in text.chars() {
+            let ev = if ch.is_ascii() {
+                ascii_event(ch as u8)
+            } else {
+                // 全形符號：chewing 英文模式會把任何 Unicode 按鍵原樣放進組字區
+                chewing::input::KeyboardEvent::builder()
+                    .ksym(chewing::input::keysym::Keysym::from_char(ch))
+                    .build()
+            };
+            self.editor.process_keyevent(ev);
         }
         self.editor
             .set_editor_options(|o| o.language_mode = LanguageMode::Chinese);
@@ -920,12 +934,12 @@ impl Session {
                 // 組字中的數字鍵盤：放進組字區（「第 6 章」整句一起選字、送出）
                 self.insert_latin(&(c as char).to_string());
             } else if let Some(text) = self.direct_text(ev) {
-                if text.bytes().all(|b| b.is_ascii_punctuation())
-                    && !self.editor.is_empty()
+                let ascii = text.bytes().all(|b| b.is_ascii_punctuation());
+                if (!ascii || !self.editor.is_empty())
                     && !self.editor.entering_syllable()
                     && !self.editor.is_selecting()
                 {
-                    // 組字中的半形符號：放進組字區，與全形符號一致
+                    // 符號放進組字區：全形符號一律放（和 chewing 的中文標點一致），半形符號只在組字中放
                     self.insert_latin(&text);
                 } else {
                     // 組字中先送出組字，順序才正確

@@ -14,6 +14,8 @@ export struct General {
     auto-english: bool,
     english-candidate: bool,
     auto-space: bool,
+    symbol-style: int,      // 0 照鍵盤 1 中文標點
+    right-alt: bool,
 }
 
 export struct AiSettings {
@@ -278,7 +280,11 @@ export component SettingsWindow inherits Window {
                     Row { label: "預設模式"; ComboBox { width: 160px; model: ["中文", "英文"]; current-index <=> root.general.default-mode; } }
                     Note { text: "新開 App 時的中英狀態。"; }
                     Row { label: "標點"; ComboBox { width: 160px; model: ["全形", "半形"]; current-index <=> root.general.punctuation; } }
-                    Note { text: "中文模式下的標點：全形（，。？）或半形（,.?）。可以用快捷鍵隨時切換，所有 App 共用，切到別的輸入法再回來也會記住。"; }
+                    Note { text: "中文模式下的符號：全形（，。？）或半形（,.?）。可以用快捷鍵隨時切換，所有 App 共用，切到別的輸入法再回來也會記住。"; }
+                    Row { label: "Shift + 符號鍵"; ComboBox { width: 160px; model: ["鍵盤上的符號", "中文標點"]; current-index <=> root.general.symbol-style; } }
+                    Note { text: "鍵盤上的符號：按鍵上印什麼就出什麼（Shift + , → ＜、Shift + ' → ＂）。中文標點：Shift + , → ，、Shift + . → 。、Shift + ' → ；、[ → 「。半形是同一個符號的半形版。"; }
+                    Row { label: "右 Alt + 注音鍵"; Switch { checked <=> root.general.right-alt; } }
+                    Note { text: "大千排列中 , . / ; - 是注音鍵（ㄝ ㄡ ㄥ ㄤ ㄦ），它們本身的符號（，。／；－）平常從 ` 符號選單選。開啟後按右 Alt + 那個鍵直接打出來；左 Alt 照常交給程式。"; }
                     Row { label: "輸出"; ComboBox { width: 160px; model: ["繁體", "簡體"]; current-index <=> root.general.output; } }
                     Note { text: "選簡體時，組字區與候選窗仍然顯示繁體，按 Enter 送出時才整句轉成簡體（轉換較準確）。"; }
                     Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設"]; current-index <=> root.general.on-focus; } }

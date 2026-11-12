@@ -21,7 +21,7 @@ data_root = "D:/Sync/zct"
 ```toml
 [input]
 default_mode = "chinese"   # 新開啟的輸入欄位預設中文 / 英文："chinese" | "english"
-punctuation = "full"       # 中文模式的標點："full" 全形 | "half" 半形
+punctuation = "full"       # 中文模式的符號："full" 全形 | "half" 半形
 output = "traditional"     # 送出的字："traditional" 繁體 | "simplified" 簡體
 on_focus = "remember"      # 切回 App 時："remember" 保留上次中英狀態 | "reset" 重設為預設
 
@@ -75,7 +75,11 @@ composition_bar = false    # 組字提示列的全域預設（游標上方另開
 per_page = 9               # 每頁候選字數（1–10）
 sort_by_frequency = true   # 候選字依常用程度與個人學習排序
 
-# 自訂標點：覆寫內建的對照，鍵名寫法同快捷鍵
+[punctuation]
+shift = "keyboard"         # Shift + 符號鍵："keyboard" 鍵盤上印的符號 | "chinese" 中文標點，見下方說明
+right_alt = false          # 右 Alt + , . / ; - 打出 ，。／；－
+
+# 自訂符號：優先於上面的對照，鍵名寫法同快捷鍵
 [punctuation.full]
 "shift+," = "《"
 "shift+." = "》"
@@ -83,6 +87,22 @@ sort_by_frequency = true   # 候選字依常用程度與個人學習排序
 [punctuation.half]
 "'" = "'"
 ```
+
+### 符號鍵
+
+大千排列中數字、字母和 `, . / ; -` 是注音鍵，其餘符號鍵（`[ ] \ ' =`）與 Shift + 非字母鍵由輸入法輸出符號。**半形永遠是全形同一個鍵的半形版**，只差寬度。
+
+| 按鍵 | `keyboard`（預設） | `chinese` |
+|------|------|------|
+| Shift + , / Shift + . | ＜ ＞ | ， 。 |
+| Shift + ; / Shift + ' | ： ＂ | ： ； |
+| Shift + / | ？ | ？ |
+| ' / [ ] / Shift + [ ] | ＇ ［ ］ ｛ ｝ | 、 「 」 『 』 |
+| Shift + 1–0、= \ 等 | 全形版（！＠＃…） | 同左（^ 是 ︿、_ 是 —） |
+
+被注音占用的 `, . / ; -` 本身的符號（，。／；－）從 `` ` `` 符號選單選；開啟 `right_alt` 後可以直接按**右 Alt** + 那個鍵（左 Alt 照常交給 App）。
+
+全形符號會放進組字區和前後文一起送出；半形符號在組字中才放進組字區。
 
 ### 快捷鍵寫法
 

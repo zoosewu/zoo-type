@@ -383,11 +383,54 @@ fn full_width_is_default() {
 }
 
 #[test]
-fn fullwidth_is_default_and_apostrophe_is_dunhao() {
+fn symbols_follow_keycaps_by_default() {
     let mut h = Harness::new();
     h.press(Key::Char(b'\''), Mods::NONE);
     h.press(Key::Char(b','), Mods::shift());
-    assert_eq!(h.s.preedit().text, "、，");
+    let r = h.press(Key::Char(b'\''), Mods::shift());
+    assert!(r.eaten && r.commit.is_none(), "全形符號放進組字區");
+    assert_eq!(h.s.preedit().text, "＇＜＂");
+}
+
+fn symbol_style(style: zct_core::symbols::SymbolStyle, right_alt: bool) -> Config {
+    let mut c = Config::default();
+    c.punctuation.shift = style;
+    c.punctuation.right_alt = right_alt;
+    c
+}
+
+#[test]
+fn chinese_symbol_style_and_its_half_width() {
+    use zct_core::symbols::SymbolStyle;
+    let mut h = Harness::with_config(symbol_style(SymbolStyle::Chinese, false));
+    h.press(Key::Char(b'\''), Mods::NONE);
+    h.press(Key::Char(b','), Mods::shift());
+    h.press(Key::Char(b'\''), Mods::shift());
+    assert_eq!(h.s.preedit().text, "、，；");
+    h.press(Key::Enter, Mods::NONE);
+    // 半形：同一個鍵的半形版（以前 Shift + , 會變成 <）
+    h.press(Key::Space, Mods::shift());
+    assert_eq!(h.s.width(), zct_core::Width::Half);
+    h.type_str("wu0 fu4");
+    h.press(Key::Char(b','), Mods::shift());
+    h.press(Key::Char(b'.'), Mods::shift());
+    assert_eq!(h.s.preedit().text, "天氣,.");
+}
+
+#[test]
+fn right_alt_types_the_bopomofo_keys_own_symbol() {
+    use zct_core::symbols::SymbolStyle;
+    let ralt = Mods { alt: true, right_alt: true, ..Mods::NONE };
+    let lalt = Mods { alt: true, ..Mods::NONE };
+    // 預設關閉：右 Alt 組合鍵交給 App
+    let mut h = Harness::new();
+    assert!(!h.press(Key::Char(b','), ralt).eaten);
+    let mut h = Harness::with_config(symbol_style(SymbolStyle::Keyboard, true));
+    assert!(!h.press(Key::Char(b','), lalt).eaten, "左 Alt 照常交給 App");
+    h.type_str("wu0 ");
+    assert!(h.press(Key::Char(b','), ralt).eaten);
+    h.press(Key::Char(b'.'), ralt);
+    assert_eq!(h.s.preedit().text, "天，。");
 }
 
 #[test]
@@ -481,10 +524,9 @@ fn custom_punctuation_overrides_default() {
     let mut h = Harness::with_config(c);
     let r = h.press(Key::Char(b','), Mods::shift());
     assert!(r.eaten);
-    assert_eq!(r.commit.as_deref(), Some("《"));
     // 沒有覆寫的鍵維持原本行為
     h.press(Key::Char(b'.'), Mods::shift());
-    assert_eq!(h.s.preedit().text, "。");
+    assert_eq!(h.s.preedit().text, "《＞");
 }
 
 #[test]

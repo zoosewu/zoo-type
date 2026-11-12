@@ -12,6 +12,7 @@ pub mod paths;
 pub mod readings;
 pub mod session;
 pub mod shift;
+pub mod symbols;
 pub mod sync;
 
 pub use apps::{AppRule, AppRules};

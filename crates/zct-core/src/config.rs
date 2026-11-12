@@ -365,10 +365,15 @@ impl Default for ThemeConfig {
     }
 }
 
-/// 自訂標點：`"shift+," = "，"`，覆寫內建的對照
+/// 符號鍵的輸出方式（見 [`crate::symbols`]）與自訂標點
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct PunctuationConfig {
+    /// Shift + 符號鍵："keyboard" 按鍵上印的符號 | "chinese" 中文標點（，。；）
+    pub shift: crate::symbols::SymbolStyle,
+    /// 右 Alt + 注音鍵（, . / ; -）打那個鍵本身的符號（，。／；－）
+    pub right_alt: bool,
+    /// 自訂：`"shift+," = "，"`，優先於上面的對照
     pub full: BTreeMap<String, String>,
     pub half: BTreeMap<String, String>,
 }
@@ -376,6 +381,8 @@ pub struct PunctuationConfig {
 /// 驗證過的標點對照表
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PunctuationTable {
+    pub style: crate::symbols::SymbolStyle,
+    pub right_alt: bool,
     pub full: Vec<(Hotkey, String)>,
     pub half: Vec<(Hotkey, String)>,
 }
@@ -397,6 +404,8 @@ impl PunctuationConfig {
                 .collect::<Result<Vec<_>, String>>()
         };
         Ok(PunctuationTable {
+            style: self.shift,
+            right_alt: self.right_alt,
             full: compile(&self.full)?,
             half: compile(&self.half)?,
         })
