@@ -4,12 +4,12 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const ENV_HOME: &str = "ZCT_HOME";
 pub const POINTER_FILE: &str = "location.toml";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Pointer {
     data_root: PathBuf,
 }
@@ -64,6 +64,88 @@ pub fn migrate_dir(old: &Path, new: &Path) -> std::io::Result<Option<String>> {
         format!("這個資料夾的內容已複製到 {}，舊版程式都關閉後可以刪除這個資料夾。\r\n", new.display()),
     );
     Ok(Some(format!("資料夾複製：{} → {}（舊資料夾使用中）", old.display(), new.display())))
+}
+
+/// 資料夾裡已經有輸入法的資料（設定、App 規則、自訂英文單字或學習紀錄）
+pub fn has_data(dir: &Path) -> bool {
+    ["config.toml", "apps.toml", "dict"].iter().any(|f| dir.join(f).exists())
+        || dir.join("local").join("learning").exists()
+}
+
+/// 變更資料位置的結果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeRoot {
+    /// 新位置是空的：把目前的資料複製過去
+    Copied,
+    /// 新位置已經有資料（例如重灌前留下的）：直接改用
+    Adopted,
+}
+
+/// Windows 路徑不分大小寫；比較前先轉成絕對路徑
+fn same_or_inside(a: &Path, b: &Path) -> (bool, bool) {
+    let norm = |p: &Path| {
+        let s = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf()).to_string_lossy().to_lowercase();
+        PathBuf::from(s.trim_end_matches(['\\', '/']))
+    };
+    let (a, b) = (norm(a), norm(b));
+    (a == b, a.starts_with(&b) || b.starts_with(&a))
+}
+
+/// 變更資料根目錄：新位置是空的就複製目前的資料過去，已有資料就直接改用；最後更新指標檔。
+///
+/// 舊位置的資料保留不刪（當作備份）。呼叫前要先讓服務程序停止寫檔。
+pub fn change_data_root(pointer_dir: &Path, current: &Path, new: &Path) -> Result<ChangeRoot, String> {
+    let (same, nested) = same_or_inside(current, new);
+    if same {
+        return Err("和目前的位置相同".into());
+    }
+    if nested {
+        return Err("新位置不能在目前的資料夾裡面（或包含目前的資料夾）".into());
+    }
+    let result = if has_data(new) {
+        ChangeRoot::Adopted
+    } else {
+        std::fs::create_dir_all(new).map_err(|e| format!("無法建立資料夾：{e}"))?;
+        copy_data(current, new).map_err(|e| format!("複製失敗：{e}"))?;
+        ChangeRoot::Copied
+    };
+    write_pointer(pointer_dir, new).map_err(|e| format!("無法寫入 {POINTER_FILE}：{e}"))?;
+    Ok(result)
+}
+
+/// 指標檔：資料根目錄就是指標檔所在的資料夾時刪掉它（用預設位置）
+pub fn write_pointer(pointer_dir: &Path, root: &Path) -> std::io::Result<()> {
+    let file = pointer_dir.join(POINTER_FILE);
+    if same_or_inside(pointer_dir, root).0 {
+        return match std::fs::remove_file(&file) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+    }
+    std::fs::create_dir_all(pointer_dir)?;
+    let text = toml::to_string(&Pointer {
+        data_root: std::path::absolute(root)?,
+    })
+    .map_err(std::io::Error::other)?;
+    std::fs::write(file, text)
+}
+
+/// 複製資料根目錄的內容；指標檔與搬移說明不複製（它們屬於 %APPDATA%\ZooType 這個固定位置）
+fn copy_data(src: &Path, dst: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name == POINTER_FILE || name == "已搬移到 ZooType.txt" {
+            continue;
+        }
+        let to = dst.join(&name);
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -174,6 +256,49 @@ mod tests {
         copy_dir(&src, &dst).unwrap();
         assert_eq!(std::fs::read_to_string(dst.join(".git/HEAD")).unwrap(), "ref");
         assert!(dst.join("location.toml").exists());
+    }
+
+    #[test]
+    fn change_root_copies_into_empty_folder() {
+        let base = tempfile::tempdir().unwrap();
+        let pointer = base.path().join("ZooType");
+        std::fs::create_dir_all(pointer.join("local").join("learning")).unwrap();
+        std::fs::write(pointer.join("config.toml"), "c").unwrap();
+        std::fs::write(pointer.join("local/learning/user_dict.csv"), "u").unwrap();
+        let new = base.path().join("D").join("我的 資料");
+        assert_eq!(change_data_root(&pointer, &pointer, &new).unwrap(), ChangeRoot::Copied);
+        assert_eq!(std::fs::read_to_string(new.join("local/learning/user_dict.csv")).unwrap(), "u");
+        assert!(!new.join(POINTER_FILE).exists(), "指標檔不複製");
+        assert_eq!(resolve(None, &pointer), std::path::absolute(&new).unwrap());
+        assert!(pointer.join("config.toml").exists(), "舊位置保留");
+    }
+
+    #[test]
+    fn change_root_adopts_existing_data() {
+        // 重灌後選回原本的資料夾：直接改用，不覆蓋
+        let base = tempfile::tempdir().unwrap();
+        let pointer = base.path().join("ZooType");
+        std::fs::create_dir_all(&pointer).unwrap();
+        std::fs::write(pointer.join("config.toml"), "new-pc").unwrap();
+        let old = base.path().join("D").join("ZooType");
+        std::fs::create_dir_all(old.join("local").join("learning")).unwrap();
+        std::fs::write(old.join("config.toml"), "kept").unwrap();
+        assert_eq!(change_data_root(&pointer, &pointer, &old).unwrap(), ChangeRoot::Adopted);
+        assert_eq!(std::fs::read_to_string(old.join("config.toml")).unwrap(), "kept");
+        assert_eq!(resolve(None, &pointer), std::path::absolute(&old).unwrap());
+        // 改回預設位置：刪掉指標檔
+        assert_eq!(change_data_root(&pointer, &old, &pointer).unwrap(), ChangeRoot::Adopted);
+        assert!(!pointer.join(POINTER_FILE).exists());
+    }
+
+    #[test]
+    fn change_root_rejects_same_or_nested() {
+        let base = tempfile::tempdir().unwrap();
+        let cur = base.path().join("ZooType");
+        std::fs::create_dir_all(&cur).unwrap();
+        assert!(change_data_root(&cur, &cur, &cur).is_err());
+        assert!(change_data_root(&cur, &cur, &cur.join("sub")).is_err());
+        assert!(change_data_root(&cur, &cur, base.path()).is_err());
     }
 
     #[test]

@@ -6326,6 +6326,7 @@ dependencies = [
  "embed-resource",
  "slint",
  "slint-build",
+ "windows",
  "zct-ai",
  "zct-core",
  "zct-ipc",

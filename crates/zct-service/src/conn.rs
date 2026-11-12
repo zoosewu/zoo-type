@@ -159,9 +159,17 @@ fn run_command(cmd: Command, shared: &Shared) {
             log::info!("輸入法圖示：遊戲模式{}", if on { "開" } else { "關" });
         }
         Command::Restart => {
-            log::info!("輸入法圖示：重新啟動");
+            log::info!("重新啟動");
             let _ = shared.engine.save();
             shared.ui.send(UiCmd::Exit);
+        }
+        Command::PrepareMove => {
+            log::info!("變更資料位置：存檔並停止寫入");
+            if let Err(e) = shared.engine.save() {
+                log::warn!("存檔失敗：{e}");
+            }
+            shared.engine.freeze();
+            crate::version::set_read_only();
         }
     }
 }

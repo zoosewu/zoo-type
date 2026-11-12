@@ -15,7 +15,7 @@ use zct_core::hotkey::{Binding, Hotkey};
 use zct_core::paths::DataRoot;
 use zct_core::{AppRule, AppRules, Config, PhraseAction, PhraseEntry};
 use zct_ipc::pipe::Client;
-use zct_ipc::{PROTOCOL_VERSION, Request, Response};
+use zct_ipc::{Command, PROTOCOL_VERSION, Request, Response};
 
 slint::include_modules!();
 
@@ -336,12 +336,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = DataRoot::discover().ok_or("找不到資料根目錄")?;
     let ui = SettingsWindow::new()?;
     // --page N：直接開啟某一頁（系統匣與開發截圖用）
+    // --notice 文字：開啟後在狀態列顯示（變更資料位置後重新開啟時用）
+    let mut notice: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         if a == "--page"
             && let Some(n) = args.next().and_then(|n| n.parse().ok())
         {
             ui.set_page(n);
+        } else if a == "--notice" {
+            notice = args.next();
         }
     }
 
@@ -366,10 +370,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service = Service::start();
     ui.set_version(env!("CARGO_PKG_VERSION").into());
     ui.set_online(service.client.is_some());
+    ui.set_data_path(data.root().display().to_string().into());
+    ui.set_data_path_locked(std::env::var_os(zct_core::paths::ENV_HOME).is_some());
     ui.set_status(
         config_error
             .or(apps_error)
             .map(|e| format!("{e}（儲存會以目前畫面上的設定覆寫）"))
+            .or(notice)
             .unwrap_or_else(|| format!("資料位置：{}", data.root().display()))
             .into(),
     );
@@ -659,8 +666,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        ui.on_change_data_root(move || {
+            let ui = ui_weak.unwrap();
+            let current = state.borrow().data.root().to_path_buf();
+            let start = current.parent().unwrap_or(&current).to_path_buf();
+            let Some(new) = pick_folder(&start) else { return };
+            let Some(pointer) = zct_core::paths::pointer_dir() else { return };
+            // 先讓服務程序存檔並停止寫入，複製時資料才不會變動
+            let online = state.borrow_mut().service.call(Request::Command(Command::PrepareMove)).is_ok();
+            let result = zct_core::paths::change_data_root(&pointer, &current, &new);
+            // 不論成功與否都重新啟動服務程序（成功：讀新位置；失敗：解除停止寫入）
+            if online {
+                let _ = state.borrow_mut().service.call(Request::Command(Command::Restart));
+            }
+            match result {
+                Ok(mode) => {
+                    let what = match mode {
+                        zct_core::paths::ChangeRoot::Copied => "已把資料複製到",
+                        zct_core::paths::ChangeRoot::Adopted => "已改用",
+                    };
+                    let msg = format!("{what} {}（原本的資料保留在 {}）", new.display(), current.display());
+                    // 重新開啟設定程式，讀新位置的設定
+                    if let Ok(exe) = std::env::current_exe() {
+                        let _ = std::process::Command::new(exe).args(["--page", "0", "--notice", &msg]).spawn();
+                    }
+                    std::process::exit(0);
+                }
+                Err(e) => ui.set_status(format!("無法變更資料位置：{e}").into()),
+            }
+        });
+    }
+
     ui.run()?;
     Ok(())
+}
+
+/// Windows 原生的資料夾選擇視窗；取消時回傳 None
+#[cfg(windows)]
+fn pick_folder(start: &std::path::Path) -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree};
+    use windows::Win32::UI::Shell::{
+        FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+        SIGDN_FILESYSPATH,
+    };
+    use windows::core::HSTRING;
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let options = dialog.GetOptions().ok()?;
+        dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
+        let _ = dialog.SetTitle(&HSTRING::from("選擇學習資料位置"));
+        if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(start.as_os_str()), None) {
+            let _ = dialog.SetFolder(&item);
+        }
+        // 按取消時 Show 回傳錯誤
+        dialog.Show(None).ok()?;
+        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let text = path.to_string().ok();
+        CoTaskMemFree(Some(path.0 as _));
+        text.map(std::path::PathBuf::from)
+    }
+}
+
+#[cfg(not(windows))]
+fn pick_folder(_start: &std::path::Path) -> Option<std::path::PathBuf> {
+    None
 }
 
 /// 首選正確率：沒有修正的字數比例

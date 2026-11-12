@@ -220,6 +220,9 @@ export component SettingsWindow inherits Window {
     in property <string> sync-status;
     in property <bool> online;
     in property <string> version;
+    in property <string> data-path;
+    // 用 ZCT_HOME 環境變數指定資料位置時不能在這裡變更
+    in property <bool> data-path-locked;
 
     pure callback parse-color(string) -> color;
     pure callback hotkey-valid(string) -> bool;
@@ -237,6 +240,7 @@ export component SettingsWindow inherits Window {
     callback sync-now();
     callback save-api-key(string);
     callback test-ai();
+    callback change-data-root();
 
     HorizontalLayout {
         // 側邊導覽
@@ -299,6 +303,17 @@ export component SettingsWindow inherits Window {
                     Row { label: "候選窗附上英文"; Switch { checked <=> root.general.english-candidate; } }
                     Note { text: "剛打的按鍵剛好也是英文單字時（例如 fu 打出「七」），候選窗會多一個英文選項。"; }
                     Row { label: "中英之間自動空格"; Switch { checked <=> root.general.auto-space; } }
+                    Section { text: "資料位置"; }
+                    Help { text: "設定、App 規則、自訂詞與學習紀錄都存在這個資料夾。放在 D 槽或雲端硬碟資料夾，重灌電腦後安裝時選同一個資料夾，就能恢復所有學習成果。（雲端資料夾不要讓兩台電腦同時使用；多台電腦請用 git 同步。）"; }
+                    Row {
+                        label: "目前位置";
+                        Text { text: root.data-path; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
+                    }
+                    Row {
+                        label: "";
+                        Button { text: "變更位置…"; enabled: !root.data-path-locked; clicked => { root.change-data-root(); } }
+                    }
+                    Note { text: root.data-path-locked ? "目前由 ZCT_HOME 環境變數指定，請改環境變數。" : "選空的資料夾：把目前的資料複製過去。選已經有資料的資料夾（例如重灌前的）：直接改用那裡的資料。原本位置的資料會保留，確認沒問題後可以自行刪除。"; }
                     Note { text: "中文與英文、數字之間自動加一個空格（盤古之白）。"; }
                 }
             }

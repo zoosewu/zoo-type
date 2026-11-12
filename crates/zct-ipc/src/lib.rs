@@ -24,6 +24,8 @@ pub enum Command {
     OpenSettings,
     ToggleGame,
     Restart,
+    /// 設定程式要變更資料位置：立即存檔，之後不再寫入（搬移完成後再送 Restart）
+    PrepareMove,
 }
 
 /// 螢幕座標（實體像素）
