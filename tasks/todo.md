@@ -9,6 +9,8 @@
 - [ ] 設定程式詞庫頁加上英文單字清單（目前可用 Shift+Delete 或直接編輯 dict/english.txt）（原 M8.2：打字回饋修正）
 - [ ] 手動遊戲模式時 DLL 直接放行、不經 IPC（現在每鍵仍問服務程序，正常 <1ms，服務卡住最多 100ms）（原 M8.2：打字回饋修正）
 - [ ] tsf_probe 會把快捷鍵切換的結果寫進使用者真正的 `apps.toml` → 改用獨立的資料資料夾（`ZCT_HOME`）
+- [ ] 升級 chewing 0.14.0-rc.1（待使用者決定）：要改無效音節偵測、Enter 丟掉卡住的注音、自訂詞預設加權 10 → 0；之後刪掉 vendor/chewing
+- [ ] 實測「右 Alt + 注音鍵」：TSF 是否把 Alt 組合鍵交給輸入法、放開 Alt 會不會讓 App 選單取得焦點
 
 ## M10 Release 與 GitHub Actions（repo：zoo-type；分支 `m10`；初版完成前不發 release）
 
@@ -31,6 +33,8 @@
 - [x] 授權聲明：installer/THIRD-PARTY-NOTICES.txt（libchewing LGPL 靜態連結 → 原始碼公開即符合）
 - [ ] Slint 授權：Royalty-free 2.0 需二選一 —— 設定程式「關於」畫面放 AboutSlint，或在下載頁放 Slint 標誌（待使用者決定）
 - [x] install-dev.ps1 保留給開發用；安裝邏輯共用 scripts/install.ps1、uninstall.ps1
+- [x] 免管理員安裝：不可行（實驗 2026-11-13）。TIP 只寫在 HKCU（COM 類別 + CTF\TIP 語言設定檔）時，
+  `InstallLayoutOrTip` 回報成功但語言清單沒有它，而且 TSF 會把 HKCU 的語言設定檔當殘留刪掉；HKCU 只是已在 HKLM 登記的 TIP 的個人設定
 
 ### 2. CI（`.github/workflows/ci.yml`，push / PR）
 - [ ] windows-latest：fetch-dict.sh → fmt 檢查 → clippy -D warnings → test → build release
