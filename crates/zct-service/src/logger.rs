@@ -15,7 +15,8 @@ impl log::Log for FileLogger {
     ///
     /// chewing 的 info 等級會記下每一次按鍵，等於把打字內容寫進硬碟，絕不能開
     fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-        let ours = m.target().starts_with("zct");
+        // 函式庫是 zct_*；服務程序的執行檔改名為 zoo-type-service，模組名稱是 zoo_type_service
+        let ours = m.target().starts_with("zct") || m.target().starts_with("zoo_type");
         m.level() <= log::max_level() && (ours || m.level() <= log::Level::Warn)
     }
 
@@ -81,6 +82,9 @@ mod tests {
         assert!(!l.enabled(&meta("chewing::editor", Level::Info)));
         assert!(l.enabled(&meta("chewing::editor", Level::Warn)));
         assert!(l.enabled(&meta("zct_service::conn", Level::Info)));
+        // 執行檔改名後，服務程序本身的模組名稱是 zoo_type_service
+        assert!(l.enabled(&meta("zoo_type_service::conn", Level::Info)));
+        assert!(l.enabled(&meta("zoo_type_service", Level::Info)));
     }
 
     fn tempfile_file() -> std::fs::File {
