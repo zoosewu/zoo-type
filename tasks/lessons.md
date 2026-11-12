@@ -65,3 +65,10 @@
   - 要傳 null 給 string 參數時用 `[NullString]::Value`
   - P/Invoke 的回傳值不要用 `[void]` 丟掉；失敗時印出 `GetLastWin32Error()`
   - 腳本的實際效果要檢查（例如 PendingFileRenameOperations），不能只看腳本有沒有跑完
+
+## 改執行檔名稱會改到模組路徑（2026-11-12）
+- 現象：服務程序改名為 zoo-type-service 後，log 裡沒有任何自己的 info 訊息
+- 原因：logger 用 `target().starts_with("zct")` 分辨自己與第三方；bin 改名後模組路徑變成 `zoo_type_service::…`，全被當成第三方過濾
+- 規則：
+  - 改 crate / bin / lib 名稱前，搜尋所有依名稱判斷的地方（log 過濾、`module_path!`、`env!("CARGO_PKG_NAME")`、腳本中的檔名）
+  - 改名後實際啟動一次，檢查 log 有正常的啟動訊息
