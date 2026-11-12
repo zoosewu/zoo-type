@@ -82,6 +82,8 @@ pub enum PhraseAction {
     Unpin,
     /// 設為優先（固頂）
     Pin,
+    /// 從使用者詞庫移除（連同學習紀錄）；系統詞庫的詞恢復成預設的排序，自己加的詞不再出現
+    Remove,
 }
 
 /// 每日選字統計（需求 4.14：個人首選正確率）
@@ -595,9 +597,16 @@ impl Engine {
                 self.pin(syl.as_ref(), word);
                 return Ok(());
             }
+            PhraseAction::Remove => self.remove_phrase(syl.as_ref(), word),
         }
         self.mark_dirty();
         Ok(())
+    }
+
+    fn remove_phrase(&self, syllables: &[Syllable], word: &str) {
+        self.user_dict.remove(syllables, word);
+        self.history.remove(syllables, word);
+        self.corrections_lock().remove(&correction_key(syllables, word));
     }
 
     /// 同步匯入：把一個詞設成指定狀態（`current` 是本機目前狀態，None 表示不在詞庫）
@@ -611,6 +620,8 @@ impl Engine {
         use crate::sync::PhraseState;
         let syl = Self::parse(word, bopomofo)?;
         match (target, current) {
+            (PhraseState::Removed, None) => return Ok(()),
+            (PhraseState::Removed, Some(_)) => self.remove_phrase(syl.as_ref(), word),
             (PhraseState::Banned, _) => {
                 self.user_dict.ban(syl.as_ref(), word);
                 self.history.remove(syl.as_ref(), word);

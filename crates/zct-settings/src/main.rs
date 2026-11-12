@@ -377,7 +377,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .or(apps_error)
             .map(|e| format!("{e}（儲存會以目前畫面上的設定覆寫）"))
             .or(notice)
-            .unwrap_or_else(|| format!("資料位置：{}", data.root().display()))
+            .unwrap_or_default()
             .into(),
     );
 
@@ -649,6 +649,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     {
+        let (ui_weak, state, refresh) = (ui.as_weak(), state.clone(), refresh.clone());
+        ui.on_remove_phrase(move |p| {
+            let r = state.borrow_mut().service.call(Request::Phrase {
+                word: p.word.to_string(),
+                bopomofo: p.bopomofo.to_string(),
+                action: PhraseAction::Remove,
+            });
+            refresh();
+            ui_weak.unwrap().set_status(match r {
+                Ok(_) => format!("已移除：{}", p.word).into(),
+                Err(e) => e.into(),
+            });
+        });
+    }
+    {
         let (ui_weak, state) = (ui.as_weak(), state.clone());
         ui.on_restore(move |day| {
             let ui = ui_weak.unwrap();
@@ -690,7 +705,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let msg = format!("{what} {}（原本的資料保留在 {}）", new.display(), current.display());
                     // 重新開啟設定程式，讀新位置的設定
                     if let Ok(exe) = std::env::current_exe() {
-                        let _ = std::process::Command::new(exe).args(["--page", "0", "--notice", &msg]).spawn();
+                        let _ = std::process::Command::new(exe).args(["--page", "6", "--notice", &msg]).spawn();
                     }
                     std::process::exit(0);
                 }

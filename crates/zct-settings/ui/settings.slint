@@ -234,6 +234,7 @@ export component SettingsWindow inherits Window {
     callback filter-phrases(string);
     callback add-phrase(string, string);
     callback phrase-state(Phrase, int);
+    callback remove-phrase(Phrase);
     pure callback suggest-reading(string) -> string;
     callback restore(string);
     callback refresh();
@@ -303,17 +304,6 @@ export component SettingsWindow inherits Window {
                     Row { label: "候選窗附上英文"; Switch { checked <=> root.general.english-candidate; } }
                     Note { text: "剛打的按鍵剛好也是英文單字時（例如 fu 打出「七」），候選窗會多一個英文選項。"; }
                     Row { label: "中英之間自動空格"; Switch { checked <=> root.general.auto-space; } }
-                    Section { text: "資料位置"; }
-                    Help { text: "設定、App 規則、自訂詞與學習紀錄都存在這個資料夾。放在 D 槽或雲端硬碟資料夾，重灌電腦後安裝時選同一個資料夾，就能恢復所有學習成果。（雲端資料夾不要讓兩台電腦同時使用；多台電腦請用 git 同步。）"; }
-                    Row {
-                        label: "目前位置";
-                        Text { text: root.data-path; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
-                    }
-                    Row {
-                        label: "";
-                        Button { text: "變更位置…"; enabled: !root.data-path-locked; clicked => { root.change-data-root(); } }
-                    }
-                    Note { text: root.data-path-locked ? "目前由 ZCT_HOME 環境變數指定，請改環境變數。" : "選空的資料夾：把目前的資料複製過去。選已經有資料的資料夾（例如重灌前的）：直接改用那裡的資料。原本位置的資料會保留，確認沒問題後可以自行刪除。"; }
                     Note { text: "中文與英文、數字之間自動加一個空格（盤古之白）。"; }
                 }
             }
@@ -436,7 +426,7 @@ export component SettingsWindow inherits Window {
             if root.page == 4: VerticalLayout {
                 vertical-stretch: 1;
                 spacing: 10px;
-                Help { text: "加入詞：輸入詞後會自動填入最常用的讀音，需要時再修改。狀態：一般＝照常參考；優先＝一律排第一；封鎖＝不再出現在候選。打字時也可以在組字區按 Shift + ← / → 選範圍再按 Enter 加詞。"; }
+                Help { text: "加入詞：輸入詞後會自動填入最常用的讀音，需要時再修改。狀態：一般＝照常參考；優先＝一律排第一；封鎖＝不再出現在候選。移除：刪掉這筆紀錄，系統詞庫裡的詞恢復預設排序，自己加的詞不再出現。打字時也可以在組字區按 Shift + ← / → 選範圍再按 Enter 加詞。"; }
                 HorizontalLayout {
                     spacing: 8px;
                     word := LineEdit {
@@ -472,6 +462,7 @@ export component SettingsWindow inherits Window {
                             current-index: p.state;
                             selected => { root.phrase-state(p, self.current-index); }
                         }
+                        Button { text: "移除"; enabled: root.online; clicked => { root.remove-phrase(p); } }
                     }
                 }
             }
@@ -533,6 +524,17 @@ export component SettingsWindow inherits Window {
                 vertical-stretch: 1;
                 spacing: 10px;
                 alignment: start;
+                Section { text: "資料位置"; }
+                Help { text: "設定、App 規則、自訂詞與學習紀錄都存在這個資料夾。放在 D 槽或雲端硬碟資料夾，重灌電腦後安裝時選同一個資料夾，就能恢復所有學習成果。（雲端資料夾不要讓兩台電腦同時使用；多台電腦請用 git 同步。）"; }
+                Row {
+                    label: "目前位置";
+                    Text { text: root.data-path; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
+                }
+                Row {
+                    label: "";
+                    Button { text: "變更位置…"; enabled: !root.data-path-locked; clicked => { root.change-data-root(); } }
+                }
+                Note { text: root.data-path-locked ? "目前由 ZCT_HOME 環境變數指定，請改環境變數。" : "選空的資料夾：把目前的資料複製過去。選已經有資料的資料夾（例如重灌前的）：直接改用那裡的資料。原本位置的資料會保留，確認沒問題後可以自行刪除。"; }
                 Section { text: "git 同步"; }
                 Text {
                     text: "同步設定、App 規則、自訂詞與統計；自動學習紀錄與 local/ 不同步。請使用私人 repo。";
@@ -540,7 +542,7 @@ export component SettingsWindow inherits Window {
                     wrap: word-wrap;
                 }
                 Row { label: "自動同步"; Switch { checked <=> root.sync.enabled; } }
-                Row { label: "遠端 repo"; LineEdit { width: 360px; text <=> root.sync.remote; placeholder-text: "git@github.com:you/zct-data.git"; } }
+                Row { label: "遠端 repo"; LineEdit { width: 360px; text <=> root.sync.remote; placeholder-text: "git@github.com:you/zoo-type-data.git"; } }
                 Row { label: "間隔（分鐘）"; SpinBox { width: 160px; minimum: 1; maximum: 1440; value <=> root.sync.interval; } }
                 HorizontalLayout {
                     alignment: start;

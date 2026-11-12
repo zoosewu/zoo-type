@@ -719,6 +719,22 @@ fn add_list_ban_unban_phrase() {
     let e = engine.phrases().into_iter().find(|p| p.word == "酷音").unwrap();
     assert_eq!(e.boost, zct_core::PhraseEntry::NORMAL);
     assert!(!e.is_pinned() && !e.is_banned());
+
+    engine.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Remove).unwrap();
+    assert!(engine.phrases().iter().all(|p| p.word != "酷音"), "移除後不在詞庫");
+}
+
+#[test]
+fn removed_phrase_no_longer_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = std::sync::Arc::new(open_engine(&dir.path().join("learning")));
+    engine.add_phrase("這穗", "ㄓㄜˋ ㄙㄨㄟˋ").unwrap();
+    engine
+        .phrase_action("這穗", "ㄓㄜˋ ㄙㄨㄟˋ", zct_core::PhraseAction::Remove)
+        .unwrap();
+    let mut h = Harness::with_engine(engine, Config::default(), None, dir);
+    h.type_str("5k4njo4"); // ㄓㄜˋ ㄙㄨㄟˋ
+    assert_ne!(h.s.preedit().text, "這穗");
 }
 
 #[test]

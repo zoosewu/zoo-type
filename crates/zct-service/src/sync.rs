@@ -125,12 +125,12 @@ pub fn run_once(root: &Path, cfg: &SyncConfig, engine: &Engine) -> Result<String
     git.ok(&["add", "-A"])?;
     let staged = !git.run(&["diff", "--cached", "--quiet"])?.status.success();
     if staged {
-        let msg = format!("zct: {} {}", machine(), today());
+        let msg = format!("動物園輸入法：{} {}", machine(), today());
         let has_identity = git.ok(&["config", "user.email"]).is_ok_and(|s| !s.is_empty());
         if has_identity {
             git.ok(&["commit", "-m", &msg])?;
         } else {
-            git.ok(&["-c", "user.name=動物園輸入法", "-c", "user.email=zct@localhost", "commit", "-m", &msg])?;
+            git.ok(&["-c", "user.name=動物園輸入法", "-c", "user.email=zoo-type@localhost", "commit", "-m", &msg])?;
         }
     }
     if remote.is_empty() {
@@ -238,6 +238,14 @@ mod tests {
         run_once(&b_root, &cfg, &b).unwrap();
         run_once(&a_root, &cfg, &a).unwrap();
         assert!(a.phrases().iter().any(|p| p.word == "酷音" && p.is_banned()));
+
+        // A 移除後同步，B 也移除（不會被同步檔加回來）
+        std::thread::sleep(Duration::from_millis(1100));
+        a.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Remove).unwrap();
+        run_once(&a_root, &cfg, &a).unwrap();
+        assert!(a.phrases().iter().all(|p| p.word != "酷音"), "A 自己同步後不會加回來");
+        run_once(&b_root, &cfg, &b).unwrap();
+        assert!(b.phrases().iter().all(|p| p.word != "酷音"));
 
         // local/ 不進 git
         let tracked = Git { root: &a_root }.ok(&["ls-files"]).unwrap();

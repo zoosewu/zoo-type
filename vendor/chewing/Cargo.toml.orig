@@ -1,0 +1,59 @@
+[package]
+name = "chewing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The Chewing (酷音) intelligent Zhuyin input method."
+documentation = "https://docs.rs/chewing"
+license.workspace = true
+
+include = [
+  "AUTHORS",
+  "COPYING",
+  "Cargo.toml",
+  "NEWS",
+  "src/**/*.asn1",
+  "src/**/*.rs",
+  "src/editor/data/*",
+]
+
+[package.metadata.docs.rs]
+features = ["sqlite"]
+
+[workspace]
+resolver = "3"
+members = ["capi", "fuzzer", "tests/testhelper", "tools"]
+
+[workspace.package]
+version = "0.14.0-alpha.4"
+edition = "2024"
+rust-version = "1.95.0"
+license = "LGPL-2.1-or-later"
+
+[workspace.dependencies]
+chewing = { path = ".", version = "0.14.0-alpha.1" }
+chewing_capi = { path = "./capi", version = "0.14.0-alpha.1" }
+env_logger = { version = "0.11.0", default-features = false, features = ["auto-color"] }
+log = "0.4.0"
+tempfile = "3.10.1"
+
+[dependencies]
+bstr = "1.13.1"
+der = { version = "0.7.7", features = ["std"] }
+log = { workspace = true }
+scoped-error = "0.1.5"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+default = []
+sqlite = []
+sqlite-bundled = []
+
+[profile.release]
+opt-level = 3
+debug = true
+lto = true
+panic = "abort"
+codegen-units = 1

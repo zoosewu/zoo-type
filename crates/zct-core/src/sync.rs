@@ -5,6 +5,7 @@
 //! - 兩台電腦改了同一個詞時，以修改時間較新的為準
 //! - git 對這個檔案用 `merge=union`：衝突的行兩邊都保留，讀入時再依時間挑選
 //! - 修改時間由匯出時比對上一份檔案得出：狀態沒變就沿用舊時間，變了就用現在時間
+//! - 從詞庫移除的詞留下一行 `removed`，其他電腦匯入時一起移除（否則會被同步檔加回來）
 //!
 //! 限制：chewing 的自動學習紀錄是二進位格式、沒有逐筆讀取的介面，無法合併，因此不同步。
 
@@ -19,6 +20,8 @@ pub enum PhraseState {
     Learned,
     Pinned,
     Banned,
+    /// 已從詞庫移除（只出現在同步檔）
+    Removed,
 }
 
 impl PhraseState {
@@ -40,6 +43,7 @@ impl PhraseState {
             PhraseState::Learned => "learned",
             PhraseState::Pinned => "pinned",
             PhraseState::Banned => "banned",
+            PhraseState::Removed => "removed",
         }
     }
 
@@ -49,6 +53,7 @@ impl PhraseState {
             "learned" => PhraseState::Learned,
             "pinned" => PhraseState::Pinned,
             "banned" => PhraseState::Banned,
+            "removed" => PhraseState::Removed,
             _ => return None,
         })
     }
@@ -80,9 +85,20 @@ pub fn parse(text: &str) -> BTreeMap<Key, (PhraseState, u64)> {
 }
 
 /// 依本機詞庫產生同步檔內容；`prev` 是目前檔案內容（用來保留沒變動的修改時間）
+///
+/// `prev` 是上次同步合併、匯入後的內容，裡面有、本機卻沒有的詞就是本機移除的。
 pub fn export(engine: &Engine, prev: &str, now: u64) -> String {
     let mut map = parse(prev);
-    for p in engine.phrases() {
+    let local = engine.phrases();
+    let present: std::collections::BTreeSet<Key> =
+        local.iter().map(|p| (p.bopomofo.clone(), p.word.clone())).collect();
+    for (key, (state, ts)) in map.iter_mut() {
+        if *state != PhraseState::Removed && !present.contains(key) {
+            *state = PhraseState::Removed;
+            *ts = now;
+        }
+    }
+    for p in local {
         let state = PhraseState::of(&p);
         let key = (p.bopomofo.clone(), p.word.clone());
         match map.get(&key) {

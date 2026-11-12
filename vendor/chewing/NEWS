@@ -1,0 +1,911 @@
+What's New in libchewing 0.14.0 (unreleased)
+---------------------------------------------------------
+
+* For distribution maintainers
+  - system dictionary format has changed. System files now include
+    - static_words.bin
+    - static_dict.bin
+    - rare_dict.bin
+    - static_lm.bin
+    - swkb.dat
+    - symbols.dat
+
+* Changes
+  - BREAKING: dict: support for auto migration from the legacy
+    hash.dat and uhash.dat format has been removed.
+  - BREAKING: dict: support for auto migration from the legacy
+    sqlite format has been removed.
+  - BREAKING: many rust API have changed or removed. Check the API documentation
+    for details.
+  - BREAKING: the `enabled_dicts` parameter of `chewing_new3()` is now an no-op.
+
+What's New in libchewing 0.13.1 (July 15, 2026)
+---------------------------------------------------------
+
+* Bug Fixes
+  - dict: use default user path when only sys path is customized.
+    (introduced in 0.12.0)
+  - conversion: snapshot current selections after exiting Tab
+    triggered candidate cycling.
+  - build: adjust cmake minimum required version to 3.27.0.
+
+What's New in libchewing 0.13.0 (July 4, 2026)
+---------------------------------------------------------
+
+* Bug Fixes
+  - dict: protect single character from being permanently excluded.
+  - editor: fixed candidate cycling via Tab key when
+    "chewing.auto_snapshot_selections" is enabled.
+
+* Changes
+  - symbols: replaed U+2026 … with U+22EF ⋯ as default.
+  - conversion: update probability constants.
+  - conversion: change pathfinding algorithm to m-A*.
+
+
+What's New in libchewing 0.12.0 (April 6, 2026)
+---------------------------------------------------------
+
+* Features
+  - dict: loading user dictionary are now also controlled by enabled_dicts
+    in `chewing_new3()`.
+  - dict: deleted phrases now can be recorded in a separate chewing-deleted.dat
+    exclusion dictionary. This allows excluding phrases from even built-in
+    dictionaries. Deleted phrases will not be auto learned again.
+  - editor: new config option "chewing.auto_snapshot_selections" (default false)
+    can be used to control whether phrase selections are automatically locked
+    after some condition.
+
+* Bug Fixes
+  - dict: fixed parsing trie dictionary file with extension fields.
+  - dict: fixed trie_buf tombstone is not cleared after adding phrase again.
+  - dict: use max freq of all dictionaries as phrase frequency to avoid repeatedly
+    adding static dictionary freq to user dictionary freq.
+
+* Changes
+  - rust: breaking! renamed SystemDictionaryLoader to AssetLoader.
+  - rust: breaking! renamed UserDictionaryLoader to UserDictionaryManager.
+  - rust: Dictionary trait gained a new `set_usage()` method.
+  - conversion: adjust max output paths down to 10.
+
+What's New in libchewing 0.11.0 (January 10, 2026)
+---------------------------------------------------------
+
+* Features
+  - cli: Now outputs and reads dictionary metadata in source file
+  - cli: Detects mismatched phrase word count and syllable count
+  - cli: Ignores empty line or line starts with # when processing dictionary
+  - editor: Support optional sorting candidates by frequency. Previously the
+    candidates are always sorted by their order in the dictionary.
+
+* Developer Features
+  - New API `chewing_handle_KeyboardEvent()` can be used to support any
+    keyboard layout combination without updating libchewing. Other keyboard
+    handling API will be deprecated in future release.
+  - New API `chewing_new3()` and `chewing_get_defaultDictonaryNames()` can be
+    used to initialize a chewing context with specific dictionaries enabled.
+  - New boolean config option `chewing.sort_candidates_by_frequency` can be
+    set to enable sorting candidates by frequency.
+  - Rust type SyllableSlice is removed from public interfaces.
+  - Provide libchewing as a Swift package (C based API only).
+
+* Bug Fixes
+  - Auto shift cursor after candidate selection now moves the cursor to the
+    next phrase instead of the next word.
+  - Fixed a bug when switching input mode from Chinese to English, the state
+    can be stuck in entering bopomofo.
+  - Fixed the frequency estimation function used by phrase learning to really
+    take last used time into consideration. Also assign higher frequency to
+    newly learned phrases.
+
+* Changes
+  - SQLite support is now fully optional and disabled by default
+  - rust: new sqlite-bundled feature can be used to build with bundled sqlite
+    to simplify the build configuration on Windows
+  - cli: will try to migrate to new schema when dumping chewing.sqlite3 file
+  - Use less heuristic when calculating phrase segmentation score.
+  - Reimplement scoring algorithm to use conditional probability.
+  - cli: init-database will no longer normalize the frequency of single word
+    phrase to zero.
+  - autolearn: new phrases with break words inside will be learned both with
+    and without the break word.
+  - rust: simplified dictionary API.
+  - rust: the DictionaryMut trait is merged back to the Dictionary trait.
+  - rust: the Editor::set_editor_options now accepts a closure for setting
+    options in place.
+
+* Dictionary
+  - Default symbols.dat now includes commonly used emojis.
+  - Dictionary data are built directly from the libchewing-data repository
+
+* Build
+  - Bump MSRV to 1.88
+
+
+What's New in libchewing 0.10.3 (August 24, 2025)
+---------------------------------------------------------
+
+* Bug Fixes
+  - Fix quick symbol menu for ｜(introduced in 0.8.0) (#737)
+
+* Dictionary
+  - Remove some incorrect phrase-bopomofo mapping entries
+
+
+What's New in libchewing 0.10.2 (August 14, 2025)
+---------------------------------------------------------
+
+* Bug Fixes
+  - Fix ㄈㄥ was incorrectly mapped to 風靡
+
+* Dictionary
+  - Added missing bopomofo for 風靡
+
+
+What's New in libchewing 0.10.1 (August 2, 2025)
+---------------------------------------------------------
+
+* Features
+  - cli: Ignore empty lines or lines starts with # when processing dictionary
+
+* Bug Fixes
+  - Add missing bopomofo mapping to the GinYieh layout
+  - Correct IBM layout mapping
+
+* Dictionary
+  - Import improvements from libchewing-data
+
+
+What's New in libchewing 0.10.0 (July 26, 2025)
+---------------------------------------------------------
+
+* Features
+  - New keyboard layout Colemak.
+  - cli: New --fix option enables auto correction for simple tsi.src errors
+  - cli: Allow multiple whitespace in dictionary source file
+
+* Developer Features
+  - New API `chewing_bopomofo_String()` can be used to retrieve current bopomofo
+    string in the buffer. This deprecates the old non-thread safe
+    `chewing_bopomofo_String_static`.
+  - New API `chewing_cand_string_by_index()` can be used in UILess mode to query
+    candidate string from candidate list.
+
+* Changes
+  - BREAKING: System dictionary loader now loads base and extra dictionary
+    separately. (Rust)
+  - Simple mode now always auto-commit after candidate selection to align with
+    ㄅ/半 experience.
+
+* Bug Fixes
+  - `chewing_keystroke_CheckAbsorb()` correctly return true when a keystroke
+    was absorbed due to error.
+  - `chewing_commit_preedit_buf()` does not return error when the bopomofo
+    buffer is empty, to match previous behavior.
+  - `chewing_clean_preedit_buf()` does not return error when the bopomofo
+    buffer is empty, to match previous behavior.
+  - Avoid panics in `chewing_new()`
+  - Don't panic when conversion fails
+  - Don't panic when symbols table contains empty line
+  - Avoid opening empty symbol table
+  - Skip malformed lines in abbrev table
+  - Handle special symbol input normally when easy symbol is enabled
+  - Ignore zero-length phrases
+  - Use correct %AppData% path on Windows
+  - Fallback to Windows default sys path
+  - Use correct search path separator on Windows
+  - Check file existence with Windows quirks
+  - Ensure to reload dictionary after flush buffers
+  - Esc key clears buffer in simple mode
+  - Correctly allocate and free array returned to C FFI
+  - Initialize learned user phrase freq with orig_freq
+  - Ensure user phrase takes precedence
+
+* Dictionary
+  - Add alternative sound for 麼
+  - Removed some inconsistent phrases (#709)
+
+* Build
+  - Do not link to libcmtd on Windows
+  - Bump corrosion to 0.5.1 to fix rustup breaking change
+  - Bump MSRV to 1.85
+  - Bump tools and testhelper to 2024 edition
+  - Stop updating mini.dat for every build
+  - Move C headers to the capi module
+  - Remove unused cargo-vet settings
+  - Clean-up porting layer usage in tests
+  - Add upper bound to cmake_minimum_required version
+  - Enable cli test
+  - Stop depending on the directories crate
+
+
+What's New in libchewing 0.9.1 (October 26, 2024)
+---------------------------------------------------------
+
+* Bug Fixes
+  - Disable automatic selections snapshot which introduced more problems then
+    what it tried to solve. (introduced in v0.9.0)
+
+* Build
+  - Statically link C runtime on Windows
+  - Use vcpkg on Windows
+
+
+What's New in libchewing 0.9.0 (August 11, 2024)
+---------------------------------------------------------
+
+* Features
+  - Support two new input modes:
+    - Fuzzy mode - support prefix search, partial zhuyin search, toneless input.
+    - Simple mode - like the traditional input method on Windows 95 which does
+      not perform any intelligent phrasing.
+  - Allow space key for pagination regardless of space_is_select_key mode.
+  - Merge DOWN and SPACE key behavior in pagination.
+  - A new option to disable fullwidth toggle key.
+  - Workman layout support.
+  - Load embedded mini dictionary if system dictionaries were not found.
+  - Automatically load extra dictionaries found in search path
+    - ${CHEWING_PATH}/dictionary.d/*.dat
+  - Automatic snapshot selections when the curser is moved.
+
+* Developer Features
+  - BREAKING: Remove language_mode and character_form methods (Rust).
+  - BREAKING: Remove unused pinyin.tab file
+  - BREAKING: Remove most unused C code but keep compat C headers.
+  - Bump minimum supported Rust version to 1.77
+  - Enable ELF symbol versioning. All existing symbols are marked as version
+    CHEWING_0.5 and new symbols from this release are marked as CHEWING_0.9.
+  - A new set of configuration API:
+    - chewing_config_has_option
+    - chewing_config_get_int
+    - chewing_config_set_int
+    - chewing_config_get_str
+    - chewing_config_set_str
+  - New API to get runtime library version:
+    - chewing_version
+    - chewing_version_major
+    - chewing_version_minor
+    - chewing_version_patch
+    - chewing_version_extra
+  - New API to acknowledge output buffers:
+    - chewing_ack
+  - Define version macros
+    - CHEWING_VERSION_MAJOR
+    - CHEWING_VERSION_MINOR
+    - CHEWING_VERSION_PATCH
+
+* Bug Fixes
+  - Separate special handling by pinyin variants (#298)
+  - Panic when selecting phrases backwards at the end of buffer. (introduced in
+    v0.8.0)
+
+* Dictionary
+  - Default dictionary updates and fixes (#331)
+
+* Performance
+  - Optimize K shortest path algorithm to handle long pre-edit buffer. This
+    allowed us to remove the special DP algorithm and keep only the graph search
+    based algorithm in conversion.
+
+* Testing
+  - Add benchmarks for the conversion module
+  - Add tests for options and default values
+  - Add test for chewing_config_set_str
+  - Test chewing_config_set_str with chewing.keyboard_type
+  - Allow switching keyboard layout in genkeystroke
+  - Add test for simple engine symbol input
+  - Support new editor options in the fuzzer.
+  - Generate test cases from fuzzer input.
+
+* Miscellaneous Tasks
+  - Drop outdated ChangeLog
+  - Add option to turn off tests run
+  - Use system corrosion if available
+  - Regenerate chewing.h using latest cbindgen
+  - Include CTest and use the built-in BUILD_TESTING option
+  - Manage SQLite dependency with CMake
+  - Print status about SQLite3 module
+  - Remove unused test files
+  - Bump Corrosion to v0.5
+  - Fix building without using CMake presets
+  - Force linking chewing_version obj file
+  - Append `git describe` to version string for unreleased version.
+
+
+What's New in libchewing 0.8.5 (July 8, 2024)
+---------------------------------------------------------
+
+* Changed
+  - Bump default Corrosion version to v0.5
+
+* Bug fixed
+  - Hanyu Pinyin empty rime handling. (#585, introduced in v0.8.0, reported by
+    Jidanni)
+  - Printable non A-Z chars should output symbols in pinyin. (#592, introduced
+    in v0.8.0, reported by Jidanni)
+
+
+What's New in libchewing 0.8.4 (Jun 1, 2024)
+---------------------------------------------------------
+
+* Bug fixed
+  - Config options were incorrectly reset after certain operations. (introduced
+    in v0.8.0)
+  - Incorrect mapping for KB_DVORAK and KB_DVORAK_HSU layouts. (introduced in
+    v0.8.0)
+  - Installation failure if build with testing off. (introduced in v0.8.3)
+
+
+What's New in libchewing 0.8.3 (May 25, 2024)
+---------------------------------------------------------
+
+* Changed
+  - Simplified build options on the Windows platform.
+  - Enabled CTest BUILD_TESTING option to disable tests.
+  - Default uses system Corrosion if available.
+
+* Bug fixed
+  - Fix more wrong Hsu (許氏) keyboard fuzz conversion (ㄍㄧ to ㄐㄧ and ㄍㄩ to
+    ㄐㄩ) (introduced in v0.8.0)
+
+
+What's New in libchewing 0.8.2 (May 21, 2024)
+---------------------------------------------------------
+
+* Bug fixed
+  - Wrong Hsu (許氏) keyboard fuzz conversion (ㄍㄧ to ㄐㄧ and ㄍㄩ to ㄐㄩ)
+    (introduced in v0.8.0)
+  - Wrong symbol map location when building as a CMake submodule.
+
+
+What's New in libchewing 0.8.1 (May 15, 2024)
+---------------------------------------------------------
+
+* Bug fixed
+  - Fail to build on aarch64 due to type mismatch. (introduced in v0.8.0)
+
+
+What's New in libchewing 0.8.0 (May 14, 2024)
+---------------------------------------------------------
+
+**BREAKING CHANGE**
+
+New dictionary format is not compatible with old tools. Existing user dictionary
+will be automatically backed up and migrated however old tools might not be able to
+manipulate the dictionary directly.
+
+The `chewing-editor` program can still be used to edit user dictionaries. In
+this release we also introduced a new `chewing-cli` tool to inspect/dump/build
+user dictionaries. See `chewing-cli(1)` for more details.
+
+This version also closed/fixed many issues. Find the complete list of closed
+issues here: https://github.com/chewing/libchewing/milestone/7?closed=1
+
+* Added
+  - A new command line tool `chewing-cli` is included in this release. It can
+    create or inspect dictionary files.
+  - Reintroduce DictionaryMut as a separate trait.
+
+* Changed
+  - CMake default preset switched to build with rust.
+  - CMake minimum required version bumped to 3.24.0.
+  - System dictionary and user dictionary file now uses platform standard paths.
+    See https://docs.rs/chewing/latest/chewing/path/fn.data_dir.html for
+    details.
+  - Improved TrieBufDictionary::from ergonomics.
+  - Rename DictEntries to Entries.
+  - Ensure all fallible API returns Error.
+  - Improved algorithm so using Tab key to find alternative phrasing is more
+    responsive.
+  - Easy symbol input now accepts arbitrary long "symbols". (rust)
+  - Removed duplicated symbols "●" and "○" from symbols input.
+
+* Bug fixed
+  - chewing_cand_CheckDone result was reversed in capi. (introduced in v0.7.0)
+  - Correctly ignore instead of absorb keys when the pre-edit buffer is empty.
+    (introduced in v0.6.0)
+  - Reset pagination page number when searching for next candidate range.
+    (introduced in v0.7.0)
+  - chewing_bopomofo_String_static did not return key sequence for pinyin input
+    mode. (introduced in v0.6.0)
+  - Different chewing_*_static() functions were using one shared global buffer.
+    (introduced in v0.6.0)
+  - Special symbol selection missed a couple symbols that was in C version.
+    (introduced in v0.7.0)
+  - Panics when a new selection replaces more than one existing selections.
+    (introduced in v0.7.0)
+  - Selection created from alternative bopomofo was not considered in
+    conversion. (introduced in v0.6.0)
+
+* Removed
+  - HashMap implemented Dictionary was removed.
+
+* Documentation
+  - Clarify the accepted value of `chewing_handle_Default` method.
+
+
+What's New in libchewing 0.7.0 (Apr 7, 2024)
+---------------------------------------------------------
+
+This is the first beta release of the Rust rewrite. The library has been tested
+with the AFL++ fuzzer, and most of the obvious bugs have been fixed, so it should
+not crash for normal use. Now we invite power users to daily drive the beta
+release in order to find more subtle bugs.
+
+The Rust rewrite is ABI compatiable with previous releases. The most notable
+difference with the C version includes a new portable dictionary format that can
+be used both as system dictionary and user dictionary. Users with existing user
+phrase dictionary will be automatically migrated. Old files will be backed up
+automatically. With these changes, we will be able to support dictionary sharing
+and loading multiple dictionaries in future releases.
+
+* Future roadmap
+  - 0.8.x after bug bashing this version will be the first public release with
+    rust implementation as the default.
+  - 0.9.x will focus on the stablization of the Rust Crate API.
+  - 1.0.0 will be the first public release of the Rust API. C implementation
+    will be removed from the repository.
+
+* Added
+  - Added Colemak-DH ANSI/Orth layout support
+  - Replace bespoke RIFF+TLV file format with standard DER format. (rust)
+  - Supporting migrating user dictionary file to new format. (rust)
+  - Allow creating in memory user dictionary. (rust)
+  - New `chewing-cli` tool can be used to create or inspect dictionary files. (rust)
+  - New `chewing-cli` tool can dump or import dictionaries from CSV files. (rust)
+  - Audit dependencies using cargo-vet. (rust)
+
+* Changed
+  - Buffer user dictionary changes and flush in background without blocking main
+    thread. (rust)
+
+* Bug fixed
+  - Some unsigned underflow issue found by AFL++. (rust)
+  - Skip symbol selection if preedit buffer is empty. (rust)
+  - Allow numlock in selection mode. (rust)
+  - Avoid infinite recursion. (rust)
+  - Ensure to return KeyBehavior::Commit when we push to commit buffer. (rust)
+  - Adjust selection offset after delete symbols. (rust)
+  - Disable trace logging if no logger is enabled. (rust)
+  - Should not start selection in English mode. (rust)
+  - Use offset to select from paginated phrase list. (rust)
+
+* Documentation
+  - Added document for fuzzers. (rust)
+  - Describe how to compile dictionary files.
+  - Update build instruction and Rust MSRV info.
+
+* Testing
+  - Added a fuzzer harness with AFL++. (rust)
+
+
+What's New in libchewing 0.6.0 (Jan 27, 2024)
+---------------------------------------------------------
+
+This release contains many improvements and bug fixes. It's the first
+release since 2016. We have started a major rewrite in Rust, so we expect
+to have more frequent releases in the following months.
+
+* Added
+  - New API chewing_phone_to_bopomofo to convert syllable in u16 to bopomofo
+    string. [ShengYenPeng] #166
+  - New API chewing_set_autoLearn and chewing_get_autoLearn can be used to
+    disable and enable new phrase auto-learning. [Hiunn-hué] #261
+  - Add a default config test for autoLearn option. [Billy Su]
+  - Add Android platform support. [hiroshiyui] #408
+  - New chewing Rust Crate can be downloaded from
+    [crates.io](https://crates.io/crates/chewing). [Kan-ru Chen] #423
+  - Add several CMake presets for supported configurations. [Kan-ru Chen] #424
+
+* Changed
+  - Implement has_userphrase in testhelper with the public
+    chewing_userphrase_lookup API. [ShengYenPeng] #223
+  - Updated HSU layout's JVC conversion to be more intuitive. [Hiunn-hué] #259
+  - Phrase auto-learning now only triggers after committing. [Hiunn-hué] #260
+  - chewing_handle_CtrlNum now handles cursor better and has a clearer error
+    message if there is nothing to be added to user phrase. [Hiunn-hué] #277
+  - chewing_handle_ShiftLeft and chewing_handle_ShiftRight now also displays
+    aux message for new user phrases added. [Hiunn-hué] #278
+  - Symbol used for full-width colon changed from ︰ (U+FE30) to ： (U+FF1A).
+    [school510587] #304
+  - Support cross compiling with qemu. [sgn] #333
+  - CMake minimum version changed to 3.21.0.
+  - Rewrite chewing internal in Rust. [Kan-ru Chen] #347 #378
+
+* Dictionary
+  -  Add new syllable ㄒㄩㄢ for 亘. [yan12125] #252 #253
+
+* Removed
+  - Autotools build tools are removed. CMake is the recommended way to build
+    libchewing.
+
+* Bug fixed
+  - Fix ChoiceEndChoice expression always true. [Billy Su]
+  - Fix strncpy warning in hash.c. [Bo-Cheng Jhan]
+  - Fix unable to input some Bopomofos with ET26 layout. [Hiunn-hué] #235
+  - Fix double free in userphrase-hash's TerminateUserphrase. [cwlin] #254
+  - Fix hash item offsett calculation in uhash. [cwlin] #255
+  - Fix ChoiceEndChoice expression always true. [Billy Su] #258
+  - Fix clearing bopomofo buffer after switching Chi-Eng mode. [Hiunn-hué] #268
+  - Fix chewing_handle_Space cannot input space with empty buffer. [Hiunn-hué] #274
+  - Fix a strncpy warning and use ARRAY_SIZE. [school510587] #296
+  - Enhance chewing.py to support platforms with 64-bit pointes. [cheese] #310
+  - Fix init_database to correctly read phrase frequency for sorting. [yan12125] #334 #337
+  - Fix installation of data files. [yan12125] #350
+  - Fix building shared library on all supported platforms. [Kan-ru Chen] #375 #376
+  - Fix dvorak-qwerty symbol mapping. [hiroshiyui] #407
+  - Prevent memory leak in error case of GetDefaultUserPhrasePath [Kuang-che Wu].
+  - Fix PinYinData keySeq buffer overflow in PinYinInput(). [Kuang-che Wu] #238
+  - Fix trying to allocate buffer of negative size. [Kuang-che Wu]
+  - Fix access violation due to negative cursor position. [Kuang-che Wu]
+  - Fix several buffer overflows. [ChangZhuo Chen]. #241 #242
+
+* Platform-specific
+  - Install instructions for macOS. [Chocobo1]
+
+
+What's New in libchewing 0.5.1 (May 18, 2016)
+---------------------------------------------------------
+* Bug fixed:
+  - Fix wrong CHEWING_DATADIR definition in CMake build. #222
+  - Fix j, k selection when symbol in between. #149 #221
+
+
+What's New in libchewing 0.5.0 (May 2, 2016)
+---------------------------------------------------------
+* New feature
+  - Add Carpalx keyboard layout support. #217
+
+* Dictionary
+  - Update dictionary. #151 #155 #188 #191 #201
+  - Add debug tool dump_database.
+  - Sort tsi.src. #212
+
+* Misc
+  - Tweak several comments.
+  - Fix libchewing document.
+  - Remove old/dead code.
+  - Improve code readability and consistency.
+  - Update automake syntax. #114
+  - Add test cases. #169 #177
+  - Update Python sample code.
+  - Add debug tool dump_database.
+  - Integrate Coverity scan in https://scan.coverity.com/.
+
+* Platform-specific
+  - Update README for OS X.
+  - Set WITH_INTERNAL_SQLITE3 to true by default in MS-Windows.
+  - Fix Visual Studio compiling warnings/errors. #168 #171 #189 #190 #213
+  - Add a cmake option BUILD_DLL to enable building *.dll with MS VC++. #185
+  - Make the python binding of libchewing support Windows dll files. #186
+  - Don't use SIGSTOP in MS-Windows.
+
+* Bug fixed
+  - Check if ld supports --no-defined. #144
+  - Fix unexpected candidate disorder for '1'. #153
+  - Replace bash-izm '==' operator with '=' for test(1). #158
+  - Fix several Coverity errors. #172 #173
+  - Fix ChewingKillChar which is disabling OpenSymbolChoice. #160 #181
+  - ㄅ cannot overwrite ㄆ in HSU and ET26. #170 #183
+
+* Successful stories:
+  - Rime Input Method Engine (RIME) takes partial dictionary from
+    libchewing.
+  - PIME (writing input methods for Windows easily with Python) supports
+    Chewing IM by default.
+
+
+What's New in libchewing 0.4.0 (Apr 11, 2014)
+---------------------------------------------------------
+* Add the following APIs:
+  - Userphrase manipulation
+    - chewing_userphrase_enumerate
+    - chewing_userphrase_has_next
+    - chewing_userphrase_get
+    - chewing_userphrase_add
+    - chewing_userphrase_remove
+    - chewing_userphrase_lookup
+  - Keyboardless action
+    - chewing_cand_open
+    - chewing_cand_close
+    - chewing_cand_string_by_index_static
+    - chewing_cand_choose_by_index
+    - chewing_cand_list_first
+    - chewing_cand_list_last
+    - chewing_cand_list_has_next
+    - chewing_cand_list_has_prev
+    - chewing_cand_list_next
+    - chewing_cand_list_prev
+    - chewing_commit_preedit_buf
+    - chewing_clean_preedit_buf
+    - chewing_clean_bopomofo_buf
+  - Bopomofo buffer
+    - chewing_bopomofo_Check
+    - chewing_bopomofo_String_static
+  - Static API
+    - chewing_aux_String_static
+    - chewing_buffer_String_static
+    - chewing_cand_String_static
+    - chewing_commit_String_static
+    - chewing_kbtype_String_static
+  - Misc
+    - chewing_new2
+* Dictionary format:
+  - Remove text data support.
+  - Introduce platform independent binary data representation.
+  - Move binary data to share/libchewing/*.
+* Userphrase format:
+  - Support SQLite-based user phrase storage and manipulation.
+* New coding style:
+  - Use scripts/indent.sh to change coding style.
+* Bug fixed:
+  - Fix chewing_zuin_Check wrong return value. #62
+  - Fix numlock key cannot output number. #45
+  - Fix negative frequency problem. #75
+  - Fix cannot select candidate when symbol exists. #79
+  - Avoid clearing the buffer when Up arrow key is pressed and escCleanAllBuf is 1.
+  - Fix cannot handle numlock 9 correctly. #88
+  - Fix invalid characters are committed when pre-edit buffer is full.
+  - Fix AutoLearnPhrase cannot fill correct wordSeq. #108
+  - Fix wrong auto-learn when symbol in between. #112
+  - Fix missing rpl_malloc for cross compilation. #118
+  - Fix '\n' appear in symbol table. #126
+  - Reopen candidate list for symbols with down key. #127 #135
+  - Let up key close candidate list of symbols. #131 #138
+* Misc:
+  - Add `make check' in cmake build.
+  - Change MAX_UTF8_SIZE to 4.
+  - Update official website URL.
+  - Use CreateFileA() instead of CreateFile() to stick with the ANSI API.
+  - Do not check phrase longer than MAX_PHRASE_LEN.
+  - Implement dynamic programming phrasing algorithm. #73
+  - Clean bopomofo buffer when mode change to English mode. #89 #97
+  - Update README to GFM.
+  - Replace 'INCLUDE' with 'AM_CPPFLAGS'. #68 #114 #116
+  - Use [Shift]+[-] to input EM DASH (u+2014) as default. #113 #124
+  - Use Backspace to close candidate window. #128
+  - Use PgUp/PgDn to turn pages of candidates. #129
+  - Update Windows default search path. #78
+  - The word "zuin", "Zhuyin" are obsolete terms for "Bopomofo".
+  - Add const whenever possible in several APIs.
+  - Toggle shape mode with shift-space. #141 #142
+* Successful stories:
+  - chewing-windows-tsf project provides Text Services Framework
+    support for Microsoft Windows.
+
+
+What's New in libchewing 0.3.5 (Jul 28, 2013)
+---------------------------------------------------------
+* Improve CMake rules
+  - Visual Studio build included
+* Dictionary improvements
+  - Remove duplicated phrases, fix Bopomofo representation
+  - tool tweaks
+* travis-ci support (https://travis-ci.org/chewing/libchewing)
+* drone.io support (https://drone.io/github.com/chewing/libchewing)
+* coveralls.io support (https://coveralls.io/r/chewing/libchewing)
+* editorconfig support (http://editorconfig.org/)
+* Add new chewing_set_logger API
+* Prevent unaligned memory access
+* Reduce maxChiSymbolLen to 39 to avoid overflow
+* Do not store user phrase when its length is 1
+* Check chiSymbolBufLen in chewing_handle_Numlock()
+* Set isSymbol to 0 in SetChoiceInfo
+* Fix 'j', 'k' in select mode cannot handle symbol selecting
+* Do not call GetCharNext() when GetCharFirst() fails
+* Successful stories:
+  . FreeArray utilizes libchewing for selecting phrases of Array
+    input method
+
+
+What's New in libchewing 0.3.4 (Dec 31, 2012)
+---------------------------------------------------------
+* Improve the description of libchewing API
+  - Simplified examples to illustrate the usage are added
+* Revise libchewing API. Check the documentation for details
+* Support THL (Taiwan Huayu Luomapinyin) and MPS2 Pinyin keyboard layout
+* Reimplementation of unit test framework. No external 'check' package
+  is required
+* Fix several phrase errors
+  - Add exceptional phrase as well
+* Improved developer and user guide
+* Introduce CMake based build system, which is convenient to MS-Windows
+  based environments.
+* Add --enable-gcov to enable gcov coverage
+* Fix possible strncat() overflow
+* Consistent checks for bopomofo sequence internally
+* Handle incomplete bopomofo with space key properly
+* Internal structure refactoring
+* Read hash path from CHEWING_PATH environment variable
+* Make libchewing thread-safe
+* Fix IM crash by changing default candidate per page to 10
+* Fix the detection of ncursesw
+* Fix the usage of autotools
+* Update and tune symbols
+* Fix valgrind warning
+* Fix several compilation warnings
+* Fix GCC visibility availability for Darwin specific PIC code
+* Fix hash table initialization and its memory leakage
+* Support building with mingw32 toolchain
+* Fix GNU Hurd build
+* Fix Microsoft VC build
+* Fix Windows 64-bit build
+* Fix mingw32/64 + WINE build
+* Successful stories:
+ . GCIN supports experimental Chewing IM since version 1.6.4
+ . HIME supports Chewing IM
+ . UCIMF supports Chewing IM
+ . Fcitx supports Chewing IM
+ . mozc (IM framework maintained by Google) provides Chewing support
+ . JMCCE (reworked version) supports libchewing
+
+
+What's New in libchewing 0.3.3 (Feb 27, 2011)
+---------------------------------------------------------
+* Fix memory access violation.
+* Improved Python binding.
+* Merged with libchewing-data project. (r455)
+* Improved random key stroke tester.
+* Fix the handling of phonetic symbols in Hsu's keyboard.
+* Fix unexpected candidate disorder when doing symbol choice.
+* Revised phrase choice from rearward logic.
+* Fix cross compilation.
+* Improved shell script to merge changes form libchewing-data.
+* Successful stories:
+  . Google ChromeOS provides built-in Chewing IM support
+  . MeeGo platform provides built-in Chewing IM support
+
+
+What's New in libchewing 0.3.2 (Dec 1, 2008)
+---------------------------------------------------------
+* Add gcc visibility support to hide private APIs.
+* APIs and Headers refactoring.
+* Doxygen-friendly API documentation.
+* New binary data manipulation approach to dramatically reduce storage
+  usage and loading time via memory mapping. (enabled by default)
+* New word segmentation method based on mmseg.
+* Improved auto-learn new phrases method.
+* Improved test suite and added simple benchmark program.
+* Option to indicate the behavior for phrase choice to be rearward
+  or not.
+* New APIs to enumerate supported keyboard types.
+* Repair improper memory access.
+* API united in Win32 and UNIX world.
+* Initial Python binding support.
+* Merged with libchewing-data project. (r342)
+* Canonical debugging messages.
+* Successful stories:
+  . OpenBSD porting
+  . ibus-chewing : chewing engine for ibus input method framework.
+  . UIM-chewing leveraging libchewing 0.3.x development branch.
+
+
+What's New in libchewing 0.3.1 (Oct 1, 2008)
+----------------------------------------------------------
+* New keyboard layout DACHEN_CP26.
+* Add key '`' to open symbol table.
+* Erase candidate and reset its length when 'Esc' key is handled.
+* Closes candidate window when user pressed 'Up' key.
+* Doing select at the end of edit buffer works on the
+  last phrase (interval).
+* Improved reminding message text.
+* Sync with libchewingdata project.
+* A new HanYu-PinYin mapping table
+* More robust behavior when IM crashes.
+* Allow '#' comment and blank line in tsi.src.
+* Fix chewing switch between Full/Half mode and cursor moves one space in
+  gedit.
+* Fix when list available phrases to choice, user's own phrases are
+  not included.
+* Release PgUp/PgDn key event to running applications.
+* Fix portability issues on FreeBSD.
+* Fix incorrect initialization.
+* Fix pinyin key order, put "shun" before "shuo".
+* Fix various potenital boffer overflow bugs.
+* Fix various memory leaks.
+* chewing_set_PinYinMethod to support multiple PinYin methods.
+* chewing_handle_CtrlOption was removed.
+* New structure SymbolEntry.
+* Rename selectAreaLen to candPerPage.
+* Added bEasySymbolInput.
+
+
+What's New in libchewing 0.3.0 (May 15, 2006)
+----------------------------------------------------------
+* This is a new development branch differing a lot from
+  0.2.x series, and breaks API/ABI for new features.
+* UTF-8 based language engine core for common Unicode
+  environment.
+* Porting layer for POSIX/Unix-like and Win32 to reduce the
+  redundant porting process.
+* New API design for better consistency.
+* Merge the efforts from libchewing-data subproject, which
+  means various phrases have been reviewed and corrected.
+* Zuin fixes and symbol improvements.
+* Support key 'j' / 'k' for paging in selection mode.
+* Fix some internal memory management bugs and leaks.
+* Improved internal test suite.
+* New binary-form of user hash data to speed up loading and
+  solve hash data corruption.
+* Better calculating of internal tree and phone constants.
+* Revised tsi.src for richer phrases and avoiding crashes.
+* Merge phone and phrase from CNS11643.
+* Reduce the amount for the expose for internal symbols.
+* Improved Han-Yu PinYin to use table-lookup implementation.
+* Experimental frequency-evaluation. (re-compute chewing
+  lifetime)
+* Implement the choice mechanism for pair symbols.
+* Improved Tab handling to allow the switching over different
+  frequency orders of candidated phrases.
+* New auxiliary module for simpler API uses.
+* Experimental memory-mapping based binary data handling to
+  speed up data loading.
+* Successful stories:
+  . Sun Solaris 10 U2 and 11 will provide built-in Chewing
+    IM support.
+  . OXIM input method suite from OpenDesktop/OSSI provides
+    Chewing support as its default input method.
+  . New Win32-Chewing subproject to provide efficient input
+    method solution on Microsoft Windows platforms.
+
+
+What's New in libchewing 0.2.7 (Aug 8, 2005)
+----------------------------------------------------------
+* Fix the keyboard type state changing bug.
+* Add new function to specify the space as the selection
+  key.
+* Improved debug messages.
+* Provide cutomized user-defined PinYin table support.
+* Add termination mechanism.
+* Successful stories:
+  . Chewing has its Win32 porting (MS-IME) via OVIME (the
+    Win32 port of OpenVanilla Input Method Framework).
+
+
+What's New in libchewing 0.2.6 (Feb 28, 2005)
+----------------------------------------------------------
+* Experimental feature -- HanYu PinYing Keyboard layout.
+* Proper $HOME env handling.
+* SegFault workaround after libtabe's tsi.src merge.
+* Add the facility to input symbols.
+* Successful stories:
+  . Chewing becomes one of the built-in input methods in Sun
+    Java Desktop System (JDS).
+
+
+What's New in libchewing 0.2.5 (Dec 28, 2004)
+----------------------------------------------------------
+* Merge SpaceChewing's frequency tweaking from zonble.
+* Minor fixes for building process and zuin core.
+* Successful stories:
+  . IIIMF-chewing
+  . SCIM-chewing
+  . OpenVanilla Input Method Framework for MacOS X
+
+
+What's New in libchewing 0.2.4
+----------------------------------------------------------
+* Merge from SpaceChewing:
+  . Dvorak Hsu keyboard layout.
+  . Hanin style support.
+* Directly use tsi.src from libtabe.
+  . No longer maintain separate tsi.src.
+* Fix the word selection bug.
+* Fix phonetic index in Hsu keyboard, and do fuzzy "g e"
+  to "j e" convertion.
+* Provide pkg-config and RPM spec.
+* Allow users to specify forward/backward phrase addition.
+* Initial Win32 support.
+
+
+What's New in libchewing 0.2.3
+----------------------------------------------------------
+* Fix candidate phrase choice bug.
+* Built-in debugging routines.
+* Test suite & sample implementation.
+* Merge the enhancements from SpaceChewing, such as
+  space key selection, Eten special symbol input, and
+  MacOSX awared information.
+* Fix broken encoding in sort_dic utility.
+* Doxygen documentation support.
+* Add Dvorak keyboard support.

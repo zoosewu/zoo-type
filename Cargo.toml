@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# vendor/ 是修改過的第三方套件，不是本專案的成員
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -25,3 +27,7 @@ codegen-units = 1
 # 開發建置也最佳化相依套件（chewing 未最佳化時評測測試要 48 秒）；自己的程式碼維持好除錯
 [profile.dev.package."*"]
 opt-level = 2
+
+# chewing alpha.4 + 從 rc.1 移植的 UserDict::remove（說明見 vendor/README.md）
+[patch.crates-io]
+chewing = { path = "vendor/chewing" }
