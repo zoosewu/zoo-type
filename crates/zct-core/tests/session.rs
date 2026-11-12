@@ -506,15 +506,28 @@ fn numpad_digit_selects_candidate() {
 }
 
 #[test]
-fn caps_lock_letters_are_english() {
+fn caps_lock_does_not_affect_chinese_mode() {
+    // 方案 A：Caps Lock 只影響英文大小寫，中文模式照常打注音
     let mut h = Harness::with_config(no_auto_space());
     let caps = Mods { caps_lock: true, ..Mods::NONE };
-    assert!(!h.press(Key::Char(b'a'), caps).eaten, "沒有組字時交給 App");
-    h.type_str("wu0 "); // 天
-    let r = h.press(Key::Char(b'a'), caps);
-    assert_eq!(r.commit.as_deref(), Some("天A"));
-    // Caps Lock 下注音鍵中的數字與標點不受影響
-    assert!(h.press(Key::Char(b','), caps).eaten);
+    for b in "wu0".bytes() {
+        assert!(h.press(Key::Char(b), caps).eaten);
+    }
+    h.press(Key::Space, caps);
+    assert_eq!(h.s.preedit().text, "天");
+    assert_eq!(h.s.mode(), InputMode::Chinese);
+}
+
+#[test]
+fn caps_lock_uppercases_english_in_composition() {
+    // 組字中用 Shift 切到英文：Caps Lock 決定大小寫
+    let mut h = Harness::new();
+    h.type_str("ji3"); // 我
+    h.tap_shift();
+    let caps = Mods { caps_lock: true, ..Mods::NONE };
+    h.press(Key::Char(b'o'), caps);
+    h.press(Key::Char(b'k'), caps);
+    assert_eq!(h.s.preedit().text, "我OK");
 }
 
 #[test]

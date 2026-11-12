@@ -305,13 +305,8 @@ impl Session {
             }
             return Some((c as char).to_string());
         }
-        let Key::Char(c) = ev.key else { return None };
-        // Caps Lock：字母直接輸出英文（與微軟新注音相同）
-        if ev.mods.caps_lock && c.is_ascii_alphabetic() {
-            let upper = !ev.mods.shift;
-            let c = if upper { c.to_ascii_uppercase() } else { c };
-            return Some((c as char).to_string());
-        }
+        // Caps Lock 不影響中英：中文模式照常打注音，只影響英文的大小寫
+        let Key::Char(_) = ev.key else { return None };
         let table = match self.width {
             Width::Full => &self.punct.full,
             Width::Half => &self.punct.half,
@@ -384,9 +379,8 @@ impl Session {
             return !matches!(ev.key, Key::F(_));
         }
         match ev.key {
-            // 沒在組字時，數字鍵盤與 Caps Lock 字母由 App 自己處理
+            // 沒在組字時，數字鍵盤由 App 自己處理（Caps Lock 不影響中英，字母照常打注音）
             Key::Numpad(_) => false,
-            Key::Char(c) if ev.mods.caps_lock && c.is_ascii_alphabetic() => false,
             // 只有字元鍵會開始組字；Enter、空白、方向鍵等交給 App
             Key::Char(_) => true,
             _ => false,

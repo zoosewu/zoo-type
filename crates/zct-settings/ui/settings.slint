@@ -279,7 +279,7 @@ export component SettingsWindow inherits Window {
                     Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設"]; current-index <=> root.general.on-focus; } }
                     Note { text: "切到別的視窗再回來時，保留原本的中英狀態，或重設為上面的預設模式。"; }
                     Section { text: "Shift 切換中英"; }
-                    Help { text: "單按一下 Shift 切換中文 / 英文。組字中切換不會送出已打的字，接著打的英文與數字會加進組字區，例如「第」Shift「6」Shift「章」→ 第6章，Enter 一起送出。"; }
+                    Help { text: "單按一下 Shift 切換中文 / 英文。組字中切換不會送出已打的字，接著打的英文與數字會加進組字區，例如「第」Shift「6」Shift「章」→ 第6章，Enter 一起送出。Caps Lock 只影響英文的大小寫，不會切換中英。"; }
                     Row { label: "使用的 Shift"; ComboBox { width: 160px; model: ["左右都可", "左 Shift", "右 Shift", "不使用"]; current-index <=> root.general.shift; } }
                     Row { label: "按住上限（毫秒）"; SpinBox { width: 160px; minimum: 100; maximum: 1000; step-size: 50; value <=> root.general.tap-ms; } }
                     Note { text: "按住 Shift 超過這個時間才放開不算切換，避免打大寫字母或 Shift 組合鍵時誤切。"; }
