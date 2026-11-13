@@ -2085,3 +2085,24 @@ fn abbreviation_syncs_like_phrases() {
     zct_core::sync::import(&b, &text);
     assert_eq!(b.abbreviation("tw"), None);
 }
+
+#[test]
+fn abbreviation_drops_separating_space_before_chinese_word() {
+    let mut h = with_abbrevs(&[("tw", "動物園"), ("kk", "ok")]);
+    // 中文模式：「我」+ 空白 + tw
+    h.type_str("ji3 tw ");
+    assert_eq!(h.s.preedit().text, "我動物園");
+    h.press(Key::Enter, Mods::NONE);
+    // 英文模式
+    h.type_str("ji3");
+    h.tap_shift();
+    h.type_str(" tw ");
+    assert_eq!(h.s.preedit().text, "我動物園");
+    h.press(Key::Enter, Mods::NONE);
+    // 換成的不是中文：空白留著
+    h.tap_shift();
+    h.type_str("ji3");
+    h.tap_shift();
+    h.type_str(" kk ");
+    assert_eq!(h.s.preedit().text, "我 ok");
+}

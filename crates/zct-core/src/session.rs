@@ -1012,6 +1012,14 @@ impl Session {
                 for _ in 0..letters {
                     self.chewing_key(Key::Backspace);
                 }
+                // 換成中文詞：前面用來隔開的空白一起拿掉（「我 tw」→「我台灣」）
+                let c = self.editor.cursor();
+                if word.chars().next().is_some_and(crate::mixed::is_cjk)
+                    && c > 0
+                    && self.sym_space(c - 1)
+                {
+                    self.chewing_key(Key::Backspace);
+                }
                 self.raw.clear();
                 self.english_alt = None;
                 self.latin_word.clear();

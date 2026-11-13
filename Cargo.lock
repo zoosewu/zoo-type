@@ -6324,6 +6324,7 @@ name = "zct-settings"
 version = "0.1.0"
 dependencies = [
  "embed-resource",
+ "i-slint-backend-testing",
  "slint",
  "slint-build",
  "windows",

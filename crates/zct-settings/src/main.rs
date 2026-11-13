@@ -770,6 +770,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     {
+        // 編輯：加入新的那筆、再移除原本的；封鎖的詞換了寫法仍然封鎖
+        let (ui_weak, state, refresh) = (ui.as_weak(), state.clone(), refresh.clone());
+        ui.on_update_phrase(move |old, word, reading| {
+            let (word, reading) = (word.trim().to_owned(), reading.trim().to_owned());
+            if old.word == word.as_str() && old.bopomofo == reading.as_str() {
+                return;
+            }
+            let r = (|| {
+                let mut st = state.borrow_mut();
+                st.service.call(Request::AddPhrase {
+                    word: word.clone(),
+                    bopomofo: reading.clone(),
+                })?;
+                if old.state == 2 && !zct_core::abbrev::is_abbrev(&reading) {
+                    st.service.call(Request::Phrase {
+                        word: word.clone(),
+                        bopomofo: reading.clone(),
+                        action: PhraseAction::Ban,
+                    })?;
+                }
+                st.service.call(Request::Phrase {
+                    word: old.word.to_string(),
+                    bopomofo: old.bopomofo.to_string(),
+                    action: PhraseAction::Remove,
+                })
+            })();
+            refresh();
+            ui_weak.unwrap().set_status(match r {
+                Ok(_) => format!("已更新：{word}").into(),
+                Err(e) => e.into(),
+            });
+        });
+    }
+    {
         let (ui_weak, state) = (ui.as_weak(), state.clone());
         ui.on_restore(move |day| {
             let ui = ui_weak.unwrap();
@@ -981,5 +1015,115 @@ mod tests {
         assert_eq!(accuracy(0, 0), 1.0);
         assert_eq!(accuracy(100, 5), 0.95);
         assert_eq!(accuracy(1, 9), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod ui_tests {
+    use super::*;
+    use i_slint_backend_testing::ElementHandle;
+    use slint::platform::{Key, WindowEvent};
+
+    fn key(ui: &SettingsWindow, text: impl Into<SharedString>) {
+        let text = text.into();
+        ui.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        ui.window()
+            .dispatch_event(WindowEvent::KeyReleased { text });
+    }
+
+    fn field(ui: &SettingsWindow, placeholder: &str) -> ElementHandle {
+        i_slint_backend_testing::ElementQuery::from_root(ui)
+            .match_descendants()
+            .match_predicate({
+                let p = placeholder.to_owned();
+                move |e| e.accessible_placeholder_text().as_deref() == Some(p.as_str())
+            })
+            .find_first()
+            .unwrap_or_else(|| panic!("找不到 {placeholder}"))
+    }
+
+    fn dictionary_page() -> SettingsWindow {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = SettingsWindow::new().unwrap();
+        ui.set_online(true);
+        ui.set_page(4);
+        ui.show().unwrap();
+        ui
+    }
+
+    fn type_text(ui: &SettingsWindow, s: &str) {
+        for c in s.chars() {
+            key(ui, c.to_string());
+        }
+    }
+
+    #[test]
+    fn dictionary_tab_and_enter_move_through_the_form() {
+        let ui = dictionary_page();
+        let added = Rc::new(RefCell::new(None));
+        ui.on_add_phrase({
+            let added = added.clone();
+            move |w, r| *added.borrow_mut() = Some((w.to_string(), r.to_string()))
+        });
+        let (word, reading) = (field(&ui, "詞"), field(&ui, "注音或縮寫"));
+        word.mock_single_click(slint::platform::PointerEventButton::Left);
+        type_text(&ui, "ab");
+        key(&ui, Key::Tab);
+        type_text(&ui, "cd");
+        assert_eq!(
+            reading.accessible_value().as_deref(),
+            Some("cd"),
+            "Tab 從詞跳到讀音"
+        );
+        key(&ui, Key::Return);
+        assert_eq!(
+            *added.borrow(),
+            Some(("ab".into(), "cd".into())),
+            "讀音欄按 Enter 加入"
+        );
+        assert_eq!(word.accessible_value().as_deref(), Some(""));
+        // 加入後回到詞欄；詞欄按 Enter 跳到讀音
+        type_text(&ui, "ef");
+        key(&ui, Key::Return);
+        type_text(&ui, "gh");
+        assert_eq!(word.accessible_value().as_deref(), Some("ef"));
+        assert_eq!(reading.accessible_value().as_deref(), Some("gh"));
+    }
+
+    #[test]
+    fn dictionary_edit_updates_the_entry() {
+        let ui = dictionary_page();
+        ui.set_phrases(ModelRc::new(VecModel::from(vec![Phrase {
+            word: "動物".into(),
+            bopomofo: "ㄉㄨㄥˋ ㄨˋ".into(),
+            state: 0,
+            abbrev: false,
+        }])));
+        let updated = Rc::new(RefCell::new(None));
+        ui.on_update_phrase({
+            let updated = updated.clone();
+            move |old, w, r| {
+                *updated.borrow_mut() = Some((old.word.to_string(), w.to_string(), r.to_string()))
+            }
+        });
+        let edit = i_slint_backend_testing::ElementQuery::from_root(&ui)
+            .match_descendants()
+            .match_predicate(|e| e.accessible_label().as_deref() == Some("編輯"))
+            .find_first()
+            .expect("編輯按鈕");
+        edit.invoke_accessible_default_action();
+        let (word, reading) = (field(&ui, "詞"), field(&ui, "注音或縮寫"));
+        assert_eq!(word.accessible_value().as_deref(), Some("動物"));
+        assert_eq!(reading.accessible_value().as_deref(), Some("ㄉㄨㄥˋ ㄨˋ"));
+        word.set_accessible_value("動物園");
+        reading.set_accessible_value("ㄉㄨㄥˋ ㄨˋ ㄩㄢˊ");
+        reading.mock_single_click(slint::platform::PointerEventButton::Left);
+        key(&ui, Key::Return);
+        assert_eq!(
+            *updated.borrow(),
+            Some(("動物".into(), "動物園".into(), "ㄉㄨㄥˋ ㄨˋ ㄩㄢˊ".into()))
+        );
+        assert!(!ui.get_phrase_editing());
     }
 }

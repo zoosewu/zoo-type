@@ -227,6 +227,9 @@ export component SettingsWindow inherits Window {
     in property <string> data-path;
     // 用 ZCT_HOME 環境變數指定資料位置時不能在這裡變更
     in property <bool> data-path-locked;
+    // 詞庫：正在編輯的那一筆（加入欄位改成更新它）
+    in-out property <bool> phrase-editing;
+    in-out property <Phrase> phrase-edit;
 
     pure callback parse-color(string) -> color;
     pure callback hotkey-valid(string) -> bool;
@@ -239,6 +242,7 @@ export component SettingsWindow inherits Window {
     callback add-phrase(string, string);
     callback phrase-state(Phrase, int);
     callback remove-phrase(Phrase);
+    callback update-phrase(Phrase, string, string);
     pure callback suggest-reading(string) -> string;
     callback restore(string);
     callback refresh();
@@ -415,9 +419,9 @@ export component SettingsWindow inherits Window {
                 }
                 if root.app-index >= 0: VerticalLayout {
                     spacing: 8px;
-                    Row { label: "名稱"; LineEdit { width: 220px; text <=> root.app-edit.name; } }
-                    Row { label: "Windows 執行檔"; LineEdit { width: 220px; text <=> root.app-edit.windows; placeholder-text: "Code.exe"; } }
-                    Row { label: "macOS Bundle ID"; LineEdit { width: 220px; text <=> root.app-edit.macos; placeholder-text: "com.microsoft.VSCode"; } }
+                    Row { label: "名稱"; LineEdit { width: 220px; text <=> root.app-edit.name; accepted => { root.apply-app(); } } }
+                    Row { label: "Windows 執行檔"; LineEdit { width: 220px; text <=> root.app-edit.windows; placeholder-text: "Code.exe"; accepted => { root.apply-app(); } } }
+                    Row { label: "macOS Bundle ID"; LineEdit { width: 220px; text <=> root.app-edit.macos; placeholder-text: "com.microsoft.VSCode"; accepted => { root.apply-app(); } } }
                     Row { label: "預設模式"; ComboBox { width: 160px; model: ["沿用全域", "中文", "英文"]; current-index <=> root.app-edit.default-mode; } }
                     Row { label: "標點"; ComboBox { width: 160px; model: ["沿用全域", "全形", "半形"]; current-index <=> root.app-edit.punctuation; } }
                     Row { label: "輸出"; ComboBox { width: 160px; model: ["沿用全域", "繁體", "簡體"]; current-index <=> root.app-edit.output; } }
@@ -435,24 +439,49 @@ export component SettingsWindow inherits Window {
                 vertical-stretch: 1;
                 spacing: 10px;
                 Help { text: "讀音填注音是自訂詞，填英文字母是縮寫：打縮寫再按空白就換成詞。優先：一律排第一；封鎖：不出現在候選；移除：恢復預設。在組字區按 Shift + ← / → 選範圍再按 Enter 也能加詞。"; }
-                HorizontalLayout {
+                form := HorizontalLayout {
                     spacing: 8px;
+                    property <bool> ready: root.online && word.text != "" && reading.text != "";
+                    function submit() {
+                        if !self.ready { return; }
+                        if root.phrase-editing {
+                            root.update-phrase(root.phrase-edit, word.text, reading.text);
+                        } else {
+                            root.add-phrase(word.text, reading.text);
+                        }
+                        self.clear();
+                    }
+                    function clear() {
+                        root.phrase-editing = false;
+                        word.text = "";
+                        reading.text = "";
+                        word.focus();
+                    }
+                    public function edit(p: Phrase) {
+                        root.phrase-edit = p;
+                        root.phrase-editing = true;
+                        word.text = p.word;
+                        reading.text = p.bopomofo;
+                        word.focus();
+                    }
                     word := LineEdit {
                         width: 160px;
                         placeholder-text: "詞";
                         // 打中文時填入最常用的讀音
                         edited(t) => { reading.text = root.suggest-reading(t); }
+                        accepted => { reading.focus(); }
                     }
-                    reading := LineEdit { width: 220px; placeholder-text: "注音或縮寫"; }
+                    reading := LineEdit {
+                        width: 220px;
+                        placeholder-text: "注音或縮寫";
+                        accepted => { form.submit(); }
+                    }
                     Button {
-                        text: "加入";
-                        enabled: root.online && word.text != "" && reading.text != "";
-                        clicked => {
-                            root.add-phrase(word.text, reading.text);
-                            word.text = "";
-                            reading.text = "";
-                        }
+                        text: root.phrase-editing ? "更新" : "加入";
+                        enabled: form.ready;
+                        clicked => { form.submit(); }
                     }
+                    if root.phrase-editing: Button { text: "取消"; clicked => { form.clear(); } }
                     Rectangle { }
                     LineEdit { width: 180px; placeholder-text: "搜尋"; edited(t) => { root.filter-phrases(t); } }
                 }
@@ -471,6 +500,7 @@ export component SettingsWindow inherits Window {
                             current-index: p.state;
                             selected => { root.phrase-state(p, self.current-index); }
                         }
+                        Button { text: "編輯"; enabled: root.online; clicked => { form.edit(p); } }
                         Button { text: "移除"; enabled: root.online; clicked => { root.remove-phrase(p); } }
                     }
                 }
@@ -579,7 +609,7 @@ export component SettingsWindow inherits Window {
                 Row { label: "逾時（秒）"; SpinBox { width: 160px; minimum: 1; maximum: 120; value <=> root.ai.timeout; } }
                 Row {
                     label: "API Key";
-                    key := LineEdit { width: 240px; input-type: password; placeholder-text: root.has-api-key ? "已儲存" : "本機服務可以留空"; }
+                    key := LineEdit { width: 240px; input-type: password; placeholder-text: root.has-api-key ? "已儲存" : "本機服務可以留空"; accepted => { if self.text != "" { root.save-api-key(self.text); self.text = ""; } } }
                     Button { text: "儲存金鑰"; enabled: key.text != ""; clicked => { root.save-api-key(key.text); key.text = ""; } }
                     Button { text: "清除"; enabled: root.has-api-key; clicked => { root.save-api-key(""); } }
                 }
