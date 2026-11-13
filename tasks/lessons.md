@@ -85,3 +85,10 @@
 - 規則：
   - 欄位標籤、placeholder 只說「這是什麼」；行為說明盡量讓版面本身表達（CLAUDE.md：Let the Layout Explain）
   - 新功能改到既有文字時，以「如果一開始就有這個功能會怎麼寫」重寫整段
+
+## 吃掉放開事件會讓 App 以為按鍵還按著（2026-11-13）
+- 現象：單按 Shift 切中英後，設定程式按 Tab 焦點往回跳到「儲存設定」（Slint 當成 Shift + Tab）
+- 原因：OnTestKeyUp 回傳 TRUE 時 TSF 就吃掉放開事件，OnKeyUp 回傳什麼都一樣
+- 規則：
+  - 放開事件一律交給 App；需要更新文件時從 OnTestKeyUp 用非同步 edit session（TF_ES_ASYNCDONTCARE）
+  - 只在真實視窗出現的問題，先徵得同意再用模擬按鍵實測（UI Automation 讀焦點與欄位內容），不要只靠推測
