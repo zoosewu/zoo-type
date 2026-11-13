@@ -353,6 +353,13 @@ fn update_document(
     Ok(())
 }
 
+fn right_alt_key(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> TF_PRESERVEDKEY {
+    TF_PRESERVEDKEY {
+        uVKey: vk.0 as u32,
+        uModifiers: TF_MOD_RALT,
+    }
+}
+
 impl ITfTextInputProcessor_Impl for TextService_Impl {
     fn Activate(&self, ptim: Ref<ITfThreadMgr>, tid: u32) -> Result<()> {
         self.ActivateEx(ptim, tid, 0)
@@ -370,6 +377,9 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                         langbar::detach(button);
                     }
                     if let Ok(km) = tm.cast::<ITfKeystrokeMgr>() {
+                        for (guid, vk, _) in keys::RIGHT_ALT_KEYS {
+                            let _ = km.UnpreserveKey(&guid, &right_alt_key(vk));
+                        }
                         let _ = km.UnadviseKeyEventSink(tsf.client_id);
                     }
                     if let (Some(cookie), Ok(src)) = (tsf.thread_sink_cookie, tm.cast::<ITfSource>())
@@ -396,6 +406,11 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
                 let km: ITfKeystrokeMgr = tm.cast()?;
                 let key_sink: ITfKeyEventSink = self.to_interface();
                 km.AdviseKeyEventSink(tid, &key_sink, true)?;
+                // 右 Alt + 注音鍵：一般按鍵通道收不到 Alt 組合鍵（設定關閉時 OnPreservedKey 不吃，交還 App）
+                let desc: Vec<u16> = "右 Alt 符號".encode_utf16().collect();
+                for (guid, vk, _) in keys::RIGHT_ALT_KEYS {
+                    let _ = km.PreserveKey(tid, &guid, &right_alt_key(vk), &desc);
+                }
 
                 let src: ITfSource = tm.cast()?;
                 let thread_sink: ITfThreadMgrEventSink = self.to_interface();
@@ -506,8 +521,24 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         })
     }
 
-    fn OnPreservedKey(&self, _pic: Ref<ITfContext>, _guid: *const GUID) -> Result<BOOL> {
-        Ok(false.into())
+    fn OnPreservedKey(&self, pic: Ref<ITfContext>, guid: *const GUID) -> Result<BOOL> {
+        guard(|| {
+            if guid.is_null() || self.not_input() {
+                return Ok(false.into());
+            }
+            let guid = unsafe { *guid };
+            let Some(&(_, _, c)) = keys::RIGHT_ALT_KEYS.iter().find(|(g, _, _)| *g == guid) else {
+                return Ok(false.into());
+            };
+            let Some(Response::Key(r)) = self.call(&Request::Key(keys::right_alt_event(c))) else {
+                return Ok(false.into());
+            };
+            let eaten = r.eaten;
+            if let Some(ctx) = pic.as_ref() {
+                self.apply(ctx, r);
+            }
+            Ok(eaten.into())
+        })
     }
 }
 

@@ -76,6 +76,30 @@ pub fn key(wparam: WPARAM, lparam: LPARAM) -> Key {
     }
 }
 
+/// 右 Alt + 注音鍵（, . / ; -）：TSF 一般的按鍵通道不會把 Alt 組合鍵交給輸入法，
+/// 所以登記成「保留按鍵」，由 `OnPreservedKey` 收到。（保留按鍵 GUID、虛擬鍵碼、按鍵字元）
+pub const RIGHT_ALT_KEYS: [(windows::core::GUID, VIRTUAL_KEY, u8); 5] = [
+    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e001), VK_OEM_COMMA, b','),
+    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e002), VK_OEM_PERIOD, b'.'),
+    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e003), VK_OEM_2, b'/'),
+    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e004), VK_OEM_1, b';'),
+    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e005), VK_OEM_MINUS, b'-'),
+];
+
+/// 保留按鍵（右 Alt + 注音鍵）對應的按下事件
+pub fn right_alt_event(c: u8) -> KeyEvent {
+    KeyEvent {
+        key: Key::Char(c),
+        mods: Mods {
+            alt: true,
+            right_alt: true,
+            ..Mods::NONE
+        },
+        released: false,
+        time_ms: unsafe { GetTickCount64() },
+    }
+}
+
 pub fn event(wparam: WPARAM, lparam: LPARAM, released: bool) -> KeyEvent {
     KeyEvent {
         key: key(wparam, lparam),
