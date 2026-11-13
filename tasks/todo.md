@@ -41,10 +41,10 @@
 - [x] 快取 cargo（rust-cache）與詞庫資料（以 fetch-dict.sh 內容為 key）
 
 ### 3. Release（`.github/workflows/release.yml`，推送 v* 標籤）
-- [ ] 檢查標籤版本 = Cargo.toml workspace 版本（不一致就失敗）
-- [ ] 建置 + 測試 → iscc 產生 `zootype-<版本>-windows-x64-setup.exe` → SHA256
-- [ ] 用 gh CLI 建立 GitHub Release，附上安裝檔與 SHA256，自動產生變更說明
-- [ ] 未做程式碼簽章：下載時 SmartScreen 會警告（README 說明；之後可考慮簽章）
+- [x] 檢查標籤版本 = Cargo.toml workspace 版本（不一致就失敗）
+- [x] 建置 + 測試 → iscc 產生 `zootype-<版本>-windows-x64-setup.exe` → SHA256
+- [x] 用 gh CLI 建立 GitHub Release，附上安裝檔與 SHA256，自動產生變更說明
+- [x] 未做程式碼簽章：下載時 SmartScreen 會警告（README 說明；之後可考慮簽章）
 
 ### 4. macOS（需要先完成 M6）
 - [ ] M6：InputMethodKit 前端（Swift）+ cbindgen C ABI 接 zct-core

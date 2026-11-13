@@ -1,0 +1,84 @@
+name: Release
+
+# 推送 v* 標籤（例如 v0.1.0）：建置正式版安裝檔並建立 GitHub Release
+# 標籤有 -（例如 v0.2.0-rc.1）時標成 pre-release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 標籤與版號一致
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          $cargo = Get-Content Cargo.toml -Raw
+          if ($cargo -notmatch '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"') { throw '讀不到 Cargo.toml 的版號' }
+          if ($Matches[1] -ne $tag) { throw "標籤 $tag 和 Cargo.toml 的版號 $($Matches[1]) 不一致" }
+          "VERSION=$tag" >> $env:GITHUB_ENV
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 詞庫快取
+        id: dict
+        uses: actions/cache@v4
+        with:
+          path: assets/dict
+          key: dict-${{ hashFiles('scripts/fetch-dict.sh') }}
+
+      - name: 下載詞庫
+        if: steps.dict.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash scripts/fetch-dict.sh
+
+      - name: 測試
+        run: cargo test --workspace --locked
+
+      - name: Release 建置
+        run: cargo build --workspace --release --locked
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ISCC.exe -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: 安裝檔
+        shell: pwsh
+        run: ./scripts/build-installer.ps1
+
+      - name: GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $setup = "target/installer/zoo-type-$env:VERSION-windows-x64-setup.exe"
+          $hash = (Get-Content "$setup.sha256").Split(' ')[0]
+          @"
+          ## 安裝
+
+          下載 ``zoo-type-$env:VERSION-windows-x64-setup.exe`` 執行（需要系統管理員權限，Windows 10 / 11 64 位元）。
+
+          安裝檔沒有程式碼簽章，Windows 可能顯示「Windows 已保護您的電腦」：按「其他資訊」→「仍要執行」。
+
+          SHA256：``$hash``
+          "@ | Set-Content notes.md -Encoding utf8
+          $flags = @()
+          if ('${{ github.ref_name }}' -like '*-*') { $flags += '--prerelease' }
+          gh release create '${{ github.ref_name }}' $setup "$setup.sha256" --title "動物園輸入法 $env:VERSION" --notes-file notes.md --generate-notes @flags

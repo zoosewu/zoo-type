@@ -1,6 +1,12 @@
 # 動物園輸入法（zoo-type）
 
-跨平台（Windows / macOS）注音輸入法，Rust 核心。開發中。
+大千排列的繁體注音輸入法，Rust 核心。目前支援 Windows 10 / 11（64 位元），macOS 開發中。
+
+## 安裝
+
+到 [Releases](https://github.com/zoosewu/zoo-type/releases) 下載 `zoo-type-<版本>-windows-x64-setup.exe` 執行（需要系統管理員權限）。
+
+安裝檔沒有程式碼簽章，Windows 可能顯示「Windows 已保護您的電腦」：按「其他資訊」→「仍要執行」。可以用同一頁的 `.sha256` 檔核對下載的檔案。
 
 - 需求：[docs/requirements.md](docs/requirements.md)
 - 架構：[docs/architecture.md](docs/architecture.md)
