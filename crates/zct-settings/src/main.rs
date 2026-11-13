@@ -607,6 +607,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(to_phrase)
                 .collect();
             ui.set_phrases(ModelRc::new(VecModel::from(list)));
+            // 清單換了，編輯中的列號就不對了
+            ui.set_phrase_edit_row(-1);
         }
     };
     let refresh = {
@@ -1113,9 +1115,22 @@ mod ui_tests {
             .find_first()
             .expect("編輯按鈕");
         edit.invoke_accessible_default_action();
-        let (word, reading) = (field(&ui, "詞"), field(&ui, "注音或縮寫"));
-        assert_eq!(word.accessible_value().as_deref(), Some("動物"));
-        assert_eq!(reading.accessible_value().as_deref(), Some("ㄉㄨㄥˋ ㄨˋ"));
+        // 那一列變成輸入框，帶著原本的內容
+        let value = |v: &str| {
+            i_slint_backend_testing::ElementQuery::from_root(&ui)
+                .match_descendants()
+                .match_predicate({
+                    let v = v.to_owned();
+                    move |e| {
+                        e.accessible_role()
+                            == Some(i_slint_backend_testing::AccessibleRole::TextInput)
+                            && e.accessible_value().as_deref() == Some(v.as_str())
+                    }
+                })
+                .find_first()
+                .unwrap_or_else(|| panic!("找不到內容是 {v} 的輸入框"))
+        };
+        let (word, reading) = (value("動物"), value("ㄉㄨㄥˋ ㄨˋ"));
         word.set_accessible_value("動物園");
         reading.set_accessible_value("ㄉㄨㄥˋ ㄨˋ ㄩㄢˊ");
         reading.mock_single_click(slint::platform::PointerEventButton::Left);
@@ -1124,6 +1139,6 @@ mod ui_tests {
             *updated.borrow(),
             Some(("動物".into(), "動物園".into(), "ㄉㄨㄥˋ ㄨˋ ㄩㄢˊ".into()))
         );
-        assert!(!ui.get_phrase_editing());
+        assert_eq!(ui.get_phrase_edit_row(), -1);
     }
 }
