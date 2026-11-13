@@ -532,6 +532,37 @@ impl Session {
         ok.then(|| raw.clone())
     }
 
+    /// 自訂縮寫：按空白時，剛打的縮寫換成詞（回傳要刪掉的字母數與詞）
+    ///
+    /// - 中文模式：這個音節的按鍵是縮寫、又組不成注音（`tw`）。組得成注音的（`su`）照常打注音，
+    ///   詞改附在候選窗（見 `complete_segment`）
+    /// - 英文模式：只在組字中，游標前連續的英文字母是縮寫（「天氣」Shift「tw」空白）
+    fn abbrev_key(&self, ev: &KeyEvent) -> Option<(usize, String)> {
+        if ev.key != Key::Space || ev.mods.shift || self.editor.is_selecting() {
+            return None;
+        }
+        match self.mode {
+            InputMode::Chinese => {
+                if !self.editor.entering_syllable() || crate::mixed::is_syllable(&self.raw) {
+                    return None;
+                }
+                self.engine.abbreviation(&self.raw).map(|w| (0, w))
+            }
+            InputMode::English => {
+                if self.editor.is_empty() || self.editor.entering_syllable() {
+                    return None;
+                }
+                let c = self.editor.cursor();
+                let n = self.letters_before(c);
+                let keys: String = self.editor.symbols()[c - n..c]
+                    .iter()
+                    .filter_map(|s| s.to_char())
+                    .collect();
+                self.engine.abbreviation(&keys).map(|w| (n, w))
+            }
+        }
+    }
+
     /// 組字中的英文模式：要放進組字區的字元（選字中交給候選窗，數字用來選字）
     fn latin_in_composition(&self, ev: &KeyEvent) -> Option<String> {
         if self.mode != InputMode::English || self.editor.is_empty() || self.editor.is_selecting() {
@@ -703,10 +734,9 @@ impl Session {
         (len > 0).then(|| if c < len { c } else { len - 1 })
     }
 
-    /// B：英文選項目前可以出現嗎（英文對應的是最後一個音節；候選窗必須正在選最後一個字）
+    /// B：英文（或縮寫的詞）選項目前可以出現嗎（對應的是最後一個音節；候選窗必須正在選最後一個字）
     fn english_applicable(&self) -> bool {
-        self.mixed.english_candidate
-            && self.english_alt.is_some()
+        self.english_alt.is_some()
             && self.editor.is_selecting()
             && self.editor.cursor() + 1 == self.editor.len()
     }
@@ -887,12 +917,15 @@ impl Session {
         false
     }
 
+    /// 音節完成：候選窗要附上的另一個選項 —— 自訂縮寫的詞優先，其次是英文單字
     fn complete_segment(&mut self) {
         let raw = std::mem::take(&mut self.raw);
-        self.english_alt = (self.mixed.english_candidate
-            && self.raw_english_ok
-            && self.engine.english_candidate(&raw))
-        .then_some(raw);
+        self.english_alt = self.engine.abbreviation(&raw).or_else(|| {
+            (self.mixed.english_candidate
+                && self.raw_english_ok
+                && self.engine.english_candidate(&raw))
+            .then_some(raw)
+        });
     }
 
     pub fn process_key(&mut self, ev: &KeyEvent) -> KeyResult {
@@ -974,6 +1007,15 @@ impl Session {
                 let text = self.flush();
                 self.join(&mut commit, &text);
                 r.toggle_game = true;
+            } else if let Some((letters, word)) = self.abbrev_key(ev) {
+                self.editor.cancel_entering_syllable();
+                for _ in 0..letters {
+                    self.chewing_key(Key::Backspace);
+                }
+                self.raw.clear();
+                self.english_alt = None;
+                self.latin_word.clear();
+                self.insert_latin(&word);
             } else if let Some(text) = self.latin_in_composition(ev) {
                 self.track_latin(&text);
                 self.insert_latin(&text);

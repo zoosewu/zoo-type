@@ -71,6 +71,7 @@ export struct Phrase {
     word: string,
     bopomofo: string,
     state: int,             // 0 一般 / 1 優先 / 2 封鎖
+    abbrev: bool,           // 縮寫（讀音是英文字母）：沒有狀態，只能移除
 }
 
 export struct Day {
@@ -435,7 +436,7 @@ export component SettingsWindow inherits Window {
             if root.page == 4: VerticalLayout {
                 vertical-stretch: 1;
                 spacing: 10px;
-                Help { text: "加入詞：輸入詞後會自動填入最常用的讀音，需要時再修改。狀態：一般＝照常參考；優先＝一律排第一；封鎖＝不再出現在候選。移除：刪掉這筆紀錄，系統詞庫裡的詞恢復預設排序，自己加的詞不再出現。打字時也可以在組字區按 Shift + ← / → 選範圍再按 Enter 加詞。"; }
+                Help { text: "加入詞：輸入詞後會自動填入最常用的讀音，需要時再修改。狀態：一般＝照常參考；優先＝一律排第一；封鎖＝不再出現在候選。移除：刪掉這筆紀錄，系統詞庫裡的詞恢復預設排序，自己加的詞不再出現。讀音填英文字母就是縮寫：打縮寫再按空白換成詞（tw → 台灣）；縮寫剛好是注音時改附在候選窗。打字時也可以在組字區按 Shift + ← / → 選範圍再按 Enter 加詞。"; }
                 HorizontalLayout {
                     spacing: 8px;
                     word := LineEdit {
@@ -444,7 +445,7 @@ export component SettingsWindow inherits Window {
                         // 打中文自動填入最常用的讀音，需要時再改
                         edited(t) => { reading.text = root.suggest-reading(t); }
                     }
-                    reading := LineEdit { width: 220px; placeholder-text: "注音（自動填入）"; }
+                    reading := LineEdit { width: 220px; placeholder-text: "注音或英文縮寫"; }
                     Button {
                         text: "加入";
                         enabled: root.online && word.text != "" && reading.text != "";
@@ -465,7 +466,8 @@ export component SettingsWindow inherits Window {
                         alignment: start;
                         Text { width: 120px; text: p.word; vertical-alignment: center; color: p.state == 2 ? Palette.foreground.with-alpha(0.4) : Palette.foreground; }
                         Text { width: 200px; text: p.bopomofo; vertical-alignment: center; color: Palette.foreground.with-alpha(0.7); }
-                        ComboBox {
+                        if p.abbrev: Text { width: 110px; text: "縮寫"; vertical-alignment: center; color: Palette.foreground.with-alpha(0.7); }
+                        if !p.abbrev: ComboBox {
                             width: 110px;
                             model: ["一般", "優先", "封鎖"];
                             current-index: p.state;

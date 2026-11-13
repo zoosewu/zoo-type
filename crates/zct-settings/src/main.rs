@@ -341,6 +341,7 @@ fn to_phrase(p: &PhraseEntry) -> Phrase {
     Phrase {
         word: p.word.clone().into(),
         bopomofo: p.bopomofo.clone().into(),
+        abbrev: zct_core::abbrev::is_abbrev(&p.bopomofo),
         state: if p.is_banned() {
             2
         } else if p.is_pinned() {

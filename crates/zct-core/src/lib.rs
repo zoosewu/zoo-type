@@ -1,5 +1,6 @@
 //! ZCT 輸入法核心：所有「判斷」都在這裡，平台層（TSF / IMK）只做轉譯。
 
+pub mod abbrev;
 pub mod apps;
 pub mod config;
 pub mod emoji;

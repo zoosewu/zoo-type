@@ -960,7 +960,10 @@ fn add_list_ban_unban_phrase() {
         engine.add_phrase("酷", "ㄎㄨˋ ㄧㄣ").is_err(),
         "字數與音節數不符"
     );
-    assert!(engine.add_phrase("酷音", "abc").is_err(), "注音格式錯誤");
+    assert!(
+        engine.add_phrase("酷音", "ㄎㄨˋ x1").is_err(),
+        "注音格式錯誤"
+    );
     let list = engine.phrases();
     let e = list.iter().find(|p| p.word == "酷音").unwrap();
     assert_eq!(e.bopomofo, "ㄎㄨˋ ㄧㄣ");
@@ -1984,4 +1987,101 @@ fn legacy_normal_boost_is_migrated() {
     assert_eq!(boost("酷音"), zct_core::PhraseEntry::NORMAL);
     assert_eq!(boost("這穗"), zct_core::PhraseEntry::LEARNED);
     assert_eq!(boost("天氣"), zct_core::PhraseEntry::PINNED);
+}
+
+fn with_abbrevs(pairs: &[(&str, &str)]) -> Harness {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = open_engine(&dir.path().join("learning"));
+    for (abbrev, word) in pairs {
+        engine.add_phrase(word, abbrev).unwrap();
+    }
+    Harness::with_engine(std::sync::Arc::new(engine), Config::default(), None, dir)
+}
+
+#[test]
+fn abbreviation_turns_into_word_on_space() {
+    // tw（ㄔㄊ）組不成注音：按空白直接換成詞，句中也可以
+    let mut h = with_abbrevs(&[("tw", "動物園")]);
+    h.type_str("tw ");
+    assert_eq!(h.s.preedit().text, "動物園");
+    h.type_str("wu0 fu4tw ");
+    assert_eq!(
+        h.press(Key::Enter, Mods::NONE).commit.as_deref(),
+        Some("動物園天氣動物園")
+    );
+}
+
+#[test]
+fn abbreviation_that_is_bopomofo_goes_to_candidates() {
+    // su（ㄋㄧ）是合法注音：照常打注音，詞附在候選窗
+    let mut h = with_abbrevs(&[("su", "動物園")]);
+    h.type_str("su3");
+    assert_eq!(h.s.preedit().text, "你");
+    let page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
+    let i = page
+        .items
+        .iter()
+        .position(|w| w == "動物園")
+        .expect("縮寫的詞在候選窗");
+    h.press(Key::Char(b'1' + i as u8), Mods::NONE);
+    assert_eq!(h.s.preedit().text, "動物園");
+}
+
+#[test]
+fn abbreviation_in_english_mode_only_inside_composition() {
+    let mut h = with_abbrevs(&[("tw", "動物園")]);
+    h.type_str("wu0 ");
+    h.tap_shift();
+    h.type_str("tw ");
+    assert_eq!(h.s.preedit().text, "天動物園");
+    h.press(Key::Enter, Mods::NONE);
+    // 沒有組字時英文模式照打英文
+    let r = h.press(Key::Char(b't'), Mods::NONE);
+    assert!(!r.eaten);
+}
+
+#[test]
+fn abbreviation_listed_and_removed_like_phrases() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = open_engine(&dir.path().join("learning"));
+    engine.add_phrase("動物園", "TW").unwrap();
+    assert!(engine.add_phrase("動物園", "tw").is_err(), "已有");
+    assert!(
+        engine
+            .phrases()
+            .iter()
+            .any(|p| p.word == "動物園" && p.bopomofo == "tw")
+    );
+    assert!(
+        engine
+            .phrase_action("動物園", "tw", zct_core::PhraseAction::Pin)
+            .is_err()
+    );
+    engine
+        .phrase_action("動物園", "tw", zct_core::PhraseAction::Remove)
+        .unwrap();
+    assert_eq!(engine.abbreviation("tw"), None);
+    // 存檔後重新開啟仍在
+    engine.add_phrase("動物園", "tw").unwrap();
+    engine.save().unwrap();
+    let again = open_engine(&dir.path().join("learning"));
+    assert_eq!(again.abbreviation("tw").as_deref(), Some("動物園"));
+}
+
+#[test]
+fn abbreviation_syncs_like_phrases() {
+    let (a_dir, b_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = open_engine(a_dir.path());
+    let b = open_engine(b_dir.path());
+    a.add_phrase("動物園", "tw").unwrap();
+    let text = zct_core::sync::export(&a, "", 100);
+    assert!(text.contains("動物園\ttw\tnormal\t100"), "{text}");
+    zct_core::sync::import(&b, &text);
+    assert_eq!(b.abbreviation("tw").as_deref(), Some("動物園"));
+    // 移除也同步
+    a.phrase_action("動物園", "tw", zct_core::PhraseAction::Remove)
+        .unwrap();
+    let text = zct_core::sync::export(&a, &text, 200);
+    zct_core::sync::import(&b, &text);
+    assert_eq!(b.abbreviation("tw"), None);
 }

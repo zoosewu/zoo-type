@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 const USER_DICT: &str = "user_dict.csv";
 const HISTORY: &str = "history_dict.bin";
 const STATS: &str = "stats.tsv";
+/// 自訂縮寫（`tw` → 台灣），見 [`crate::abbrev`]
+const ABBREVS: &str = "abbrev.tsv";
 /// 選字修正的累計次數（讀音 + 字），同一個修正兩次才學起來；單機資料，不同步
 const CORRECTIONS: &str = "corrections.tsv";
 
@@ -127,6 +129,8 @@ pub struct Engine {
     stats: Mutex<Vec<DayStats>>,
     /// 選字修正累計次數：`詞 \t 注音` → 次數
     corrections: Mutex<std::collections::BTreeMap<String, u32>>,
+    /// 自訂縮寫
+    abbrevs: std::sync::RwLock<crate::abbrev::Abbrevs>,
 }
 
 /// UTC 日期，避免為此引入時間函式庫
@@ -291,6 +295,9 @@ impl Engine {
             frozen: AtomicBool::new(false),
             stats: Mutex::new(load_stats(&dir.join(STATS))),
             corrections: Mutex::new(load_corrections(&dir.join(CORRECTIONS))),
+            abbrevs: std::sync::RwLock::new(crate::abbrev::Abbrevs::parse(
+                &std::fs::read_to_string(dir.join(ABBREVS)).unwrap_or_default(),
+            )),
         };
         engine.migrate_normal_boost();
         Ok(engine)
@@ -597,8 +604,26 @@ impl Engine {
                 }
             })
             .collect();
+        list.extend(self.abbrevs_read().entries().map(|(a, w)| PhraseEntry {
+            word: w.to_owned(),
+            bopomofo: a.to_owned(),
+            boost: PhraseEntry::NORMAL,
+        }));
         list.sort_by(|a, b| a.bopomofo.cmp(&b.bopomofo).then(a.word.cmp(&b.word)));
         list
+    }
+
+    fn abbrevs_read(&self) -> std::sync::RwLockReadGuard<'_, crate::abbrev::Abbrevs> {
+        self.abbrevs.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn abbrevs_write(&self) -> std::sync::RwLockWriteGuard<'_, crate::abbrev::Abbrevs> {
+        self.abbrevs.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 縮寫對應的詞（打縮寫再按空白時換成這個詞）
+    pub fn abbreviation(&self, keys: &str) -> Option<String> {
+        self.abbrevs_read().lookup(keys).map(str::to_owned)
     }
 
     fn parse(word: &str, bopomofo: &str) -> Result<SyllableVec, String> {
@@ -617,8 +642,19 @@ impl Engine {
     }
 
     /// 加入自訂詞：使用者明確加入的詞要能打得出來，所以和固頂一樣優先
+    ///
+    /// 讀音是英文字母時加入的是縮寫（`tw` → 台灣）
     pub fn add_phrase(&self, word: &str, bopomofo: &str) -> Result<(), String> {
         let word = word.trim();
+        if crate::abbrev::is_abbrev(bopomofo.trim()) {
+            return match self.abbrevs_write().add(bopomofo, word)? {
+                true => {
+                    self.mark_dirty();
+                    Ok(())
+                }
+                false => Err(format!("已有：{word}")),
+            };
+        }
         let syl = Self::parse(word, bopomofo)?;
         match self.boost_of(syl.as_ref(), word) {
             Some(b) if b != PhraseEntry::BANNED => return Err(format!("已有：{word}")),
@@ -633,6 +669,14 @@ impl Engine {
         bopomofo: &str,
         action: PhraseAction,
     ) -> Result<(), String> {
+        if crate::abbrev::is_abbrev(bopomofo) {
+            if action != PhraseAction::Remove {
+                return Err("縮寫只能移除".into());
+            }
+            self.abbrevs_write().remove(bopomofo, word);
+            self.mark_dirty();
+            return Ok(());
+        }
         let syl = Self::parse(word, bopomofo)?;
         match action {
             PhraseAction::Ban => {
@@ -671,6 +715,17 @@ impl Engine {
         current: Option<crate::sync::PhraseState>,
     ) -> Result<(), String> {
         use crate::sync::PhraseState;
+        if crate::abbrev::is_abbrev(bopomofo) {
+            let mut a = self.abbrevs_write();
+            if target == PhraseState::Removed {
+                a.remove(bopomofo, word);
+            } else {
+                a.add(bopomofo, word)?;
+            }
+            drop(a);
+            self.mark_dirty();
+            return Ok(());
+        }
         let syl = Self::parse(word, bopomofo)?;
         match (target, current) {
             (PhraseState::Removed, None) => return Ok(()),
@@ -720,7 +775,7 @@ impl Engine {
             return Err(std::io::Error::other(format!("找不到備份：{day}")));
         }
         self.frozen.store(true, Ordering::SeqCst);
-        for name in [USER_DICT, HISTORY, STATS] {
+        for name in [USER_DICT, HISTORY, STATS, ABBREVS] {
             let (from, to) = (src.join(name), self.dir.join(name));
             if from.exists() {
                 std::fs::copy(&from, &to)?;
@@ -757,7 +812,9 @@ impl Engine {
                     writeln!(w, "{key}\t{n}")?;
                 }
                 Ok(())
-            })
+            })?;
+            let abbrevs = self.abbrevs_read().to_text();
+            write_atomic(&self.dir.join(ABBREVS), |w| w.write_all(abbrevs.as_bytes()))
         })();
         if r.is_err() {
             // 寫入失敗：下次再試
@@ -770,12 +827,12 @@ impl Engine {
     pub fn backup(&self, backup_dir: &Path, keep: usize) -> std::io::Result<()> {
         let target = backup_dir.join(today());
         // 還沒有任何資料時不建立備份：否則會留下空的當日備份，當天之後也不會再補
-        let has_data = [USER_DICT, HISTORY]
+        let has_data = [USER_DICT, HISTORY, ABBREVS]
             .iter()
             .any(|n| self.dir.join(n).exists());
         if has_data && !target.exists() {
             std::fs::create_dir_all(&target)?;
-            for name in [USER_DICT, HISTORY, STATS] {
+            for name in [USER_DICT, HISTORY, STATS, ABBREVS] {
                 let src = self.dir.join(name);
                 if src.exists() {
                     std::fs::copy(&src, target.join(name))?;
