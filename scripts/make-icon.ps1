@@ -4,16 +4,19 @@
 
 .DESCRIPTION
 每個尺寸存成 32 位元 BMP（ExtractIconEx 支援最完整）。改字或字型後重新執行即可。
+開發版：scripts/make-icon.ps1 -Badge DEV -Name zct-dev.ico（右下角加橘色標籤，小尺寸只放第一個字母）
 #>
 param(
     [string]$Text = '動',
-    [string]$Font = 'Microsoft JhengHei'
+    [string]$Font = 'Microsoft JhengHei',
+    [string]$Badge = '',
+    [string]$Name = 'zct.ico'
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $root = Split-Path -Parent $PSScriptRoot
-$out = Join-Path $root 'crates\zct-tsf\res\zct.ico'
+$out = Join-Path $root "crates\zct-tsf\res\$Name"
 New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
 
 $sizes = 16, 20, 24, 32, 40, 48, 64
@@ -28,6 +31,20 @@ $entries = foreach ($size in $sizes) {
     $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
     $rect = New-Object System.Drawing.RectangleF 0, 0, $size, ($size + $size * 0.06)
     $g.DrawString($Text, $face, [System.Drawing.Brushes]::Black, $rect, $fmt)
+    if ($Badge) {
+        # 右下角的標籤：小尺寸只放第一個字母
+        $label = if ($size -ge 32) { $Badge } else { $Badge.Substring(0, 1) }
+        $bw = if ($size -ge 32) { [math]::Round($size * 0.7) } else { [math]::Round($size * 0.5) }
+        $bh = if ($size -ge 32) { [math]::Round($size * 0.34) } else { [math]::Round($size * 0.45) }
+        $box = New-Object System.Drawing.RectangleF ($size - $bw), ($size - $bh), $bw, $bh
+        $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(232, 89, 12))), $box)
+        # 字級依標籤寬度與高度取小的，整個標籤一行放得下
+        $em = [math]::Min($bh * 0.85, $bw / ($label.Length * 0.68))
+        $small = New-Object System.Drawing.Font 'Segoe UI', $em, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+        $one = New-Object System.Drawing.StringFormat $fmt
+        $one.FormatFlags = [System.Drawing.StringFormatFlags]::NoWrap -bor [System.Drawing.StringFormatFlags]::NoClip
+        $g.DrawString($label, $small, [System.Drawing.Brushes]::White, $box, $one)
+    }
     $g.Dispose()
 
     # BITMAPINFOHEADER + 由下而上的 BGRA 像素 + 全 0 的 AND 遮罩

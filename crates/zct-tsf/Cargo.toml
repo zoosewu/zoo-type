@@ -10,6 +10,10 @@ rust-version.workspace = true
 name = "zoo_type"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# 開發版（見 zct-core/src/channel.rs）：圖示與檔案描述也標成開發版
+dev = ["zct-core/dev"]
+
 [dependencies]
 zct-core.workspace = true
 zct-ipc.workspace = true

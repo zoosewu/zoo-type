@@ -1,4 +1,4 @@
 # 開發版：另一套獨立的輸入法（zct-core 的 dev feature），建置結果放在 target/dev，不會蓋掉正式版的 target/release
 # 用法：cargo build-dev，再以系統管理員身分執行 scripts/install-dev.ps1
 [alias]
-build-dev = "build --release --workspace --features zct-core/dev --target-dir target/dev"
+build-dev = "build --release --workspace --features zct-tsf/dev,zct-service/dev,zct-settings/dev --target-dir target/dev"
