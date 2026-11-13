@@ -46,16 +46,22 @@ fn static_hint(r: &KeyResult) -> Option<&'static str> {
 /// 按鍵診斷：只記錄非字元鍵，絕不記錄字母、數字與符號
 fn debug_key(shared: &Shared, id: u64, stage: &str, ev: &zct_core::KeyEvent, result: &str) {
     use zct_core::Key;
-    if !shared.debug_keys || matches!(ev.key, Key::Char(_) | Key::Numpad(_)) {
+    if !shared.debug_keys {
         return;
     }
+    // 字元鍵不記哪一個字（log 不能有打字內容）；只記帶 Ctrl / Alt / Win 的組合鍵有出現
+    let key = match ev.key {
+        Key::Char(_) | Key::Numpad(_) if ev.mods.has_command_modifier() => "字元鍵（隱藏）".to_string(),
+        Key::Char(_) | Key::Numpad(_) => return,
+        k => format!("{k:?}"),
+    };
     log::info!(
-        "[{id}] 按鍵診斷 {stage} {:?} {} shift={} ctrl={} alt={} t={} {result}",
-        ev.key,
+        "[{id}] 按鍵診斷 {stage} {key} {} shift={} ctrl={} alt={} right_alt={} t={} {result}",
         if ev.released { "放開" } else { "按下" },
         ev.mods.shift,
         ev.mods.ctrl,
         ev.mods.alt,
+        ev.mods.right_alt,
         ev.time_ms,
     );
 }
