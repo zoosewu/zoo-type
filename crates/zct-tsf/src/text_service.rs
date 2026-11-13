@@ -52,6 +52,8 @@ pub struct TextService {
     pending_up: RefCell<Option<KeyResult>>,
     /// 已向 TSF 登記右 Alt 的保留按鍵
     right_alt: Cell<bool>,
+    /// 上一次查游標位置時 App 有回報（不是沿用舊位置）
+    last_fresh: Cell<bool>,
     ipc: RefCell<Ipc>,
     fullscreen: FullscreenCache,
     /// 最後一次從 App 取得的游標位置：App 暫時回報不出來時沿用（VS Code 終端機打注音途中常取不到），
@@ -66,6 +68,7 @@ impl TextService {
             composition: RefCell::default(),
             pending_up: RefCell::default(),
             right_alt: Cell::new(false),
+            last_fresh: Cell::new(false),
             ipc: RefCell::default(),
             fullscreen: FullscreenCache::default(),
             last_rect: Cell::new(None),
@@ -219,12 +222,14 @@ impl TextService_Impl {
                 );
             }
             let got = rect_out.get();
+            self.last_fresh.set(got.is_some());
             if got.is_some() {
                 self.last_rect.set(got);
             }
             rect.set(got.or(self.last_rect.get()).or_else(fallback_rect));
         }
-        self.call(&Request::Caret(rect.get()));
+        let fresh = needs_caret && self.last_fresh.get();
+        self.call(&Request::Caret { rect: rect.get(), fresh });
     }
 
     fn reset(&self, req: Request) {
@@ -285,7 +290,15 @@ impl TextService_Impl {
                 self.refresh_langbar();
                 return;
             }
-            Action::OpenSettings => Command::OpenSettings,
+            Action::OpenSettings => {
+                // 選單在 App 裡（前景）：允許設定程式把自己的視窗叫到前面
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                        windows::Win32::UI::WindowsAndMessaging::ASFW_ANY,
+                    );
+                }
+                Command::OpenSettings
+            }
             Action::ToggleGame => Command::ToggleGame,
             Action::Restart => Command::Restart,
         };

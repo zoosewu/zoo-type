@@ -68,6 +68,8 @@ mod app {
         /// 診斷用：資料夾 local/ 下有 `debug-keys` 檔案時，記錄非字元鍵（Shift、Delete…）的事件；
         /// 字母、數字、符號一律不記，避免記下使用者打的內容
         pub debug_keys: bool,
+        /// 每個 App（程序 ID）最後的中英狀態：切到別的輸入法時連線會斷，切回來時沿用
+        pub last_mode: std::sync::Mutex<std::collections::HashMap<u32, zct_core::InputMode>>,
     }
 
     /// 系統詞庫：正式安裝放在執行檔旁的 `dict/`；開發時可用 `ZCT_DICT` 指定
@@ -235,6 +237,7 @@ mod app {
             game,
             ui,
             debug_keys: data.local().join("debug-keys").exists(),
+            last_mode: Default::default(),
         });
         if shared.debug_keys {
             log::info!("按鍵診斷已開啟（只記錄非字元鍵）");

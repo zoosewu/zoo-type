@@ -16,7 +16,7 @@ fn main() {
         let r = c.call(&Request::Key(KeyEvent::down(k, m, now)), t).unwrap();
         now += 40;
         c.call(&Request::Key(KeyEvent::up(k, m, now)), t).unwrap();
-        c.call(&Request::Caret(caret), t).unwrap();
+        c.call(&Request::Caret { rect: caret, fresh: true }, t).unwrap();
         r
     };
     for b in b"dk3u3y94" {

@@ -17,7 +17,7 @@ fn main() {
         println!("{k:?} → {r:?}");
         now += 40;
         c.call(&Request::Key(KeyEvent::up(k, m, now)), t).unwrap();
-        c.call(&Request::Caret(caret), t).unwrap();
+        c.call(&Request::Caret { rect: caret, fresh: true }, t).unwrap();
     };
     for b in b"d9 vup " {
         let k = if *b == b' ' { Key::Space } else { Key::Char(*b) };

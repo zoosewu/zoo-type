@@ -20,7 +20,7 @@ fn main() {
         now += 40;
         let up_mods = if matches!(k, Key::Shift(_)) { Mods::NONE } else { mods };
         let r2 = call(c, Request::Key(KeyEvent::up(k, up_mods, now)));
-        call(c, Request::Caret(caret));
+        call(c, Request::Caret { rect: caret, fresh: true });
         if let (Response::Key(a), Response::Key(b)) = (r, r2) {
             println!("{k:?} eaten={} preedit={:?} commit={:?} cand={:?} mode={:?}",
                 a.eaten, b.preedit.text, a.commit.or(b.commit), b.candidates.map(|p| p.items), a.mode_changed.or(b.mode_changed));

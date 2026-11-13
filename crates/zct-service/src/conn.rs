@@ -188,9 +188,12 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let mut last: Option<(KeyResult, Option<String>)> = None;
     // 這個連線的 App 與組字提示列設定（連線時決定，快捷鍵切換）
     let mut app = String::new();
+    let mut app_pid: Option<u32> = None;
     let mut bar = false;
     // 組字提示列的位置：組字開始時的游標位置，組字結束前不跟著游標移動
     let mut bar_anchor: Option<zct_ipc::Rect> = None;
+    // 提示列的位置是 App 回報的（不是沿用舊位置）；沿用的話，App 回報後改用新位置
+    let mut anchor_fresh = false;
 
     loop {
         let req = match conn.recv() {
@@ -217,8 +220,13 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     log::info!("[{id}] 連線：{exe}（pid {pid}）");
                     bar = composition_bar_for(&exe, shared);
                     app = exe.clone();
+                    app_pid = Some(pid);
                     match open_session(id, &exe, shared) {
-                        Ok(s) => {
+                        Ok(mut s) => {
+                            let saved = shared.last_mode.lock().ok().and_then(|m| m.get(&pid).copied());
+                            if let Some(mode) = saved {
+                                s.restore_mode(mode);
+                            }
                             let (detect_legacy, detect_fullscreen) = s.detection();
                             session = Some(s);
                             Response::Welcome {
@@ -287,12 +295,18 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 None => Response::Key(KeyResult::default()),
             },
-            Request::Caret(rect) => {
+            Request::Caret { rect, fresh } => {
+                if shared.debug_keys {
+                    log::info!("[{id}] 游標位置 {rect:?} fresh={fresh}");
+                }
                 if let Some((r, hint)) = last.take() {
                     if r.preedit.text.is_empty() {
                         bar_anchor = None;
-                    } else if bar_anchor.is_none() {
+                        anchor_fresh = false;
+                    } else if bar_anchor.is_none() || (fresh && !anchor_fresh) {
+                        // VS Code 等 Chromium App 剛輸出完常回報不出位置：先用舊位置，回報後再移過去
                         bar_anchor = rect;
+                        anchor_fresh = fresh;
                     }
                     shared.ui.send(UiCmd::Composition {
                         owner: id,
@@ -375,6 +389,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 last = None;
                 bar_anchor = None;
+                anchor_fresh = false;
                 shared.ui.send(UiCmd::Hide { owner: id });
                 Response::Ok
             }
@@ -385,6 +400,13 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
         }
     }
     shared.ui.send(UiCmd::Hide { owner: id });
+    if let (Some(pid), Some(s), Ok(mut m)) = (app_pid, &session, shared.last_mode.lock()) {
+        // 已經結束的程序不會再用到；數量多了就整個清掉（只是少了沿用，不影響功能）
+        if m.len() > 256 {
+            m.clear();
+        }
+        m.insert(pid, s.mode());
+    }
     // App 關閉時順便存檔，縮短當機時遺失學習的時間窗
     if let Err(e) = shared.engine.save() {
         log::error!("學習紀錄存檔失敗：{e}");

@@ -335,7 +335,55 @@ fn load_readings() -> Option<zct_core::readings::Readings> {
         .and_then(|p| zct_core::readings::Readings::load(&p).ok())
 }
 
+/// 視窗標題（settings.slint 的 title）；第二次開啟時用來找到已經開著的視窗
+const WINDOW_TITLE: &str = "動物園輸入法 設定";
+
+/// 只允許一個設定程式：已經開著時把那個視窗叫到前面，回傳 false
+///
+/// 變更資料位置後會自己重新開啟（`--notice`），那時舊的還在結束中，等它一下。
+#[cfg(windows)]
+fn single_instance(wait_for_old: bool) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
+    use windows::Win32::System::Threading::CreateMutexW;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow};
+    use windows::core::{HSTRING, PCWSTR};
+    let tries = if wait_for_old { 25 } else { 1 };
+    for _ in 0..tries {
+        unsafe {
+            let Ok(handle) = CreateMutexW(None, false, &HSTRING::from(r"Local\ZooType-settings")) else {
+                return true;
+            };
+            if GetLastError() != ERROR_ALREADY_EXISTS {
+                // 不關閉 handle：程序結束時系統自動釋放
+                let _ = handle;
+                return true;
+            }
+            let _ = CloseHandle(handle);
+        }
+        if wait_for_old {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+    unsafe {
+        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), &HSTRING::from(WINDOW_TITLE)) {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+    false
+}
+
+#[cfg(not(windows))]
+fn single_instance(_wait_for_old: bool) -> bool {
+    true
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if !single_instance(std::env::args().any(|a| a == "--notice")) {
+        return Ok(());
+    }
     // 改名前的 %APPDATA%\zct 搬到 %APPDATA%\ZooType（服務程序也會做，先開哪個都一樣）
     let _ = zct_core::paths::migrate_legacy();
     let data = DataRoot::discover().ok_or("找不到資料根目錄")?;

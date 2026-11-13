@@ -1498,6 +1498,13 @@ impl Session {
         self.menu = None;
     }
 
+    /// 切到別的輸入法再切回來（重新連線）：`on_focus = "remember"` 時沿用上次的中英狀態
+    pub fn restore_mode(&mut self, mode: InputMode) {
+        if self.eff.on_focus == OnFocus::Remember {
+            self.mode = mode;
+        }
+    }
+
     /// 輸入焦點回到這個 context：依 `on_focus` 決定是否重設中英狀態
     pub fn focus(&mut self) {
         self.reset();

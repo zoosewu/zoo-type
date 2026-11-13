@@ -16,7 +16,7 @@ fn main() {
         c.call(&Request::Key(KeyEvent::down(k, Mods::NONE, now)), t).unwrap();
         now += 40;
         c.call(&Request::Key(KeyEvent::up(k, Mods::NONE, now)), t).unwrap();
-        c.call(&Request::Caret(caret), t).unwrap();
+        c.call(&Request::Caret { rect: caret, fresh: true }, t).unwrap();
     };
     for b in b"ji3 love su3" {
         key(&mut c, if *b == b' ' { Key::Space } else { Key::Char(*b) });
