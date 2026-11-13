@@ -418,7 +418,7 @@ fn chinese_symbol_style_and_its_half_width() {
 }
 
 #[test]
-fn right_alt_types_the_bopomofo_keys_own_symbol() {
+fn right_alt_follows_keycaps_for_every_key() {
     use zct_core::symbols::SymbolStyle;
     let ralt = Mods { alt: true, right_alt: true, ..Mods::NONE };
     let lalt = Mods { alt: true, ..Mods::NONE };
@@ -430,7 +430,12 @@ fn right_alt_types_the_bopomofo_keys_own_symbol() {
     h.type_str("wu0 ");
     assert!(h.press(Key::Char(b','), ralt).eaten);
     h.press(Key::Char(b'.'), ralt);
-    assert_eq!(h.s.preedit().text, "天，。");
+    h.press(Key::Char(b'1'), ralt);
+    h.press(Key::Char(b'w'), ralt);
+    h.press(Key::Char(b'['), Mods { shift: true, ..ralt });
+    h.press(Key::Char(b'='), Mods { shift: true, ..ralt });
+    assert_eq!(h.s.preedit().text, "天，。１ｗ｛＋");
+    assert!(h.s.right_alt_enabled());
 }
 
 #[test]

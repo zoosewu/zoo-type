@@ -347,6 +347,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 chinese: session.as_ref().is_none_or(|s| s.mode() == InputMode::Chinese),
                 simplified: session.as_ref().is_some_and(|s| s.output() == Output::Simplified),
                 game: shared.game.load(Ordering::Relaxed),
+                right_alt: session.as_ref().is_some_and(|s| s.right_alt_enabled()),
             },
             Request::ToggleMode => match session.as_mut() {
                 Some(s) => {

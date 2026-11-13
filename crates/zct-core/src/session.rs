@@ -329,14 +329,18 @@ impl Session {
         crate::symbols::symbol(c, ev.mods.shift, right_alt, self.width, self.punct.style).map(String::from)
     }
 
-    /// 開啟「右 Alt + 注音鍵」時，這是不是右 Alt + , . / ; -
+    /// 開啟「右 Alt」時，這是不是右 Alt（+ Shift）+ 可以打字的鍵
     fn right_alt_symbol(&self, ev: &KeyEvent) -> bool {
         self.punct.right_alt
             && ev.mods.right_alt
             && !ev.mods.ctrl
             && !ev.mods.meta
-            && !ev.mods.shift
-            && matches!(ev.key, Key::Char(c) if crate::symbols::BOPOMOFO_SYMBOL_KEYS.contains(&c))
+            && matches!(ev.key, Key::Char(c) if c.is_ascii_graphic())
+    }
+
+    /// 設定開啟了「右 Alt 照鍵帽輸出」（DLL 依此向 TSF 登記保留按鍵）
+    pub fn right_alt_enabled(&self) -> bool {
+        self.punct.right_alt
     }
 
     /// 只判斷「按下」事件是否會被吃掉，不改變任何狀態（給 TSF `OnTestKeyDown` 用）

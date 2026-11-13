@@ -7,7 +7,8 @@
 //! - **中文標點**：chewing 的傳統對照（Shift + , → ，、Shift + ' → ；、[ → 「）
 //!
 //! 半形永遠是全形同一個鍵的半形版，只差寬度。被注音占用的 `, . / ; -` 本身的符號
-//! 用 ` 符號選單，或開啟「右 Alt + 鍵」。
+//! 用 ` 符號選單，或開啟「右 Alt」：右 Alt + 任何鍵都照鍵帽輸出（Shift 照樣作用），
+//! 例如右 Alt + 1 → １、右 Alt + w → ｗ、右 Alt + Shift + [ → ｛。
 
 use serde::{Deserialize, Serialize};
 
@@ -24,9 +25,6 @@ pub enum SymbolStyle {
     /// 中文標點：Shift + , → ，、Shift + . → 。、Shift + ' → ；、[ → 「
     Chinese,
 }
-
-/// 被注音占用的符號鍵（大千：ㄝ ㄡ ㄥ ㄤ ㄦ）
-pub const BOPOMOFO_SYMBOL_KEYS: [u8; 5] = *b",./;-";
 
 /// ASCII 符號的全形版（U+FF01–FF5E）
 fn fullwidth(c: u8) -> char {
@@ -66,14 +64,15 @@ fn chinese_half(c: u8) -> char {
 /// `c` 是沒按 Shift 時的按鍵字元。
 pub fn symbol(c: u8, shift: bool, right_alt: bool, width: Width, style: SymbolStyle) -> Option<char> {
     if right_alt {
-        // 右 Alt + 注音鍵：那個鍵本身的符號（，。／；－）
-        if shift || !BOPOMOFO_SYMBOL_KEYS.contains(&c) {
+        // 右 Alt + 任何鍵：照鍵帽輸出（，。沿用中文的句讀）
+        if !c.is_ascii_graphic() {
             return None;
         }
+        let key = if shift { shifted(c) } else { c };
         return Some(match width {
-            Width::Half => c as char,
-            Width::Full if c == b'.' => '。',
-            Width::Full => fullwidth(c),
+            Width::Half => key as char,
+            Width::Full if key == b'.' => '。',
+            Width::Full => fullwidth(key),
         });
     }
     let key = if shift {
@@ -150,14 +149,21 @@ mod tests {
     }
 
     #[test]
-    fn right_alt_gives_the_bopomofo_keys_own_symbol() {
-        let ra = |c, w| symbol(c, false, true, w, Keyboard);
-        assert_eq!(ra(b',', Full), Some('，'));
-        assert_eq!(ra(b'.', Full), Some('。'));
-        assert_eq!(ra(b';', Full), Some('；'));
-        assert_eq!(ra(b'/', Full), Some('／'));
-        assert_eq!(ra(b'-', Full), Some('－'));
-        assert_eq!(ra(b',', Half), Some(','));
-        assert_eq!(ra(b'a', Full), None);
+    fn right_alt_follows_keycaps_for_every_key() {
+        let ra = |c, shift, w| symbol(c, shift, true, w, Chinese);
+        assert_eq!(ra(b',', false, Full), Some('，'));
+        assert_eq!(ra(b'.', false, Full), Some('。'));
+        assert_eq!(ra(b';', false, Full), Some('；'));
+        assert_eq!(ra(b'/', false, Full), Some('／'));
+        assert_eq!(ra(b'-', false, Full), Some('－'));
+        assert_eq!(ra(b'=', false, Full), Some('＝'));
+        assert_eq!(ra(b'1', false, Full), Some('１'));
+        assert_eq!(ra(b'w', false, Full), Some('ｗ'));
+        assert_eq!(ra(b'w', true, Full), Some('Ｗ'));
+        assert_eq!(ra(b'[', true, Full), Some('｛'));
+        assert_eq!(ra(b'-', true, Full), Some('＿'));
+        assert_eq!(ra(b'=', true, Full), Some('＋'));
+        assert_eq!(ra(b',', false, Half), Some(','));
+        assert_eq!(ra(b'1', true, Half), Some('!'));
     }
 }

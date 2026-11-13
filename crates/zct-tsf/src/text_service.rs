@@ -50,6 +50,8 @@ pub struct TextService {
     composition: RefCell<Option<ITfComposition>>,
     /// `OnTestKeyUp` 已處理、等 `OnKeyUp` 套用到文件的結果
     pending_up: RefCell<Option<KeyResult>>,
+    /// 已向 TSF 登記右 Alt 的保留按鍵
+    right_alt: Cell<bool>,
     ipc: RefCell<Ipc>,
     fullscreen: FullscreenCache,
     /// 最後一次從 App 取得的游標位置：App 暫時回報不出來時沿用（VS Code 終端機打注音途中常取不到），
@@ -63,6 +65,7 @@ impl TextService {
             tsf: RefCell::default(),
             composition: RefCell::default(),
             pending_up: RefCell::default(),
+            right_alt: Cell::new(false),
             ipc: RefCell::default(),
             fullscreen: FullscreenCache::default(),
             last_rect: Cell::new(None),
@@ -241,11 +244,26 @@ impl TextService_Impl {
                 chinese,
                 simplified,
                 game,
+                right_alt,
             }),
         ) = (button, self.call(&Request::Status))
         {
             langbar::set_state(&button, chinese, simplified, game);
+            self.sync_right_alt(right_alt);
         }
+    }
+
+    /// 依設定登記或取消右 Alt 的保留按鍵（設定關閉時完全不攔右 Alt 組合鍵）
+    fn sync_right_alt(&self, enabled: bool) {
+        if self.right_alt.get() == enabled {
+            return;
+        }
+        let tsf = self.tsf.borrow();
+        let Some(km) = tsf.thread_mgr.as_ref().and_then(|tm| tm.cast::<ITfKeystrokeMgr>().ok()) else {
+            return;
+        };
+        preserve_right_alt(&km, tsf.client_id, enabled);
+        self.right_alt.set(enabled);
     }
 
     /// 輸入法圖示的點擊與選單
@@ -353,10 +371,21 @@ fn update_document(
     Ok(())
 }
 
-fn right_alt_key(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> TF_PRESERVEDKEY {
-    TF_PRESERVEDKEY {
-        uVKey: vk.0 as u32,
-        uModifiers: TF_MOD_RALT,
+/// 登記（或取消）右 Alt（+ Shift）+ 可以打字的鍵為保留按鍵
+fn preserve_right_alt(km: &ITfKeystrokeMgr, tid: u32, preserve: bool) {
+    let desc: Vec<u16> = "右 Alt 符號".encode_utf16().collect();
+    for (guid, vk, shift, _) in keys::right_alt_keys() {
+        let key = TF_PRESERVEDKEY {
+            uVKey: vk.0 as u32,
+            uModifiers: TF_MOD_RALT | if shift { TF_MOD_SHIFT } else { 0 },
+        };
+        unsafe {
+            let _ = if preserve {
+                km.PreserveKey(tid, &guid, &key, &desc)
+            } else {
+                km.UnpreserveKey(&guid, &key)
+            };
+        }
     }
 }
 
@@ -377,8 +406,8 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                         langbar::detach(button);
                     }
                     if let Ok(km) = tm.cast::<ITfKeystrokeMgr>() {
-                        for (guid, vk, _) in keys::RIGHT_ALT_KEYS {
-                            let _ = km.UnpreserveKey(&guid, &right_alt_key(vk));
+                        if self.right_alt.replace(false) {
+                            preserve_right_alt(&km, tsf.client_id, false);
                         }
                         let _ = km.UnadviseKeyEventSink(tsf.client_id);
                     }
@@ -406,11 +435,7 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
                 let km: ITfKeystrokeMgr = tm.cast()?;
                 let key_sink: ITfKeyEventSink = self.to_interface();
                 km.AdviseKeyEventSink(tid, &key_sink, true)?;
-                // 右 Alt + 注音鍵：一般按鍵通道收不到 Alt 組合鍵（設定關閉時 OnPreservedKey 不吃，交還 App）
-                let desc: Vec<u16> = "右 Alt 符號".encode_utf16().collect();
-                for (guid, vk, _) in keys::RIGHT_ALT_KEYS {
-                    let _ = km.PreserveKey(tid, &guid, &right_alt_key(vk), &desc);
-                }
+                // 右 Alt 的保留按鍵在 refresh_langbar 依設定登記
 
                 let src: ITfSource = tm.cast()?;
                 let thread_sink: ITfThreadMgrEventSink = self.to_interface();
@@ -527,10 +552,10 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 return Ok(false.into());
             }
             let guid = unsafe { *guid };
-            let Some(&(_, _, c)) = keys::RIGHT_ALT_KEYS.iter().find(|(g, _, _)| *g == guid) else {
+            let Some((_, _, shift, c)) = keys::right_alt_keys().find(|(g, ..)| *g == guid) else {
                 return Ok(false.into());
             };
-            let Some(Response::Key(r)) = self.call(&Request::Key(keys::right_alt_event(c))) else {
+            let Some(Response::Key(r)) = self.call(&Request::Key(keys::right_alt_event(c, shift))) else {
                 return Ok(false.into());
             };
             let eaten = r.eaten;

@@ -77,7 +77,7 @@ sort_by_frequency = true   # 候選字依常用程度與個人學習排序
 
 [punctuation]
 shift = "keyboard"         # Shift + 符號鍵："keyboard" 鍵盤上印的符號 | "chinese" 中文標點，見下方說明
-right_alt = false          # 右 Alt + , . / ; - 打出 ，。／；－
+right_alt = false          # 右 Alt + 任何鍵照鍵帽輸出（右 Alt + , → ，、右 Alt + Shift + [ → ｛）
 
 # 自訂符號：優先於上面的對照，鍵名寫法同快捷鍵
 [punctuation.full]
@@ -100,7 +100,7 @@ right_alt = false          # 右 Alt + , . / ; - 打出 ，。／；－
 | ' / [ ] / Shift + [ ] | ＇ ［ ］ ｛ ｝ | 、 「 」 『 』 |
 | Shift + 1–0、= \ 等 | 全形版（！＠＃…） | 同左（^ 是 ︿、_ 是 —） |
 
-被注音占用的 `, . / ; -` 本身的符號（，。／；－）從 `` ` `` 符號選單選；開啟 `right_alt` 後可以直接按**右 Alt** + 那個鍵（左 Alt 照常交給 App）。
+被注音占用的鍵（數字、字母、`, . / ; -`）本身的字元從 `` ` `` 符號選單選或切英文；開啟 `right_alt` 後，**右 Alt + 任何鍵都照鍵帽輸出**，加 Shift 就是上排的符號（右 Alt + 1 → １、右 Alt + Shift + = → ＋）。開啟時程式收不到右 Alt 組合鍵；左 Alt 照常交給 App。
 
 全形符號會放進組字區和前後文一起送出；半形符號在組字中才放進組字區。
 

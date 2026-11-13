@@ -76,23 +76,49 @@ pub fn key(wparam: WPARAM, lparam: LPARAM) -> Key {
     }
 }
 
-/// 右 Alt + 注音鍵（, . / ; -）：TSF 一般的按鍵通道不會把 Alt 組合鍵交給輸入法，
-/// 所以登記成「保留按鍵」，由 `OnPreservedKey` 收到。（保留按鍵 GUID、虛擬鍵碼、按鍵字元）
-pub const RIGHT_ALT_KEYS: [(windows::core::GUID, VIRTUAL_KEY, u8); 5] = [
-    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e001), VK_OEM_COMMA, b','),
-    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e002), VK_OEM_PERIOD, b'.'),
-    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e003), VK_OEM_2, b'/'),
-    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e004), VK_OEM_1, b';'),
-    (windows::core::GUID::from_u128(0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d8e005), VK_OEM_MINUS, b'-'),
+/// 右 Alt 照鍵帽輸出：TSF 一般的按鍵通道不會把 Alt 組合鍵交給輸入法，
+/// 所以把「右 Alt（+ Shift）+ 可以打字的鍵」登記成保留按鍵，由 `OnPreservedKey` 收到。
+const RIGHT_ALT_VKS: [VIRTUAL_KEY; 11] = [
+    VK_OEM_COMMA,
+    VK_OEM_PERIOD,
+    VK_OEM_2,
+    VK_OEM_1,
+    VK_OEM_7,
+    VK_OEM_4,
+    VK_OEM_6,
+    VK_OEM_5,
+    VK_OEM_MINUS,
+    VK_OEM_PLUS,
+    VK_OEM_3,
 ];
 
-/// 保留按鍵（右 Alt + 注音鍵）對應的按下事件
-pub fn right_alt_event(c: u8) -> KeyEvent {
+/// 保留按鍵：(GUID, 虛擬鍵碼, 是否含 Shift, 按鍵字元)；GUID 由按鍵與 Shift 推得，每次都一樣
+pub fn right_alt_keys() -> impl Iterator<Item = (windows::core::GUID, VIRTUAL_KEY, bool, u8)> {
+    let vks = RIGHT_ALT_VKS
+        .into_iter()
+        .chain((0x30..=0x39).map(VIRTUAL_KEY))
+        .chain((0x41..=0x5A).map(VIRTUAL_KEY));
+    vks.flat_map(|vk| {
+        let Key::Char(c) = key(WPARAM(vk.0 as usize), LPARAM(0)) else {
+            unreachable!("清單裡都是字元鍵")
+        };
+        [false, true].map(move |shift| {
+            let guid = windows::core::GUID::from_u128(
+                0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d80000 | (shift as u128) << 8 | vk.0 as u128,
+            );
+            (guid, vk, shift, c)
+        })
+    })
+}
+
+/// 保留按鍵（右 Alt 符號）對應的按下事件
+pub fn right_alt_event(c: u8, shift: bool) -> KeyEvent {
     KeyEvent {
         key: Key::Char(c),
         mods: Mods {
             alt: true,
             right_alt: true,
+            shift,
             ..Mods::NONE
         },
         released: false,

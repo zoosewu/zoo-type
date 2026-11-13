@@ -10,7 +10,7 @@ pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
 /// 12：程式改名為 zoo-type-*（舊版服務程序不能讓位給不同檔名的新版，改走協定不同的唯讀模式）
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -105,6 +105,8 @@ pub enum Response {
         chinese: bool,
         simplified: bool,
         game: bool,
+        /// 「右 Alt 照鍵帽輸出」開啟：DLL 要向 TSF 登記保留按鍵
+        right_alt: bool,
     },
     Error(String),
 }
