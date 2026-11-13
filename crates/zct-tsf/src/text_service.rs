@@ -3,7 +3,7 @@
 //! 按鍵流程（每次一到兩次 IPC 往返）：
 //! - `OnTestKeyDown` → `TestKeyDown`：會不會吃掉（不吃的鍵服務程序仍會觀察，供 Shift 判定）
 //! - `OnKeyDown`     → `Key`：處理並更新文件
-//! - `OnTestKeyUp`   → `Key`：Shift 單按在放開時才成立；需要更新文件時吃掉，交給 `OnKeyUp`
+//! - `OnTestKeyUp`   → `Key`：Shift 單按在放開時才成立；需要更新文件時交給 `OnKeyUp` 套用（放開事件仍交給 App）
 //!
 //! 借用規則：每個 RefCell 只短暫借用，絕不在借用期間呼叫 TSF（TSF 可能重入）。
 
@@ -615,13 +615,12 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                     r
                 }
             };
-            match pic.as_ref() {
-                Some(ctx) => {
-                    self.apply(ctx, r);
-                    Ok(true.into())
-                }
-                None => Ok(false.into()),
+            if let Some(ctx) = pic.as_ref() {
+                self.apply(ctx, r);
             }
+            // 放開事件照樣交給 App：吃掉的話 App 以為 Shift 一直按著
+            //（單按 Shift 切中英後，設定程式的 Tab 變成 Shift + Tab，焦點往回跳）
+            Ok(false.into())
         })
     }
 
