@@ -48,6 +48,8 @@ struct Tsf {
 pub struct TextService {
     tsf: RefCell<Tsf>,
     composition: RefCell<Option<ITfComposition>>,
+    /// 最後寫進組字區的文字：用來發現 App 自己結束了組字卻沒通知
+    composition_text: RefCell<String>,
     /// `OnTestKeyUp` 已處理、等 `OnKeyUp` 套用到文件的結果
     pending_up: RefCell<Option<KeyResult>>,
     /// 已向 TSF 登記右 Alt 的保留按鍵
@@ -66,6 +68,7 @@ impl TextService {
         TextService {
             tsf: RefCell::default(),
             composition: RefCell::default(),
+            composition_text: RefCell::default(),
             pending_up: RefCell::default(),
             right_alt: Cell::new(false),
             last_fresh: Cell::new(false),
@@ -232,6 +235,39 @@ impl TextService_Impl {
         self.call(&Request::Caret { rect: rect.get(), fresh });
     }
 
+    /// App 自己結束了組字卻沒通知（Windows 11 記事本按 Ctrl + , 這類 App 自己的快捷鍵時）：
+    /// 字已經由 App 送出，組字區的文字不再是我們寫的那段。這時結束那個組字、清掉服務程序的組字，
+    /// 不然候選窗會留著，之後再按 Enter 又送出一次
+    fn drop_lost_composition(&self, ctx: &ITfContext) {
+        let Some(comp) = self.composition.borrow().clone() else {
+            return;
+        };
+        let want = wide(&self.composition_text.borrow());
+        let lost = std::rc::Rc::new(Cell::new(false));
+        let out = lost.clone();
+        let session = EditSession::create(move |ec| {
+            let same = unsafe {
+                comp.GetRange().and_then(|range| {
+                    let mut buf = vec![0u16; want.len() + 1];
+                    let mut n = 0u32;
+                    range.GetText(ec, 0, &mut buf, &mut n)?;
+                    Ok(buf[..n as usize] == want[..])
+                })
+            };
+            if !same.unwrap_or(false) {
+                out.set(true);
+                let _ = unsafe { comp.EndComposition(ec) };
+            }
+            Ok(())
+        });
+        unsafe {
+            let _ = ctx.RequestEditSession(self.client_id(), &session, TF_ES_SYNC | TF_ES_READWRITE);
+        }
+        if lost.get() {
+            self.reset(Request::Reset);
+        }
+    }
+
     fn reset(&self, req: Request) {
         self.composition.borrow_mut().take();
         self.pending_up.borrow_mut().take();
@@ -360,6 +396,7 @@ fn update_document(
         };
         let range = comp.GetRange()?;
         range.SetText(ec, TF_ST_CORRECTION, &wide(&preedit.text))?;
+        *this.composition_text.borrow_mut() = preedit.text.clone();
 
         // 底線：整段組字 + 選字目標（字元位置換成 UTF-16）
         let utf16 = |chars: usize| -> i32 {
@@ -500,6 +537,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             if self.not_input() {
                 return Ok(false.into());
             }
+            if let Some(ctx) = pic.as_ref() {
+                self.drop_lost_composition(ctx);
+            }
             let ev = keys::event(w, l, false);
             let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
                 return Ok(false.into());
@@ -563,6 +603,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         guard(|| {
             if guid.is_null() || self.not_input() {
                 return Ok(false.into());
+            }
+            if let Some(ctx) = pic.as_ref() {
+                self.drop_lost_composition(ctx);
             }
             let guid = unsafe { *guid };
             let Some((_, _, shift, c)) = keys::right_alt_keys().find(|(g, ..)| *g == guid) else {

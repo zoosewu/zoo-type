@@ -380,6 +380,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 Response::Ok
             }
             Request::Reset | Request::Focus => {
+                if shared.debug_keys {
+                    log::info!("[{id}] 清除組字（{req:?}）");
+                }
                 if let Some(s) = session.as_mut() {
                     if req == Request::Focus {
                         s.focus();
