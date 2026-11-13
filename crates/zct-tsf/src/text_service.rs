@@ -3,7 +3,7 @@
 //! 按鍵流程（每次一到兩次 IPC 往返）：
 //! - `OnTestKeyDown` → `TestKeyDown`：會不會吃掉（不吃的鍵服務程序仍會觀察，供 Shift 判定）
 //! - `OnKeyDown`     → `Key`：處理並更新文件
-//! - `OnTestKeyUp`   → `Key`：Shift 單按在放開時才成立；需要更新文件時交給 `OnKeyUp` 套用（放開事件仍交給 App）
+//! - `OnTestKeyUp`   → `Key`：Shift 單按在放開時才成立；放開事件一律交給 App，需要更新文件時用非同步 edit session
 //!
 //! 借用規則：每個 RefCell 只短暫借用，絕不在借用期間呼叫 TSF（TSF 可能重入）。
 
@@ -50,8 +50,8 @@ pub struct TextService {
     composition: RefCell<Option<ITfComposition>>,
     /// 最後寫進組字區的文字：用來發現 App 自己結束了組字卻沒通知
     composition_text: RefCell<String>,
-    /// `OnTestKeyUp` 已處理、等 `OnKeyUp` 套用到文件的結果
-    pending_up: RefCell<Option<KeyResult>>,
+    /// `OnTestKeyUp` 已處理過的放開事件（wparam, lparam）：App 接著又呼叫 `OnKeyUp` 時不重複處理
+    tested_up: Cell<Option<(usize, isize)>>,
     /// 已向 TSF 登記右 Alt 的保留按鍵
     right_alt: Cell<bool>,
     /// 上一次查游標位置時 App 有回報（不是沿用舊位置）
@@ -69,7 +69,7 @@ impl TextService {
             tsf: RefCell::default(),
             composition: RefCell::default(),
             composition_text: RefCell::default(),
-            pending_up: RefCell::default(),
+            tested_up: Cell::new(None),
             right_alt: Cell::new(false),
             last_fresh: Cell::new(false),
             ipc: RefCell::default(),
@@ -195,6 +195,11 @@ impl TextService_Impl {
 
     /// 把一次按鍵結果套用到文件，並把游標位置回報給服務程序
     fn apply(&self, ctx: &ITfContext, r: KeyResult) {
+        self.apply_with(ctx, r, TF_ES_SYNC);
+    }
+
+    /// `sync`：`TF_ES_SYNC`（按鍵處理中）或 `TF_ES_ASYNCDONTCARE`（不允許同步編輯的地方，例如 `OnTestKeyUp`）
+    fn apply_with(&self, ctx: &ITfContext, r: KeyResult, sync: TF_CONTEXT_EDIT_CONTEXT_FLAGS) {
         let has_composition = self.composition.borrow().is_some();
         let touches_doc = r.commit.is_some() || !r.preedit.text.is_empty() || has_composition;
         if r.mode_changed.is_some() || r.output_changed.is_some() || r.toggle_game {
@@ -221,11 +226,7 @@ impl TextService_Impl {
                 Ok(())
             });
             unsafe {
-                let _ = ctx.RequestEditSession(
-                    self.client_id(),
-                    &session,
-                    TF_ES_SYNC | TF_ES_READWRITE,
-                );
+                let _ = ctx.RequestEditSession(self.client_id(), &session, sync | TF_ES_READWRITE);
             }
             let got = rect_out.get();
             self.last_fresh.set(got.is_some());
@@ -277,7 +278,7 @@ impl TextService_Impl {
 
     fn reset(&self, req: Request) {
         self.composition.borrow_mut().take();
-        self.pending_up.borrow_mut().take();
+        self.tested_up.set(None);
         self.last_rect.set(None);
         self.call(&req);
         self.refresh_langbar();
@@ -488,7 +489,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                 }
             }
             self.composition.borrow_mut().take();
-            self.pending_up.borrow_mut().take();
+            self.tested_up.set(None);
             if let Ok(mut ipc) = self.ipc.try_borrow_mut() {
                 ipc.disconnect();
             }
@@ -546,6 +547,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnTestKeyDown(&self, _pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
+            // 新的按鍵：上一個放開事件的記錄作廢（同一個鍵的放開事件 lparam 每次都一樣）
+            self.tested_up.set(None);
             if self.not_input() {
                 return Ok(false.into());
             }
@@ -560,6 +563,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnKeyDown(&self, pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
+            // 新的按鍵：上一個放開事件的記錄作廢（同一個鍵的放開事件 lparam 每次都一樣）
+            self.tested_up.set(None);
             if self.not_input() {
                 return Ok(false.into());
             }
@@ -578,48 +583,39 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         })
     }
 
-    fn OnTestKeyUp(&self, _pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
+    /// 放開事件一律交給 App（回傳 false）：吃掉的話 App 以為按鍵還按著，
+    /// 例如單按 Shift 切中英後，設定程式的 Tab 變成 Shift + Tab。需要更新文件時改用非同步的 edit session
+    fn OnTestKeyUp(&self, pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
             if self.not_input() {
                 return Ok(false.into());
             }
+            self.tested_up.set(Some((w.0, l.0)));
             let ev = keys::event(w, l, true);
-            let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
-                return Ok(false.into());
-            };
-            let needs_doc = r.commit.is_some() || r.mode_changed.is_some();
-            if needs_doc {
-                *self.pending_up.borrow_mut() = Some(r);
+            if let Some(Response::Key(r)) = self.call(&Request::Key(ev))
+                && (r.commit.is_some() || r.mode_changed.is_some())
+                && let Some(ctx) = pic.as_ref()
+            {
+                self.apply_with(ctx, r, TF_ES_ASYNCDONTCARE);
             }
-            Ok(needs_doc.into())
+            Ok(false.into())
         })
     }
 
+    /// 有些 App（例如 Win11 記事本）直接呼叫 ITfKeystrokeMgr::KeyUp，不會先經過 OnTestKeyUp；
+    /// 這時要在這裡處理放開事件，否則單按 Shift 永遠不會切換中英
     fn OnKeyUp(&self, pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
-            let r = match self.pending_up.borrow_mut().take() {
-                Some(r) => r,
-                // 有些 App（例如 Win11 記事本）直接呼叫 ITfKeystrokeMgr::KeyUp，不會先經過 OnTestKeyUp；
-                // 這時要在這裡處理放開事件，否則單按 Shift 永遠不會切換中英
-                None => {
-                    if self.not_input() {
-                        return Ok(false.into());
-                    }
-                    let ev = keys::event(w, l, true);
-                    let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
-                        return Ok(false.into());
-                    };
-                    if r.commit.is_none() && r.mode_changed.is_none() {
-                        return Ok(false.into());
-                    }
-                    r
-                }
-            };
-            if let Some(ctx) = pic.as_ref() {
+            if self.tested_up.take() == Some((w.0, l.0)) || self.not_input() {
+                return Ok(false.into());
+            }
+            let ev = keys::event(w, l, true);
+            if let Some(Response::Key(r)) = self.call(&Request::Key(ev))
+                && (r.commit.is_some() || r.mode_changed.is_some())
+                && let Some(ctx) = pic.as_ref()
+            {
                 self.apply(ctx, r);
             }
-            // 放開事件照樣交給 App：吃掉的話 App 以為 Shift 一直按著
-            //（單按 Shift 切中英後，設定程式的 Tab 變成 Shift + Tab，焦點往回跳）
             Ok(false.into())
         })
     }
