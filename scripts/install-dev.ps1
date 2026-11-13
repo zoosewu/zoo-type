@@ -15,8 +15,16 @@ $release = Join-Path $root 'target\release'
 $dict = Join-Path $root 'assets\dict'
 $base = Join-Path $env:ProgramFiles 'ZooType'
 
-foreach ($f in @("$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe", "$dict\static_dict.bin")) {
+$binaries = @("$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe")
+foreach ($f in $binaries + "$dict\static_dict.bin") {
     if (-not (Test-Path $f)) { throw "找不到 $f；請先 cargo build --release 並執行 scripts/fetch-dict.sh" }
+}
+# 本腳本不建置：最後一次建置比原始碼舊就拒絕安裝（cargo 只重建有變動的，所以看最新的那個檔），免得資料夾標著新的 commit、裝的卻是舊程式
+$built = ($binaries | ForEach-Object { (Get-Item $_).LastWriteTime } | Measure-Object -Maximum).Maximum
+$newest = Get-ChildItem (Join-Path $root 'crates'), (Join-Path $root 'Cargo.lock') -Recurse -File -Include *.rs, *.slint, *.toml, *.lock, *.txt, *.rc, *.ico |
+    Where-Object { $_.FullName -notmatch '\\(target|tests|examples|benches)\\' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($newest.LastWriteTime -gt $built) {
+    throw "建置結果比原始碼舊（$($newest.FullName) 改過）；請先 cargo build --release --workspace"
 }
 
 $commit = (& git -C $root rev-parse --short HEAD 2>$null)

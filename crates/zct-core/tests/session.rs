@@ -813,7 +813,7 @@ fn frequency_sort_puts_common_char_first() {
 fn pin_moves_word_to_top() {
     let mut h = Harness::new();
     let r = highlight_and(&mut h, "汽", Key::Enter, Mods::shift());
-    assert_eq!(r.notice.as_deref(), Some("已固頂：汽"));
+    assert_eq!(r.notice.as_deref(), Some("已設為優先：汽"));
     assert!(h.s.preedit().text.ends_with('汽'));
     assert_eq!(candidates_for_qi(&mut h)[0], "汽");
 }

@@ -31,7 +31,7 @@
 - [x] 升級：裝到新的版本資料夾（與 install-dev.ps1 共用 install.ps1），不覆蓋被載入中的檔案
 - [x] 解除安裝：uninstall.ps1（結束服務 → regsvr32 /u → 從鍵盤清單移除 → 刪除或排程刪除）；使用者資料保留
 - [x] 授權聲明：installer/THIRD-PARTY-NOTICES.txt（libchewing LGPL 靜態連結 → 原始碼公開即符合）
-- [ ] Slint 授權：設定程式加「關於」頁放 AboutSlint（使用者決定 2026-11-13）
+- [x] Slint 授權：設定程式「關於」頁放 AboutSlint（使用者決定 2026-11-13；已有）
 - [x] install-dev.ps1 保留給開發用；安裝邏輯共用 scripts/install.ps1、uninstall.ps1
 - [x] 免管理員安裝：不可行（實驗 2026-11-13）。TIP 只寫在 HKCU（COM 類別 + CTF\TIP 語言設定檔）時，
   `InstallLayoutOrTip` 回報成功但語言清單沒有它，而且 TSF 會把 HKCU 的語言設定檔當殘留刪掉；HKCU 只是已在 HKLM 登記的 TIP 的個人設定

@@ -76,9 +76,9 @@ end;
 procedure InitializeWizard;
 begin
   IsExistingUser := ExistingUser;
-  DataPage := CreateInputDirPage(wpLicense, '學習資料位置',
-    '使用者詞庫、學習紀錄與設定要存在哪裡？',
-    '之後更新會沿用這個位置。若要用 git 或雲端硬碟同步，可以選在同步資料夾裡。',
+  DataPage := CreateInputDirPage(wpLicense, '資料位置',
+    '設定、詞庫與學習紀錄要存在哪裡？',
+    '更新時沿用這個位置。',
     False, '');
   DataPage.Add('');
   DataPage.Values[0] := ExpandConstant('{userappdata}\ZooType');

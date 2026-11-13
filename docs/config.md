@@ -33,8 +33,8 @@ shift_tap_max_ms = 300     # 按住 Shift 超過這個時間才放開，不算�
 width = "shift+space"      # 切換全形 / 半形
 output = ""                # 切換繁體 / 簡體（預設不綁定）
 game_mode = "ctrl+shift+f12"  # 開關遊戲模式（所有 App 一起）
-forget = "shift+delete"    # 候選窗中：忘記選擇框所在詞的學習紀錄（並取消固頂）
-pin = "shift+enter"        # 候選窗中：固頂選擇框所在的詞並選它
+forget = "shift+delete"    # 候選窗中：忘記選擇框那個詞的學習紀錄與優先
+pin = "shift+enter"        # 候選窗中：選擇框那個詞設為優先（以後都排第一）
 emoji = "ctrl+shift+;"     # Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
 ai = "ctrl+shift+'"         # AI 修正組字內容中的同音錯字
 composition_bar = "ctrl+shift+f11"  # 切換目前 App 的組字提示列（自動寫進 apps.toml 記住）
@@ -176,7 +176,7 @@ App 的執行檔名稱可以在工作管理員的「詳細資料」分頁查到�
 
 | 檔案（資料根目錄下） | 內容 |
 |------|------|
-| `local/learning/user_dict.csv` | 自己加的詞與固頂（純文字） |
+| `local/learning/user_dict.csv` | 自訂詞與優先（純文字） |
 | `local/learning/history_dict.bin` | 自動學習的選字紀錄（會隨時間衰減） |
 | `local/learning/stats.tsv` | 每日統計：日期、送出字數、修正次數 |
 | `local/backup/<日期>/` | 每日自動備份，保留最近 7 天 |
@@ -193,7 +193,7 @@ App 的執行檔名稱可以在工作管理員的「詳細資料」分頁查到�
 | 同步 | 不同步 |
 |------|--------|
 | `config.toml`、`apps.toml` | `local/`（學習紀錄、備份、log） |
-| `dict/user.tsv`（自訂詞、固頂、封鎖、自訂縮寫） | |
+| `dict/user.tsv`（自訂詞、縮寫、優先、封鎖） | |
 | `stats/<電腦名稱>.tsv`（每日統計） | |
 
 - 兩台電腦改了同一個詞時，以較新的修改為準

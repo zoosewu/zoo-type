@@ -282,37 +282,36 @@ export component SettingsWindow inherits Window {
                     Row { label: "預設模式"; ComboBox { width: 160px; model: ["中文", "英文"]; current-index <=> root.general.default-mode; } }
                     Note { text: "新開 App 時的中英狀態。"; }
                     Row { label: "標點"; ComboBox { width: 160px; model: ["全形", "半形"]; current-index <=> root.general.punctuation; } }
-                    Note { text: "中文模式下的符號：全形（，。？）或半形（,.?）。可以用快捷鍵隨時切換，所有 App 共用，切到別的輸入法再回來也會記住。"; }
-                    Row { label: "主要符號（，。；＇…）"; ComboBox { width: 280px; model: ["` + 鍵", "右 Alt + 鍵", "` + 鍵 或 右 Alt + 鍵"]; current-index <=> root.general.primary; } }
-                    Note { text: "鍵帽下排的字元。大千排列中數字、字母和 , . / ; - 是注音鍵，要用這個方式打：` 再按 , → ，、` 再按 1 → １。右 Alt 是按住再按那個鍵；選了右 Alt 時，程式收不到右 Alt 組合鍵（左 Alt 不受影響）。` 連按兩下打出 ` 本身。"; }
-                    Row { label: "次要符號（：＂＜＞…）"; ComboBox { width: 280px; model: ["Shift + 鍵", "` 或 右 Alt + Shift + 鍵"]; current-index <=> root.general.secondary; } }
-                    Note { text: "鍵帽上排的符號。Shift + 鍵：Shift + , → ＜、Shift + ' → ＂。選第二種時，次要符號改成 ` 再按 Shift + 鍵，Shift + 鍵則改出中文標點（Shift + , → ，、Shift + . → 。、Shift + ' → ；、[ → 「）。"; }
+                    Note { text: "全形（，。？）或半形（,.?），所有 App 共用。"; }
+                    Row { label: "主要符號"; ComboBox { width: 280px; model: ["` + 鍵", "右 Alt + 鍵", "` + 鍵 或 右 Alt + 鍵"]; current-index <=> root.general.primary; } }
+                    Note { text: "鍵帽下排的字元：` 再按 , → ，、` 再按 1 → １、` 按兩下 → `。用右 Alt 時，App 收不到右 Alt 組合鍵。"; }
+                    Row { label: "次要符號"; ComboBox { width: 280px; model: ["Shift + 鍵", "` 或 右 Alt + Shift + 鍵"]; current-index <=> root.general.secondary; } }
+                    Note { text: "鍵帽上排的符號：Shift + , → ＜、Shift + ' → ＂。選第二種時，Shift + 鍵改打中文標點（，。；「」）。"; }
                     Row { label: "輸出"; ComboBox { width: 160px; model: ["繁體", "簡體"]; current-index <=> root.general.output; } }
-                    Note { text: "選簡體時，組字區與候選窗仍然顯示繁體，按 Enter 送出時才整句轉成簡體（轉換較準確）。"; }
-                    Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設"]; current-index <=> root.general.on-focus; } }
-                    Note { text: "切到別的視窗再回來時，保留原本的中英狀態，或重設為上面的預設模式。"; }
+                    Note { text: "組字區與候選窗一律顯示繁體，送出時才轉成簡體。"; }
+                    Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設模式"]; current-index <=> root.general.on-focus; } }
                     Section { text: "Shift 切換中英"; }
-                    Help { text: "單按一下 Shift 切換中文 / 英文。組字中切換不會送出已打的字，接著打的英文與數字會加進組字區，例如「第」Shift「6」Shift「章」→ 第6章，Enter 一起送出。Caps Lock 只影響英文的大小寫，不會切換中英。"; }
+                    Help { text: "單按 Shift 切換中英。組字中切換不會送出，接著打的英文和數字加進組字區：第 Shift 6 Shift 章 → 第6章。"; }
                     Row { label: "使用的 Shift"; ComboBox { width: 160px; model: ["左右都可", "左 Shift", "右 Shift", "不使用"]; current-index <=> root.general.shift; } }
                     Row { label: "按住上限（毫秒）"; SpinBox { width: 160px; minimum: 100; maximum: 1000; step-size: 50; value <=> root.general.tap-ms; } }
-                    Note { text: "按住 Shift 超過這個時間才放開不算切換，避免打大寫字母或 Shift 組合鍵時誤切。"; }
+                    Note { text: "按住超過這個時間才放開，不算切換。"; }
                     Section { text: "候選字"; }
                     Row { label: "每頁字數"; SpinBox { width: 160px; minimum: 1; maximum: 10; value <=> root.general.per-page; } }
                     Row { label: "依常用程度排序"; Switch { checked <=> root.general.sort-freq; } }
-                    Note { text: "常用字排在前面，並參考你的選字紀錄。你在候選窗改選的字，同一個修正送出兩次後就會記住。候選清單中長的詞在前、單字接在後面；簡體字不會出現。"; }
-                    Section { text: "自動偵測不在輸入狀態"; }
-                    Help { text: "玩遊戲或看全螢幕影片時，輸入法偵測到「這裡不是在打字」就完全不處理按鍵：按鍵直接交給程式，Shift 也不會切換中英，不會干擾遊戲操作。程式本身停用輸入法的情況一律會偵測；下面兩項是額外的判斷，誤判時可以關掉。"; }
+                    Note { text: "常用字在前，並參考你的選字紀錄。"; }
+                    Section { text: "不在打字時不處理按鍵"; }
+                    Help { text: "偵測到不是在打字（遊戲、全螢幕影片）時，按鍵直接交給 App，Shift 也不切換中英。下面兩項判斷誤判時可以關掉。"; }
                     Row { label: "舊式程式全螢幕"; Switch { checked <=> root.general.detect-legacy; } }
-                    Note { text: "舊式程式（例如 DirectX 遊戲）沒有文字游標、視窗又蓋滿整個螢幕時。"; }
+                    Note { text: "沒有文字游標、又蓋滿整個螢幕的舊式程式，例如 DirectX 遊戲。"; }
                     Row { label: "獨佔全螢幕"; Switch { checked <=> root.general.detect-fullscreen; } }
-                    Note { text: "有程式獨佔全螢幕時（全螢幕遊戲、簡報播放）。偵測不到的情況（例如視窗模式的遊戲）可以按遊戲模式快捷鍵，或在「App 規則」對那個遊戲設定遊戲模式。"; }
+                    Note { text: "全螢幕遊戲、簡報播放。視窗模式的遊戲偵測不到，請用遊戲模式。"; }
                     Section { text: "中英混打"; }
                     Row { label: "自動判斷英文單字"; Switch { checked <=> root.general.auto-english; } }
-                    Note { text: "在句首或空白之後打英文單字再按空白，自動變成英文（例如 hello、repo）。打錯的注音不會變成英文。用 Shift 打過的英文會記住，下次直接判斷；游標停在英文單字上按忘記快捷鍵可以取消。"; }
+                    Note { text: "句首或空白後打英文單字再按空白，就當作英文（hello、repo）。用 Shift 打過的英文會記住。"; }
                     Row { label: "候選窗附上英文"; Switch { checked <=> root.general.english-candidate; } }
-                    Note { text: "剛打的按鍵剛好也是英文單字時（例如 fu 打出「七」），候選窗會多一個英文選項。"; }
+                    Note { text: "按鍵也是英文單字時，候選窗多一個英文選項：fu → 七、fu。"; }
                     Row { label: "中英之間自動空格"; Switch { checked <=> root.general.auto-space; } }
-                    Note { text: "中文與英文、數字之間自動加一個空格（盤古之白）。"; }
+                    Note { text: "中文與英文、數字之間加一個空格。"; }
                 }
             }
 
@@ -323,17 +322,17 @@ export component SettingsWindow inherits Window {
                 spacing: 10px;
                 alignment: start;
                 Section { text: "快捷鍵"; }
-                Help { text: "格式例如 ctrl+shift+f12、shift+space；留空代表不使用。設定的組合鍵一律由輸入法處理，其他 Ctrl / Alt 組合鍵都交給程式（不會搶走 VS Code 等程式的快捷鍵）。"; }
+                Help { text: "格式例如 ctrl+shift+f12、shift+space，留空代表不使用。沒設定的 Ctrl / Alt 組合鍵照常交給 App。"; }
                 for item in [
-                    { label: "全形 / 半形", idx: 0, help: "切換中文標點的全形（，。）與半形（,.）。所有 App 共用並記住。" },
-                    { label: "繁體 / 簡體", idx: 1, help: "切換送出的文字是繁體或簡體；畫面上一律顯示繁體。" },
-                    { label: "遊戲模式", idx: 2, help: "玩遊戲時按一下開啟：所有程式的按鍵都直接交給程式，Shift 不會切換中英，不會干擾遊戲操作；再按一次關閉。只想對某個遊戲生效，可以在「App 規則」設定。全螢幕遊戲通常會自動偵測，不必手動開。" },
-                    { label: "忘記學習", idx: 3, help: "候選窗中：忘記選擇框那個詞的學習紀錄與固頂。組字區中游標停在英文單字上：之後不再把它當英文。" },
-                    { label: "固頂", idx: 4, help: "候選窗中：選擇框那個詞以後都排第一，並選它。" },
-                    { label: "Emoji", idx: 5, help: "組字後按：用組字內容找 Emoji（例如「開心」）；沒有組字時列出常用 Emoji。選字時按 Tab 也能切到 Emoji 與純注音。" },
-                    { label: "AI 修正", idx: 6, help: "組字後按：把組字內容送給「AI」頁設定的模型修正同音錯字（在 / 再），結果以候選顯示，Enter 採用。" },
-                    { label: "組字提示列", idx: 7, help: "在看不到組字的程式裡（終端機、Claude Code）按一下，游標上方會另外顯示組字內容與游標；每個 App 分別記住。" },
-                    { label: "符號選單", idx: 8, help: "開啟符號選單（…、※、括號、希臘字母、數學符號）。預設不設定：` 用來打主要符號。" },
+                    { label: "全形 / 半形", idx: 0, help: "切換標點的全形與半形。" },
+                    { label: "繁體 / 簡體", idx: 1, help: "切換送出的文字是繁體或簡體。" },
+                    { label: "遊戲模式", idx: 2, help: "按鍵全部交給 App，Shift 不切換中英；再按一次關閉。" },
+                    { label: "忘記學習", idx: 3, help: "候選窗中：忘記選擇框那個詞的學習紀錄與優先。游標在英文單字上：不再當英文。" },
+                    { label: "設為優先", idx: 4, help: "候選窗中：選擇框那個詞以後都排第一。" },
+                    { label: "Emoji", idx: 5, help: "用組字內容找 Emoji；沒有組字時列出常用 Emoji。" },
+                    { label: "AI 修正", idx: 6, help: "用 AI 修正組字中的同音錯字。" },
+                    { label: "組字提示列", idx: 7, help: "在游標上方顯示組字內容，給看不到組字的 App（終端機）用；每個 App 分別記住。" },
+                    { label: "符號選單", idx: 8, help: "…、※、括號、希臘字母、數學符號。" },
                 ]: VerticalLayout {
                   spacing: 2px;
                   Row {
@@ -400,7 +399,7 @@ export component SettingsWindow inherits Window {
             if root.page == 3: VerticalLayout {
                 vertical-stretch: 1;
                 spacing: 10px;
-                Help { text: "針對個別程式覆寫設定，例如在 VS Code 預設英文、在遊戲裡鎖定英文。執行檔名稱可以在工作管理員的「詳細資料」分頁查到。"; }
+                Help { text: "對個別 App 覆寫設定。執行檔名稱在工作管理員的「詳細資料」分頁。"; }
                 StandardTableView {
                     min-height: 160px;
                     columns: [{ title: "名稱" }, { title: "Windows" }, { title: "macOS" }];
@@ -423,11 +422,10 @@ export component SettingsWindow inherits Window {
                     Row { label: "標點"; ComboBox { width: 160px; model: ["沿用全域", "全形", "半形"]; current-index <=> root.app-edit.punctuation; } }
                     Row { label: "輸出"; ComboBox { width: 160px; model: ["沿用全域", "繁體", "簡體"]; current-index <=> root.app-edit.output; } }
                     Row { label: "遊戲模式"; ComboBox { width: 160px; model: ["關", "鎖定英文", "保留中英狀態"]; current-index <=> root.app-edit.game; } }
-                    Note { text: "鎖定英文：這個程式的按鍵全部直接交給程式，輸入法完全不介入（適合遊戲操作）。保留中英狀態：可以打中文，但 Shift 不切換中英（適合在遊戲聊天室打字）。"; }
+                    Note { text: "鎖定英文：按鍵全部交給 App。保留中英狀態：可以打中文，但 Shift 不切換中英，適合遊戲聊天室。"; }
                     Row { label: "自動偵測"; ComboBox { width: 160px; model: ["沿用全域", "開", "關"]; current-index <=> root.app-edit.detect; } }
-                    Note { text: "選「關」：這個程式不做「不在輸入狀態」的自動偵測。用在明明是輸入框卻打不了中文的程式（例如自己畫輸入框的遊戲聊天室）。"; }
+                    Note { text: "輸入框卻打不了中文時選「關」。"; }
                     Row { label: "組字提示列"; ComboBox { width: 160px; model: ["沿用全域", "開", "關"]; current-index <=> root.app-edit.bar; } }
-                    Note { text: "在游標上方另外顯示組字內容與游標，用在看不到組字的程式（終端機、Claude Code）。在該程式裡按組字提示列快捷鍵也會自動設定。"; }
                     HorizontalLayout { alignment: start; Button { text: "套用"; clicked => { root.apply-app(); } } }
                 }
             }
@@ -436,16 +434,16 @@ export component SettingsWindow inherits Window {
             if root.page == 4: VerticalLayout {
                 vertical-stretch: 1;
                 spacing: 10px;
-                Help { text: "加入詞：輸入詞後會自動填入最常用的讀音，需要時再修改。狀態：一般＝照常參考；優先＝一律排第一；封鎖＝不再出現在候選。移除：刪掉這筆紀錄，系統詞庫裡的詞恢復預設排序，自己加的詞不再出現。讀音填英文字母就是縮寫：打縮寫再按空白換成詞（tw → 台灣）；縮寫剛好是注音時改附在候選窗。打字時也可以在組字區按 Shift + ← / → 選範圍再按 Enter 加詞。"; }
+                Help { text: "讀音填注音是自訂詞，填英文字母是縮寫：打縮寫再按空白就換成詞。優先：一律排第一；封鎖：不出現在候選；移除：恢復預設。在組字區按 Shift + ← / → 選範圍再按 Enter 也能加詞。"; }
                 HorizontalLayout {
                     spacing: 8px;
                     word := LineEdit {
                         width: 160px;
                         placeholder-text: "詞";
-                        // 打中文自動填入最常用的讀音，需要時再改
+                        // 打中文時填入最常用的讀音
                         edited(t) => { reading.text = root.suggest-reading(t); }
                     }
-                    reading := LineEdit { width: 220px; placeholder-text: "注音或英文縮寫"; }
+                    reading := LineEdit { width: 220px; placeholder-text: "注音或縮寫"; }
                     Button {
                         text: "加入";
                         enabled: root.online && word.text != "" && reading.text != "";
@@ -484,7 +482,7 @@ export component SettingsWindow inherits Window {
                 spacing: 12px;
                 alignment: start;
                 Section { text: "首選正確率（近 30 天）"; }
-                Help { text: "不需要手動選字就打對的比例。你在候選窗改選的字，同一個修正送出兩次後就會記住（改一次不學，避免誤選被記下）；學錯了可以在候選窗按忘記快捷鍵。"; }
+                Help { text: "不必選字就打對的比例。在候選窗改選的字，同一個修正送出兩次後會記住；學錯了在候選窗按忘記學習快捷鍵。"; }
                 Text { text: root.summary; }
                 Rectangle {
                     height: 160px;
@@ -509,7 +507,7 @@ export component SettingsWindow inherits Window {
                 }
                 Section { text: "從備份還原"; }
                 Text {
-                    text: "學習紀錄變亂時，還原到之前某一天的狀態。";
+                    text: "把學習紀錄還原到之前某一天。";
                     color: Palette.foreground.with-alpha(0.6);
                 }
                 for day in root.backups: HorizontalLayout {
@@ -536,7 +534,7 @@ export component SettingsWindow inherits Window {
                 spacing: 10px;
                 alignment: start;
                 Section { text: "資料位置"; }
-                Help { text: "設定、App 規則、自訂詞與學習紀錄都存在這個資料夾。放在 D 槽或雲端硬碟資料夾，重灌電腦後安裝時選同一個資料夾，就能恢復所有學習成果。（雲端資料夾不要讓兩台電腦同時使用；多台電腦請用 git 同步。）"; }
+                Help { text: "設定、App 規則、詞庫與學習紀錄都存在這裡。重灌後選同一個資料夾就能恢復；多台電腦請用 git 同步，不要共用雲端資料夾。"; }
                 Row {
                     label: "目前位置";
                     Text { text: root.data-path; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
@@ -545,10 +543,10 @@ export component SettingsWindow inherits Window {
                     label: "";
                     Button { text: "變更位置…"; enabled: !root.data-path-locked; clicked => { root.change-data-root(); } }
                 }
-                Note { text: root.data-path-locked ? "目前由 ZCT_HOME 環境變數指定，請改環境變數。" : "選空的資料夾：把目前的資料複製過去。選已經有資料的資料夾（例如重灌前的）：直接改用那裡的資料。原本位置的資料會保留，確認沒問題後可以自行刪除。"; }
+                Note { text: root.data-path-locked ? "由 ZCT_HOME 環境變數指定。" : "選空的資料夾會把目前的資料複製過去；選已有資料的資料夾會直接改用它。原本的資料會保留。"; }
                 Section { text: "git 同步"; }
                 Text {
-                    text: "同步設定、App 規則、自訂詞與統計；自動學習紀錄與 local/ 不同步。請使用私人 repo。";
+                    text: "同步設定、App 規則、詞庫與統計；學習紀錄不同步。請用私人 repo。";
                     color: Palette.foreground.with-alpha(0.6);
                     wrap: word-wrap;
                 }
@@ -571,7 +569,7 @@ export component SettingsWindow inherits Window {
                 alignment: start;
                 Section { text: "AI 同音字修正"; }
                 Text {
-                    text: "組字中按 AI 修正快捷鍵（目前：" + (root.hotkeys.ai == "" ? "未設定" : root.hotkeys.ai) + "），把組字內容送去修正「在／再」這類錯字，結果以候選顯示，按 Enter 採用。\n只在按下快捷鍵時才傳送；送往非本機的端點代表打字內容會離開這台電腦。";
+                    text: "按 AI 修正快捷鍵（目前：" + (root.hotkeys.ai == "" ? "未設定" : root.hotkeys.ai) + "）修正組字中的同音錯字，結果出現在候選窗。\n只在按快捷鍵時傳送；端點不在本機時，打字內容會離開這台電腦。";
                     color: Palette.foreground.with-alpha(0.6);
                     wrap: word-wrap;
                 }
@@ -581,7 +579,7 @@ export component SettingsWindow inherits Window {
                 Row { label: "逾時（秒）"; SpinBox { width: 160px; minimum: 1; maximum: 120; value <=> root.ai.timeout; } }
                 Row {
                     label: "API Key";
-                    key := LineEdit { width: 240px; input-type: password; placeholder-text: root.has-api-key ? "已儲存（輸入新的會取代）" : "本機服務可以留空"; }
+                    key := LineEdit { width: 240px; input-type: password; placeholder-text: root.has-api-key ? "已儲存" : "本機服務可以留空"; }
                     Button { text: "儲存金鑰"; enabled: key.text != ""; clicked => { root.save-api-key(key.text); key.text = ""; } }
                     Button { text: "清除"; enabled: root.has-api-key; clicked => { root.save-api-key(""); } }
                 }
@@ -601,7 +599,7 @@ export component SettingsWindow inherits Window {
                 alignment: start;
                 Section { text: "動物園輸入法"; }
                 Text { text: "版本 " + root.version; }
-                Help { text: "注音輸入法。本程式以 MIT 或 Apache-2.0 授權（擇一）。\n原始碼與問題回報：https://github.com/zoosewu/zoo-type\n設定程式從工作列右下角的輸入法圖示（中 / 英）按右鍵開啟。"; }
+                Help { text: "注音輸入法，以 MIT 或 Apache-2.0 授權。\n原始碼與問題回報：https://github.com/zoosewu/zoo-type"; }
                 Section { text: "第三方元件"; }
                 Help { text: "libchewing：注音轉換引擎（LGPL-2.1-or-later）\nlibchewing-data：詞庫（LGPL-2.1-or-later）與語言模型（CC-BY-4.0）\nOpenCC：繁簡轉換字表（Apache-2.0）\nUnicode CLDR：Emoji 中文關鍵字（Unicode-3.0）\ndwyl/english-words：英文單字表（Unlicense）\nSlint：設定程式介面\n完整清單見安裝資料夾中的 THIRD-PARTY-NOTICES.txt"; }
                 // Slint 授權（Royalty-free 2.0）要求在「關於」畫面顯示；限制大小，不要佔滿畫面
@@ -613,7 +611,7 @@ export component SettingsWindow inherits Window {
             HorizontalLayout {
                 spacing: 12px;
                 Text {
-                    text: root.online ? root.status : "服務程序未執行：詞庫與學習功能無法使用";
+                    text: root.online ? root.status : "輸入法服務未執行，無法使用詞庫與學習";
                     vertical-alignment: center;
                     color: root.online ? Palette.foreground.with-alpha(0.7) : #d13438;
                 }

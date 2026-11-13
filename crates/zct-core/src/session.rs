@@ -1143,7 +1143,7 @@ impl Session {
             );
         }
         if existed {
-            format!("已在詞庫：{word}（設為優先）")
+            format!("已設為優先：{word}")
         } else {
             format!("已加入詞庫：{word}")
         }
@@ -1575,7 +1575,7 @@ impl Session {
             let i = self.menu.as_ref().map_or(0, |m| m.sel);
             self.select_menu(i);
             self.engine.pin(&syllables, &word);
-            Some(format!("已固頂：{}", self.convert(&word)))
+            Some(format!("已設為優先：{}", self.convert(&word)))
         }
     }
 

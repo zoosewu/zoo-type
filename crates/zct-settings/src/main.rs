@@ -317,7 +317,7 @@ impl Service {
         if self.client.is_none() {
             self.client = Self::connect();
         }
-        let client = self.client.as_mut().ok_or("服務程序未執行")?;
+        let client = self.client.as_mut().ok_or("輸入法服務未執行")?;
         match client.call(&req, Duration::from_secs(5)) {
             Ok(Response::Error(e)) => Err(e),
             Ok(r) => Ok(r),
@@ -863,7 +863,7 @@ fn pick_folder(start: &std::path::Path) -> Option<std::path::PathBuf> {
         dialog
             .SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)
             .ok()?;
-        let _ = dialog.SetTitle(&HSTRING::from("選擇學習資料位置"));
+        let _ = dialog.SetTitle(&HSTRING::from("選擇資料位置"));
         if let Ok(item) =
             SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(start.as_os_str()), None)
         {

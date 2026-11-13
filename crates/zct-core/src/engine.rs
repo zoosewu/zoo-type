@@ -652,12 +652,12 @@ impl Engine {
                     self.mark_dirty();
                     Ok(())
                 }
-                false => Err(format!("已有：{word}")),
+                false => Err(format!("詞庫已有：{word}")),
             };
         }
         let syl = Self::parse(word, bopomofo)?;
         match self.boost_of(syl.as_ref(), word) {
-            Some(b) if b != PhraseEntry::BANNED => return Err(format!("已有：{word}")),
+            Some(b) if b != PhraseEntry::BANNED => return Err(format!("詞庫已有：{word}")),
             _ => self.pin(syl.as_ref(), word),
         }
         Ok(())
