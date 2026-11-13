@@ -211,10 +211,12 @@ mod app {
 
         // 改名前的 %APPDATA%\zct 搬到 %APPDATA%\ZooType（找資料根目錄之前）
         let migrated = zct_core::paths::migrate_legacy();
+        // 開發版第一次啟動：從正式版複製一份資料（關掉同步）
+        let seeded = zct_core::paths::seed_dev_from_official();
         let data = DataRoot::discover().ok_or("找不到資料根目錄")?;
         logger::init(&data.local().join("logs").join("service.log"));
         log::info!("啟動，資料根目錄：{}", data.root().display());
-        if let Some(m) = migrated {
+        for m in [migrated, seeded].into_iter().flatten() {
             log::info!("{m}");
         }
         handle_stale(None);

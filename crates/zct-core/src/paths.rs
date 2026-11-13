@@ -81,6 +81,84 @@ pub fn migrate_dir(old: &Path, new: &Path) -> std::io::Result<Option<String>> {
     )))
 }
 
+/// 開發版還沒有自己的設定時，從正式版複製一份資料（設定、App 規則、詞庫、學習紀錄），
+/// 並關掉複製過來的 git 同步：開發版不能把資料推到正式版的同步 repo。回傳做了什麼（記在 log）
+///
+/// 服務程序啟動、找資料根目錄之前呼叫；正式版、或用 `ZCT_HOME` 指定資料位置時不做。
+pub fn seed_dev_from_official() -> Option<String> {
+    use crate::channel::{CURRENT, OFFICIAL};
+    if CURRENT.id == OFFICIAL.id || std::env::var_os(ENV_HOME).is_some() {
+        return None;
+    }
+    let base = app_data()?;
+    let official = resolve(None, &base.join(OFFICIAL.dir));
+    let dev = resolve(None, &base.join(CURRENT.dir));
+    match seed_from(&official, &dev) {
+        Ok(true) => Some(format!(
+            "從正式版複製資料：{} → {}",
+            official.display(),
+            dev.display()
+        )),
+        Ok(false) => None,
+        Err(e) => Some(format!("從正式版複製資料失敗：{e}")),
+    }
+}
+
+/// `dst` 還沒有設定檔、`src` 有資料時複製（git repo、log、備份不複製），並關掉同步；回傳是否有複製
+pub fn seed_from(src: &Path, dst: &Path) -> std::io::Result<bool> {
+    if dst.join("config.toml").exists() || !has_data(src) {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(dst)?;
+    copy_filtered(src, dst, &|rel: &Path| {
+        let skip = [
+            ".git",
+            "local/logs",
+            "local/backup",
+            "local/sync-status.txt",
+        ];
+        rel.file_name()
+            .is_some_and(|n| n == POINTER_FILE || n == "已搬移到 ZooType.txt")
+            || skip.iter().any(|s| rel == Path::new(s))
+    })?;
+    let config = dst.join("config.toml");
+    if config.exists() {
+        let text = std::fs::read_to_string(&config)?;
+        let mut c = crate::config::Config::parse(&text).map_err(std::io::Error::other)?;
+        c.sync.enabled = false;
+        c.save(&config)?;
+    }
+    Ok(true)
+}
+
+/// 複製資料夾內容；`skip` 收到相對於 `src` 的路徑，回傳 true 的不複製
+fn copy_filtered(src: &Path, dst: &Path, skip: &dyn Fn(&Path) -> bool) -> std::io::Result<()> {
+    fn walk(
+        root: &Path,
+        dir: &Path,
+        dst: &Path,
+        skip: &dyn Fn(&Path) -> bool,
+    ) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let rel = path.strip_prefix(root).unwrap_or(&path);
+            if skip(rel) {
+                continue;
+            }
+            let to = dst.join(rel);
+            if entry.file_type()?.is_dir() {
+                std::fs::create_dir_all(&to)?;
+                walk(root, &path, dst, skip)?;
+            } else {
+                std::fs::copy(&path, &to)?;
+            }
+        }
+        Ok(())
+    }
+    walk(src, src, dst, skip)
+}
+
 /// 資料夾裡已經有輸入法的資料（設定、App 規則、自訂英文單字或學習紀錄）
 pub fn has_data(dir: &Path) -> bool {
     ["config.toml", "apps.toml", "dict"]
@@ -256,6 +334,48 @@ impl DataRoot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seed_copies_data_without_git_logs_and_turns_sync_off() {
+        let base = tempfile::tempdir().unwrap();
+        let (src, dst) = (base.path().join("official"), base.path().join("dev"));
+        for d in [
+            ".git",
+            "dict",
+            "local/learning",
+            "local/logs",
+            "local/backup/2026-11-13",
+        ] {
+            std::fs::create_dir_all(src.join(d)).unwrap();
+        }
+        std::fs::write(
+            src.join("config.toml"),
+            "[sync]\nenabled = true\nremote = \"git@x:y.git\"\n",
+        )
+        .unwrap();
+        std::fs::write(src.join("apps.toml"), "").unwrap();
+        std::fs::write(src.join("dict/user.tsv"), "詞").unwrap();
+        std::fs::write(src.join("local/learning/user_dict.csv"), "x").unwrap();
+        std::fs::write(src.join("local/logs/service.log"), "log").unwrap();
+        std::fs::write(src.join(".git/HEAD"), "ref").unwrap();
+        // 開發版已經啟動過（有空的學習資料夾），但還沒有設定檔
+        std::fs::create_dir_all(dst.join("local/learning")).unwrap();
+
+        assert!(seed_from(&src, &dst).unwrap());
+        assert!(dst.join("dict/user.tsv").exists());
+        assert!(dst.join("local/learning/user_dict.csv").exists());
+        assert!(!dst.join(".git").exists());
+        assert!(!dst.join("local/logs").exists());
+        assert!(!dst.join("local/backup").exists());
+        let c = crate::config::Config::parse(
+            &std::fs::read_to_string(dst.join("config.toml")).unwrap(),
+        )
+        .unwrap();
+        assert!(!c.sync.enabled, "開發版不同步");
+        assert_eq!(c.sync.remote, "git@x:y.git");
+        // 已經有設定檔：不再複製
+        assert!(!seed_from(&src, &dst).unwrap());
+    }
 
     #[test]
     fn migrate_renames_legacy_dir() {
