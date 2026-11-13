@@ -76,6 +76,8 @@ scripts/install-dev.ps1           # 以系統管理員身分安裝到 Program Fi
 scripts/uninstall-dev.ps1         # 移除開發版（資料保留）
 ```
 
+第一次安裝開發版後，工作列可能把它的圖示顯示成「繁體」（explorer 快取了讀不到圖示的結果），重新啟動 explorer 或重新登入就會顯示「動」加 DEV 標籤。
+
 正式版用 `scripts/build-installer.ps1` 產生安裝程式。
 
 ## 授權
