@@ -54,7 +54,8 @@
 ### 5. 自動更新
 - [ ] 服務程序每天檢查 GitHub Releases（剛開機延後幾分鐘）；pre-release 預設略過
 - [ ] 輸入法圖示右鍵選單「更新到 vX」；下載後驗證 SHA256；靜默安裝（一次 UAC）
-- [ ] 開發版（install-dev.ps1）標成 -dev，不自動更新
+- [x] 開發版與正式版分開：zct-core 的 `dev` feature（`cargo build-dev`），CLSID、語言設定檔、名稱、資料 / 安裝資料夾、管道、mutex、認證名稱都不同；install.ps1 / uninstall.ps1 加 `-Channel` 並確認程式是同一套
+- [ ] 開發版不自動更新
 - [ ] 設定程式「自動檢查更新」開關（預設開）
 - [ ] `scripts/release.ps1 <版本>`：改版號、commit、打標籤
 

@@ -104,7 +104,7 @@ pub fn right_alt_keys() -> impl Iterator<Item = (windows::core::GUID, VIRTUAL_KE
         };
         [false, true].map(move |shift| {
             let guid = windows::core::GUID::from_u128(
-                0x3c0e5a71_9d42_4b6e_8f13_a2b4c6d80000 | (shift as u128) << 8 | vk.0 as u128,
+                zct_core::channel::CURRENT.preserved_keys | (shift as u128) << 8 | vk.0 as u128,
             );
             (guid, vk, shift, c)
         })

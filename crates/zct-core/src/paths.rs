@@ -14,8 +14,8 @@ struct Pointer {
     data_root: PathBuf,
 }
 
-/// 資料夾名稱（改名前是 `zct`）
-const DIR_NAME: &str = "ZooType";
+/// 資料夾名稱（正式版改名前是 `zct`）
+const DIR_NAME: &str = crate::channel::CURRENT.dir;
 const LEGACY_DIR_NAME: &str = "zct";
 
 /// 使用者設定的上層資料夾：Windows `%APPDATA%`、macOS `~/Library/Application Support`
@@ -43,6 +43,10 @@ pub fn pointer_dir() -> Option<PathBuf> {
 ///
 /// 服務程序與設定程式啟動時、找資料根目錄之前呼叫。新資料夾已存在就不動。
 pub fn migrate_legacy() -> Option<String> {
+    // 開發版沒有改名前的資料
+    if crate::channel::CURRENT.id != crate::channel::OFFICIAL.id {
+        return None;
+    }
     let base = app_data()?;
     match migrate_dir(&base.join(LEGACY_DIR_NAME), &base.join(DIR_NAME)) {
         Ok(done) => done,

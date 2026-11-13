@@ -8,6 +8,8 @@
   System：需要系統管理員權限的部分（註冊 TSF、current.txt、清除舊版）
   User：每個使用者各自的設定（開機自動啟動、鍵盤清單、學習資料位置），要以使用者本人的身分執行
   All：兩者（開發版：系統管理員就是使用者本人）
+.PARAMETER Channel
+  official（正式版，預設）或 dev（開發版）；必須和版本資料夾裡的程式相同（zoo-type-service.exe --channel）
 .PARAMETER DataRoot
   初次安裝時使用者選的學習資料位置（User 部分使用）。和預設的 %APPDATA%\ZooType 不同時寫進
   %APPDATA%\ZooType\location.toml；已有 location.toml 時一律不覆蓋（更新時沿用原本的位置）。
@@ -19,15 +21,25 @@
 param(
     [Parameter(Mandatory)] [string]$Dest,
     [ValidateSet('All', 'System', 'User')] [string]$Part = 'All',
+    [ValidateSet('official', 'dev')] [string]$Channel = 'official',
     [string]$DataRoot
 )
 $ErrorActionPreference = 'Stop'
+
+# 正式版與開發版是兩套獨立的輸入法（crates/zct-core/src/channel.rs），各自的識別：
+# 安裝 / 資料資料夾名稱（也是登入自動啟動的名稱）、鍵盤清單中的 TIP（語言:{CLSID}{語言設定檔}）
+$channels = @{
+    official = @{ Dir = 'ZooType'; Tip = '0404:{68E048CC-2635-4A97-8A2F-1599AF3AFCF5}{D890A24E-551E-4D5F-A0F1-745BE13B6287}' }
+    dev      = @{ Dir = 'ZooType-dev'; Tip = '0404:{A45461CC-EC30-4B88-BADA-0F20A6FD0C19}{B28977F5-A5AC-4C38-8817-FC51E1F79919}' }
+}
+$ch = $channels[$Channel]
 
 $Dest = (Resolve-Path $Dest).Path
 $base = Split-Path -Parent $Dest
 $name = Split-Path -Leaf $Dest
 $dll = Join-Path $Dest 'zoo_type.dll'
-$tip = '0404:{68E048CC-2635-4A97-8A2F-1599AF3AFCF5}{D890A24E-551E-4D5F-A0F1-745BE13B6287}'
+$tip = $ch.Tip
+$official = $Channel -eq 'official'
 # 版本資料夾之前的安裝方式直接放在根目錄的檔案
 $legacyNames = @('zct_tsf.dll', 'zct-service.exe', 'zct-settings.exe', 'zct.ico', 'dict')
 # 改名前的安裝根目錄
@@ -41,6 +53,17 @@ function Test-VersionDir([System.IO.FileSystemInfo]$item) {
 foreach ($f in @('zoo_type.dll', 'zoo-type-service.exe', 'zoo-type-settings.exe', 'dict\static_dict.bin')) {
     if (-not (Test-Path (Join-Path $Dest $f))) { throw "版本資料夾缺少 $f：$Dest" }
 }
+
+# 程式說的版本要和要裝的一致：開發版的程式裝成正式版（或反過來）會蓋掉另一套的註冊
+function Get-ServiceOutput([string]$arg) {
+    $out = Join-Path $env:TEMP "zct-$arg-$PID.txt"
+    Start-Process -FilePath (Join-Path $Dest 'zoo-type-service.exe') -ArgumentList "--$arg" -RedirectStandardOutput $out -Wait -NoNewWindow
+    $value = (Get-Content $out -Raw).Trim()
+    Remove-Item $out -Force
+    $value
+}
+$built = Get-ServiceOutput 'channel'
+if ($built -ne $Channel) { throw "版本資料夾裡是 $built 的程式，不能裝成 $Channel：$Dest" }
 
 function Install-System {
     Add-Type -Namespace Zct -Name Native -MemberDefinition @'
@@ -83,10 +106,7 @@ public static extern bool MoveFileEx(string existing, string replacement, int fl
     }
 
     # 協定版本（寫進 current.txt，讓舊版服務程序判斷要讓位還是改為唯讀）
-    $out = Join-Path $env:TEMP "zct-protocol-$PID.txt"
-    Start-Process -FilePath (Join-Path $Dest 'zoo-type-service.exe') -ArgumentList '--protocol' -RedirectStandardOutput $out -Wait -NoNewWindow
-    $protocol = (Get-Content $out -Raw).Trim()
-    Remove-Item $out -Force
+    $protocol = Get-ServiceOutput 'protocol'
     if ($protocol -notmatch '^\d+$') { throw "讀不到協定版本：$protocol" }
 
     Write-Host '註冊 TSF 文字服務'
@@ -102,6 +122,7 @@ public static extern bool MoveFileEx(string existing, string replacement, int fl
             Remove-Old @($item) $item.FullName
         }
     }
+    if (-not $official) { return }
     $legacy = @(Get-ChildItem $base -Force | Where-Object { $_.Name -in $legacyNames -or $_.Name -like 'zct_tsf.dll.*.old' })
     if ($legacy.Count -gt 0) { Remove-Old $legacy '舊的安裝方式留下的檔案' }
     # 改名前的安裝根目錄（C:\Program Files\ZCT）整個移除
@@ -114,10 +135,10 @@ public static extern bool MoveFileEx(string existing, string replacement, int fl
     }
 }
 
-# 學習資料位置：寫進 %APPDATA%\ZooType\location.toml（zct-core 的 paths.rs 依此尋找資料根目錄）
+# 資料位置：寫進 %APPDATA%\<資料夾>\location.toml（zct-core 的 paths.rs 依此尋找資料根目錄）
 # 只在初次安裝（沒有舊資料）時呼叫：不能在服務程序搬移舊的 %APPDATA%\zct 之前先建立新資料夾
 function Set-DataRoot([string]$path) {
-    $pointerDir = Join-Path $env:APPDATA 'ZooType'
+    $pointerDir = Join-Path $env:APPDATA $ch.Dir
     $pointer = Join-Path $pointerDir 'location.toml'
     if (-not $path) { return }
     if (Test-Path $pointer) {
@@ -136,25 +157,31 @@ function Set-DataRoot([string]$path) {
 
 function Install-User {
     Set-DataRoot $DataRoot
-    # 不建立開始功能表捷徑：設定程式從工作列輸入法圖示的右鍵選單開啟；清掉舊版建立的捷徑
-    foreach ($n in '動物園輸入法 設定.lnk', 'ZCT 設定.lnk') {
-        Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) $n) -ErrorAction SilentlyContinue
+    if ($official) {
+        # 不建立開始功能表捷徑：設定程式從工作列輸入法圖示的右鍵選單開啟；清掉舊版建立的捷徑
+        foreach ($n in '動物園輸入法 設定.lnk', 'ZCT 設定.lnk') {
+            Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) $n) -ErrorAction SilentlyContinue
+        }
+        Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ZCT' -ErrorAction SilentlyContinue
     }
 
     Write-Host '設定登入時自動啟動服務程序'
-    Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ZCT' -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ZooType' -Value "`"$(Join-Path $Dest 'zoo-type-service.exe')`""
+    Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $ch.Dir -Value "`"$(Join-Path $Dest 'zoo-type-service.exe')`""
 
-    Write-Host '加入中文（台灣）鍵盤清單，並排在第一位（Alt+Shift 切到中文時就是「動物園輸入法」）'
+    # 正式版排第一位（切到中文時就是它）；開發版加在最後，不搶正式版的位置
+    Write-Host '加入中文（台灣）鍵盤清單'
     $list = Get-WinUserLanguageList
     $zh = $list | Where-Object LanguageTag -eq 'zh-Hant-TW'
     if (-not $zh) {
         $list.Add('zh-Hant-TW')
         $zh = $list | Where-Object LanguageTag -eq 'zh-Hant-TW'
     }
-    if ($zh.InputMethodTips[0] -ne $tip) {
+    if ($official -and $zh.InputMethodTips[0] -ne $tip) {
         $null = $zh.InputMethodTips.Remove($tip)
         $zh.InputMethodTips.Insert(0, $tip)
+        Set-WinUserLanguageList $list -Force
+    } elseif (-not $official -and $zh.InputMethodTips -notcontains $tip) {
+        $zh.InputMethodTips.Add($tip)
         Set-WinUserLanguageList $list -Force
     }
 }

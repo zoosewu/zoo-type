@@ -381,9 +381,6 @@ fn load_readings() -> Option<zct_core::readings::Readings> {
         .and_then(|p| zct_core::readings::Readings::load(&p).ok())
 }
 
-/// 視窗標題（settings.slint 的 title）；第二次開啟時用來找到已經開著的視窗
-const WINDOW_TITLE: &str = "動物園輸入法 設定";
-
 /// 只允許一個設定程式：已經開著時把那個視窗叫到前面，回傳 false
 ///
 /// 變更資料位置後會自己重新開啟（`--notice`），那時舊的還在結束中，等它一下。
@@ -398,8 +395,8 @@ fn single_instance(wait_for_old: bool) -> bool {
     let tries = if wait_for_old { 25 } else { 1 };
     for _ in 0..tries {
         unsafe {
-            let Ok(handle) = CreateMutexW(None, false, &HSTRING::from(r"Local\ZooType-settings"))
-            else {
+            let mutex = format!(r"Local\{}-settings", zct_core::channel::CURRENT.dir);
+            let Ok(handle) = CreateMutexW(None, false, &HSTRING::from(mutex)) else {
                 return true;
             };
             if GetLastError() != ERROR_ALREADY_EXISTS {
@@ -414,7 +411,8 @@ fn single_instance(wait_for_old: bool) -> bool {
         }
     }
     unsafe {
-        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), &HSTRING::from(WINDOW_TITLE)) {
+        let title = HSTRING::from(zct_core::channel::settings_title());
+        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), &title) {
             if IsIconic(hwnd).as_bool() {
                 let _ = ShowWindow(hwnd, SW_RESTORE);
             }
@@ -437,6 +435,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = zct_core::paths::migrate_legacy();
     let data = DataRoot::discover().ok_or("找不到資料根目錄")?;
     let ui = SettingsWindow::new()?;
+    ui.set_window_title(zct_core::channel::settings_title().into());
+    ui.set_app_name(zct_core::channel::CURRENT.name.into());
     // --page N：直接開啟某一頁（系統匣與開發截圖用）
     // --notice 文字：開啟後在狀態列顯示（變更資料位置後重新開啟時用）
     let mut notice: Option<String> = None;
@@ -671,12 +671,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ui_weak = ui.as_weak();
         ui.on_save_api_key(move |key| {
             let ui = ui_weak.unwrap();
-            let target = zct_ipc::secret::AI_API_KEY;
+            let target = zct_ipc::secret::ai_api_key();
             let msg = if key.is_empty() {
-                zct_ipc::secret::delete(target);
+                zct_ipc::secret::delete(&target);
                 "已清除 API Key".to_string()
             } else {
-                match zct_ipc::secret::write(target, key.trim()) {
+                match zct_ipc::secret::write(&target, key.trim()) {
                     Ok(()) => "API Key 已存入 Windows 認證管理員".to_string(),
                     Err(e) => format!("無法儲存 API Key：{e}"),
                 }

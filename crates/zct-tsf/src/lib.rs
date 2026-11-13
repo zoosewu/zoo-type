@@ -25,10 +25,10 @@ use windows::Win32::System::Com::IClassFactory;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows::core::{BOOL, GUID, HRESULT, Interface};
 
-/// TSF 文字服務的 CLSID
-pub const CLSID_ZCT: GUID = GUID::from_u128(0x68e048cc_2635_4a97_8a2f_1599af3afcf5);
+/// TSF 文字服務的 CLSID（正式版與開發版不同，見 zct_core::channel）
+pub const CLSID_ZCT: GUID = GUID::from_u128(zct_core::channel::CURRENT.clsid);
 /// 語言設定檔 GUID
-pub const PROFILE_ZCT: GUID = GUID::from_u128(0xd890a24e_551e_4d5f_a0f1_745be13b6287);
+pub const PROFILE_ZCT: GUID = GUID::from_u128(zct_core::channel::CURRENT.profile);
 /// zh-TW
 pub const LANGID_ZH_TW: u16 = 0x0404;
 

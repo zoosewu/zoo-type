@@ -16,8 +16,8 @@ use windows::core::{BSTR, GUID, Result, implement};
 
 use crate::guard;
 
-pub const ATTR_INPUT: GUID = GUID::from_u128(0x5b2c6a9e_7c1d_4f3e_9a51_2e8f0d4c7b61);
-pub const ATTR_TARGET: GUID = GUID::from_u128(0x0f8e3d2c_1a4b_4c6d_8e9f_a1b2c3d4e5f6);
+pub const ATTR_INPUT: GUID = GUID::from_u128(zct_core::channel::CURRENT.attr_input);
+pub const ATTR_TARGET: GUID = GUID::from_u128(zct_core::channel::CURRENT.attr_target);
 
 fn color(cr: u32) -> TF_DA_COLOR {
     TF_DA_COLOR {
@@ -55,10 +55,11 @@ impl ITfDisplayAttributeInfo_Impl for AttributeInfo_Impl {
     }
 
     fn GetDescription(&self) -> Result<BSTR> {
+        let name = zct_core::channel::CURRENT.name;
         Ok(BSTR::from(if self.guid == ATTR_TARGET {
-            "動物園輸入法 選字目標"
+            format!("{name} 選字目標")
         } else {
-            "動物園輸入法 組字"
+            format!("{name} 組字")
         }))
     }
 

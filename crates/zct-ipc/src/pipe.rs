@@ -87,7 +87,8 @@ pub fn pipe_name() -> Result<HSTRING> {
 /// 名稱帶協定版本：新舊版本並存時，舊 DLL 連到舊服務程序、新 DLL 連到新服務程序
 pub fn pipe_name_with(suffix: &str) -> Result<HSTRING> {
     Ok(HSTRING::from(format!(
-        r"\\.\pipe\zct-v{}-{}{suffix}",
+        r"\\.\pipe\{}-v{}-{}{suffix}",
+        zct_core::channel::CURRENT.pipe,
         crate::PROTOCOL_VERSION,
         current_user_sid()?
     )))

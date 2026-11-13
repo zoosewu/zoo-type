@@ -22,8 +22,8 @@ use windows::Win32::UI::TextServices::{
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{GUID, w};
 
-const CLSID_ZCT: GUID = GUID::from_u128(0x68e048cc_2635_4a97_8a2f_1599af3afcf5);
-const PROFILE_ZCT: GUID = GUID::from_u128(0xd890a24e_551e_4d5f_a0f1_745be13b6287);
+const CLSID_ZCT: GUID = GUID::from_u128(zct_core::channel::CURRENT.clsid);
+const PROFILE_ZCT: GUID = GUID::from_u128(zct_core::channel::CURRENT.profile);
 
 extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     unsafe { DefWindowProcW(h, m, w, l) }

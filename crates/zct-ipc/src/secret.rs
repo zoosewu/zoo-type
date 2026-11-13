@@ -6,18 +6,23 @@ use windows::Win32::Security::Credentials::{
 };
 use windows::core::{HSTRING, PWSTR};
 
-/// 認證管理員中的名稱（「一般認證」分類下可以看到）
-pub const AI_API_KEY: &str = "ZooType/ai-api-key";
+/// 認證管理員中的名稱（「一般認證」分類下可以看到）；開發版是 `ZooType-dev/ai-api-key`
+pub fn ai_api_key() -> String {
+    format!("{}/ai-api-key", zct_core::channel::CURRENT.dir)
+}
 /// 改名前的名稱：讀取時自動搬到新名稱
 const LEGACY_AI_API_KEY: &str = "ZCT/ai-api-key";
 
 /// 讀 AI API Key；只有舊名稱時搬到新名稱
 pub fn read_ai_key() -> Option<String> {
-    if let Some(k) = read(AI_API_KEY) {
+    if let Some(k) = read(&ai_api_key()) {
         return Some(k);
     }
+    if zct_core::channel::CURRENT.id != zct_core::channel::OFFICIAL.id {
+        return None;
+    }
     let old = read(LEGACY_AI_API_KEY)?;
-    if write(AI_API_KEY, &old).is_ok() {
+    if write(&ai_api_key(), &old).is_ok() {
         delete(LEGACY_AI_API_KEY);
     }
     Some(old)
@@ -25,7 +30,11 @@ pub fn read_ai_key() -> Option<String> {
 
 pub fn write(target: &str, secret: &str) -> windows::core::Result<()> {
     let mut name: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut user: Vec<u16> = "ZooType".encode_utf16().chain(std::iter::once(0)).collect();
+    let mut user: Vec<u16> = zct_core::channel::CURRENT
+        .dir
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let mut blob = secret.as_bytes().to_vec();
     let cred = CREDENTIALW {
         Type: CRED_TYPE_GENERIC,

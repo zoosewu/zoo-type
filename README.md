@@ -65,6 +65,19 @@ cargo test                        # 執行測試
 cargo run -p zct-core --release --example sim -- "wu0 fu4" "<enter>"   # 模擬打字
 ```
 
+### 開發版與正式版
+
+開發版「動物園輸入法 開發版」是另一套獨立的輸入法，和正式版同時安裝也互不影響：鍵盤清單裡各有一個項目、
+資料各自存在 `%APPDATA%\ZooType` 與 `%APPDATA%\ZooType-dev`，開發版壞了照樣用正式版打字。
+
+```powershell
+cargo build-dev                   # 建置開發版（target/dev）
+scripts/install-dev.ps1           # 以系統管理員身分安裝到 Program Files\ZooType-dev
+scripts/uninstall-dev.ps1         # 移除開發版（資料保留）
+```
+
+正式版用 `scripts/build-installer.ps1` 產生安裝程式。
+
 ## 授權
 
 程式碼採用 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE) 雙授權，任選其一。

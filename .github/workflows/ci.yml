@@ -50,6 +50,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: Clippy（開發版）
+        run: cargo clippy --workspace --all-targets --locked --features zct-core/dev --target-dir target/dev -- -D warnings
+
       - name: 測試
         run: cargo test --workspace --locked
 

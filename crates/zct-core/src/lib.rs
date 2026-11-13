@@ -2,6 +2,7 @@
 
 pub mod abbrev;
 pub mod apps;
+pub mod channel;
 pub mod config;
 pub mod emoji;
 pub mod engine;

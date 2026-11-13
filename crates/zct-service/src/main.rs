@@ -24,6 +24,11 @@ fn main() {
         println!("{}", zct_ipc::PROTOCOL_VERSION);
         return;
     }
+    // 安裝腳本用：確認這組程式是正式版還是開發版
+    if std::env::args().any(|a| a == "--channel") {
+        println!("{}", zct_core::channel::CURRENT.id);
+        return;
+    }
     if let Err(e) = app::run() {
         log::error!("服務程序結束：{e}");
         eprintln!("zct-service: {e}");
@@ -176,7 +181,11 @@ mod app {
 
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // 單一實例：同一個登入工作階段、同一個協定版本只跑一個服務程序
-        let name = HSTRING::from(format!("Local\\zct-service-v{}", zct_ipc::PROTOCOL_VERSION));
+        let name = HSTRING::from(format!(
+            "Local\\{}-service-v{}",
+            zct_core::channel::CURRENT.pipe,
+            zct_ipc::PROTOCOL_VERSION
+        ));
         let mut mutex = unsafe { CreateMutexW(None, true, &name)? };
         if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
             // 舊版讓位時：等它結束（最多 3 秒）再接手

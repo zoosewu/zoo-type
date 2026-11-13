@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# 開發版：另一套獨立的輸入法（見 src/channel.rs）
+dev = []
+
 [dependencies]
 chewing.workspace = true
 ferrous-opencc = { version = "0.4.0", default-features = false, features = ["t2s-conversion"] }

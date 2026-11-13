@@ -224,7 +224,10 @@ component ColorField inherits HorizontalLayout {
 }
 
 export component SettingsWindow inherits Window {
-    title: "動物園輸入法 設定";
+    // 正式版與開發版不同（zct_core::channel）
+    in property <string> window-title: "動物園輸入法 設定";
+    in property <string> app-name: "動物園輸入法";
+    title: root.window-title;
     preferred-width: 820px;
     preferred-height: 600px;
     default-font-family: "Microsoft JhengHei UI";
@@ -657,7 +660,7 @@ export component SettingsWindow inherits Window {
               VerticalLayout {
                 spacing: 10px;
                 alignment: start;
-                Section { text: "動物園輸入法"; }
+                Section { text: root.app-name; }
                 Text { text: "版本 " + root.version; }
                 Help { text: "注音輸入法，以 MIT 或 Apache-2.0 授權。\n原始碼與問題回報：https://github.com/zoosewu/zoo-type"; }
                 Section { text: "第三方元件"; }

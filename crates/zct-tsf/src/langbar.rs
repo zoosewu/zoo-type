@@ -101,12 +101,11 @@ impl LangBarButton_Impl {
             };
             let _ = AppendMenuW(menu, game, ID_GAME as usize, w!("遊戲模式"));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-            let _ = AppendMenuW(
-                menu,
-                MF_STRING,
-                ID_RESTART as usize,
-                w!("重新啟動動物園輸入法"),
-            );
+            let restart = windows::core::HSTRING::from(format!(
+                "重新啟動{}",
+                zct_core::channel::CURRENT.name
+            ));
+            let _ = AppendMenuW(menu, MF_STRING, ID_RESTART as usize, &restart);
             let owner: HWND = {
                 let f = GetFocus();
                 if f.is_invalid() {
@@ -164,7 +163,12 @@ impl ITfLangBarItem_Impl for LangBarButton_Impl {
                 return Err(windows::Win32::Foundation::E_INVALIDARG.into());
             }
             let mut desc = [0u16; 32];
-            for (i, c) in "動物園輸入法".encode_utf16().enumerate() {
+            for (i, c) in zct_core::channel::CURRENT
+                .name
+                .encode_utf16()
+                .take(31)
+                .enumerate()
+            {
                 desc[i] = c;
             }
             unsafe {
@@ -189,13 +193,15 @@ impl ITfLangBarItem_Impl for LangBarButton_Impl {
     }
 
     fn GetTooltipString(&self) -> Result<BSTR> {
-        Ok(BSTR::from(
-            match (self.chinese.get(), self.simplified.get()) {
-                (false, _) => "動物園輸入法：英文（左鍵切換、右鍵選單）",
-                (true, true) => "動物園輸入法：中文・简体（左鍵切換、右鍵選單）",
-                (true, false) => "動物園輸入法：中文（左鍵切換、右鍵選單）",
-            },
-        ))
+        let state = match (self.chinese.get(), self.simplified.get()) {
+            (false, _) => "英文",
+            (true, true) => "中文・简体",
+            (true, false) => "中文",
+        };
+        Ok(BSTR::from(format!(
+            "{}：{state}（左鍵切換、右鍵選單）",
+            zct_core::channel::CURRENT.name
+        )))
     }
 }
 
