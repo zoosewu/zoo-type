@@ -37,8 +37,8 @@
   `InstallLayoutOrTip` 回報成功但語言清單沒有它，而且 TSF 會把 HKCU 的語言設定檔當殘留刪掉；HKCU 只是已在 HKLM 登記的 TIP 的個人設定
 
 ### 2. CI（`.github/workflows/ci.yml`，push / PR）
-- [ ] windows-latest：fetch-dict.sh → fmt 檢查 → clippy -D warnings → test → build release
-- [ ] 快取 cargo 與詞庫資料
+- [x] windows-latest：fetch-dict.sh → fmt 檢查 → clippy -D warnings → test → build release
+- [x] 快取 cargo（rust-cache）與詞庫資料（以 fetch-dict.sh 內容為 key）
 
 ### 3. Release（`.github/workflows/release.yml`，推送 v* 標籤）
 - [ ] 檢查標籤版本 = Cargo.toml workspace 版本（不一致就失敗）
