@@ -33,7 +33,8 @@ fn main() {
     let corpus = std::fs::read_to_string(&corpus_path).expect("讀不到語料");
     let learning = std::env::temp_dir().join(format!("zct-eval-{}", std::process::id()));
     let engine = Arc::new(
-        Engine::open(&root.join("assets/dict"), &learning).expect("需要先執行 scripts/fetch-dict.sh"),
+        Engine::open(&root.join("assets/dict"), &learning)
+            .expect("需要先執行 scripts/fetch-dict.sh"),
     );
 
     let r = evaluate(engine, config, &readings, &corpus);

@@ -45,7 +45,10 @@ pub fn init(path: &Path) {
         let _ = std::fs::create_dir_all(dir);
     }
     // 超過 1MB 就重新開始，避免無限成長
-    if std::fs::metadata(path).map(|m| m.len() > 1 << 20).unwrap_or(false) {
+    if std::fs::metadata(path)
+        .map(|m| m.len() > 1 << 20)
+        .unwrap_or(false)
+    {
         let _ = std::fs::rename(path, path.with_extension("log.old"));
     }
     let Ok(file) = OpenOptions::new().create(true).append(true).open(path) else {

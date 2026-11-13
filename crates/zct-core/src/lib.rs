@@ -16,7 +16,7 @@ pub mod symbols;
 pub mod sync;
 
 pub use apps::{AppRule, AppRules};
-pub use engine::{DayStats, Engine, PhraseAction, PhraseEntry};
 pub use config::{Config, GameMode, InputMode, Output, Width};
+pub use engine::{DayStats, Engine, PhraseAction, PhraseEntry};
 pub use key::{Key, KeyEvent, Mods, Side};
 pub use session::{CandidatePage, KeyResult, Preedit, Session, SessionOptions};

@@ -19,8 +19,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const BRANCH: &str = "main";
 
 const GITIGNORE: &str = "# 動物園輸入法：單機資料不同步\nlocal/\n*.tmp\n";
-const GITATTRIBUTES: &str =
-    "# 詞庫與統計逐行合併，衝突的行兩邊都保留，讀入時以時間較新的為準\ndict/*.tsv merge=union\ndict/english.txt merge=union\nstats/*.tsv merge=union\n";
+const GITATTRIBUTES: &str = "# 詞庫與統計逐行合併，衝突的行兩邊都保留，讀入時以時間較新的為準\ndict/*.tsv merge=union\ndict/english.txt merge=union\nstats/*.tsv merge=union\n";
 
 fn machine() -> String {
     std::env::var("COMPUTERNAME")
@@ -76,7 +75,8 @@ fn write_if_missing(path: &Path, text: &str) -> std::io::Result<()> {
 /// 跑一次同步；回傳給使用者看的結果
 pub fn run_once(root: &Path, cfg: &SyncConfig, engine: &Engine) -> Result<String, String> {
     let git = Git { root };
-    git.ok(&["--version"]).map_err(|_| "找不到 git，請先安裝 Git".to_owned())?;
+    git.ok(&["--version"])
+        .map_err(|_| "找不到 git，請先安裝 Git".to_owned())?;
 
     if !root.join(".git").exists() {
         git.ok(&["init", "-b", BRANCH])?;
@@ -102,7 +102,10 @@ pub fn run_once(root: &Path, cfg: &SyncConfig, engine: &Engine) -> Result<String
     // 0. 新電腦加入：本機還沒有任何 commit 時，先採用遠端的內容（設定、App 規則、詞庫），
     //    否則兩邊是不相關的歷史而無法合併。`local/` 不受影響；本機詞庫在下面匯出時合併進去。
     let mut changed = 0;
-    let fresh = !git.run(&["rev-parse", "--verify", "HEAD"])?.status.success();
+    let fresh = !git
+        .run(&["rev-parse", "--verify", "HEAD"])?
+        .status
+        .success();
     if fresh && !remote.is_empty() && git.run(&["fetch", "origin", BRANCH])?.status.success() {
         git.ok(&["reset", "--hard", &format!("origin/{BRANCH}")])?;
         let remote_dict = std::fs::read_to_string(&dict).unwrap_or_default();
@@ -126,11 +129,21 @@ pub fn run_once(root: &Path, cfg: &SyncConfig, engine: &Engine) -> Result<String
     let staged = !git.run(&["diff", "--cached", "--quiet"])?.status.success();
     if staged {
         let msg = format!("動物園輸入法：{} {}", machine(), today());
-        let has_identity = git.ok(&["config", "user.email"]).is_ok_and(|s| !s.is_empty());
+        let has_identity = git
+            .ok(&["config", "user.email"])
+            .is_ok_and(|s| !s.is_empty());
         if has_identity {
             git.ok(&["commit", "-m", &msg])?;
         } else {
-            git.ok(&["-c", "user.name=動物園輸入法", "-c", "user.email=zoo-type@localhost", "commit", "-m", &msg])?;
+            git.ok(&[
+                "-c",
+                "user.name=動物園輸入法",
+                "-c",
+                "user.email=zoo-type@localhost",
+                "commit",
+                "-m",
+                &msg,
+            ])?;
         }
     }
     if remote.is_empty() {
@@ -165,33 +178,39 @@ fn write_status(data: &DataRoot, result: &Result<String, String>) {
 }
 
 /// 背景同步執行緒；回傳的 Sender 用來觸發「立即同步」
-pub fn spawn(data: DataRoot, settings: Arc<Settings>, engine: Arc<Engine>) -> std::io::Result<Sender<()>> {
+pub fn spawn(
+    data: DataRoot,
+    settings: Arc<Settings>,
+    engine: Arc<Engine>,
+) -> std::io::Result<Sender<()>> {
     let (tx, rx): (Sender<()>, Receiver<()>) = channel();
-    std::thread::Builder::new().name("sync".into()).spawn(move || {
-        let root: PathBuf = data.root().to_path_buf();
-        loop {
-            let cfg = settings.current().0.sync;
-            let wait = Duration::from_secs(cfg.interval_minutes.max(1) * 60);
-            let manual = match rx.recv_timeout(wait) {
-                Ok(()) => true,
-                Err(RecvTimeoutError::Timeout) => false,
-                Err(RecvTimeoutError::Disconnected) => return,
-            };
-            let cfg = settings.current().0.sync;
-            // 已安裝新版時舊版不同步，避免用舊資料覆蓋
-            if (!cfg.enabled && !manual) || crate::version::read_only() {
-                continue;
+    std::thread::Builder::new()
+        .name("sync".into())
+        .spawn(move || {
+            let root: PathBuf = data.root().to_path_buf();
+            loop {
+                let cfg = settings.current().0.sync;
+                let wait = Duration::from_secs(cfg.interval_minutes.max(1) * 60);
+                let manual = match rx.recv_timeout(wait) {
+                    Ok(()) => true,
+                    Err(RecvTimeoutError::Timeout) => false,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                };
+                let cfg = settings.current().0.sync;
+                // 已安裝新版時舊版不同步，避免用舊資料覆蓋
+                if (!cfg.enabled && !manual) || crate::version::read_only() {
+                    continue;
+                }
+                // 先存檔，確保匯出的是最新的詞庫
+                let _ = engine.save();
+                let result = run_once(&root, &cfg, &engine);
+                match &result {
+                    Ok(s) => log::info!("同步：{s}"),
+                    Err(e) => log::warn!("同步：{e}"),
+                }
+                write_status(&data, &result);
             }
-            // 先存檔，確保匯出的是最新的詞庫
-            let _ = engine.save();
-            let result = run_once(&root, &cfg, &engine);
-            match &result {
-                Ok(s) => log::info!("同步：{s}"),
-                Err(e) => log::warn!("同步：{e}"),
-            }
-            write_status(&data, &result);
-        }
-    })?;
+        })?;
     Ok(tx)
 }
 
@@ -206,7 +225,15 @@ mod tests {
     }
 
     fn git(dir: &Path, args: &[&str]) {
-        assert!(Command::new("git").arg("-C").arg(dir).args(args).status().unwrap().success());
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
     }
 
     #[test]
@@ -230,20 +257,33 @@ mod tests {
         run_once(&a_root, &cfg, &a).unwrap();
         let msg = run_once(&b_root, &cfg, &b).unwrap();
         assert!(msg.contains("1 筆"), "{msg}");
-        assert!(b.phrases().iter().any(|p| p.word == "酷音" && p.is_pinned()));
+        assert!(
+            b.phrases()
+                .iter()
+                .any(|p| p.word == "酷音" && p.is_pinned())
+        );
 
         // B 封鎖後同步，A 拿到封鎖
         std::thread::sleep(Duration::from_millis(1100)); // 修改時間以秒計
-        b.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Ban).unwrap();
+        b.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Ban)
+            .unwrap();
         run_once(&b_root, &cfg, &b).unwrap();
         run_once(&a_root, &cfg, &a).unwrap();
-        assert!(a.phrases().iter().any(|p| p.word == "酷音" && p.is_banned()));
+        assert!(
+            a.phrases()
+                .iter()
+                .any(|p| p.word == "酷音" && p.is_banned())
+        );
 
         // A 移除後同步，B 也移除（不會被同步檔加回來）
         std::thread::sleep(Duration::from_millis(1100));
-        a.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Remove).unwrap();
+        a.phrase_action("酷音", "ㄎㄨˋ ㄧㄣ", PhraseAction::Remove)
+            .unwrap();
         run_once(&a_root, &cfg, &a).unwrap();
-        assert!(a.phrases().iter().all(|p| p.word != "酷音"), "A 自己同步後不會加回來");
+        assert!(
+            a.phrases().iter().all(|p| p.word != "酷音"),
+            "A 自己同步後不會加回來"
+        );
         run_once(&b_root, &cfg, &b).unwrap();
         assert!(b.phrases().iter().all(|p| p.word != "酷音"));
 

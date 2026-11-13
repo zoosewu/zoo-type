@@ -62,9 +62,15 @@ pub enum State {
 
 /// 讀 `current.txt` 判斷自己是不是目前版本
 pub fn state() -> State {
-    let Some(exe) = std::env::current_exe().ok() else { return State::Current };
-    let Some(folder) = exe.parent() else { return State::Current };
-    let Some(root) = folder.parent() else { return State::Current };
+    let Some(exe) = std::env::current_exe().ok() else {
+        return State::Current;
+    };
+    let Some(folder) = exe.parent() else {
+        return State::Current;
+    };
+    let Some(root) = folder.parent() else {
+        return State::Current;
+    };
     let Some(own) = folder.file_name().map(|n| n.to_string_lossy().into_owned()) else {
         return State::Current;
     };
@@ -76,7 +82,10 @@ pub fn state() -> State {
 
 fn parse(text: &str, own: &str, root: &std::path::Path) -> State {
     let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
-    let (Some(dir), Some(protocol)) = (lines.next(), lines.next().and_then(|p| p.parse::<u32>().ok())) else {
+    let (Some(dir), Some(protocol)) = (
+        lines.next(),
+        lines.next().and_then(|p| p.parse::<u32>().ok()),
+    ) else {
         return State::Current;
     };
     if dir.eq_ignore_ascii_case(own) {
@@ -97,7 +106,10 @@ mod tests {
     fn current_and_stale() {
         let root = Path::new(r"C:\ZCT");
         let p = PROTOCOL_VERSION;
-        assert_eq!(parse(&format!("0.2.0\n{p}\n"), "0.2.0", root), State::Current);
+        assert_eq!(
+            parse(&format!("0.2.0\n{p}\n"), "0.2.0", root),
+            State::Current
+        );
         assert_eq!(
             parse(&format!("0.3.0\n{p}\n"), "0.2.0", root),
             State::Stale {
@@ -107,7 +119,10 @@ mod tests {
         );
         assert!(matches!(
             parse(&format!("0.3.0\n{}\n", p + 1), "0.2.0", root),
-            State::Stale { same_protocol: false, .. }
+            State::Stale {
+                same_protocol: false,
+                ..
+            }
         ));
         // 格式不對就當作目前版本（照常運作）
         assert_eq!(parse("", "0.2.0", root), State::Current);

@@ -106,7 +106,12 @@ impl IEnumTfDisplayAttributeInfo_Impl for AttributeEnum_Impl {
         .into())
     }
 
-    fn Next(&self, count: u32, out: *mut Option<ITfDisplayAttributeInfo>, fetched: *mut u32) -> Result<()> {
+    fn Next(
+        &self,
+        count: u32,
+        out: *mut Option<ITfDisplayAttributeInfo>,
+        fetched: *mut u32,
+    ) -> Result<()> {
         guard(|| unsafe {
             let mut n = 0u32;
             while n < count && self.pos.get() < ALL.len() {
@@ -131,7 +136,8 @@ impl IEnumTfDisplayAttributeInfo_Impl for AttributeEnum_Impl {
     }
 
     fn Skip(&self, count: u32) -> Result<()> {
-        self.pos.set((self.pos.get() + count as usize).min(ALL.len()));
+        self.pos
+            .set((self.pos.get() + count as usize).min(ALL.len()));
         Ok(())
     }
 }
@@ -169,7 +175,13 @@ fn atom_variant(atom: u32) -> VARIANT {
 }
 
 /// 把顯示屬性套到組字範圍；`target` 是（UTF-16 起點, UTF-16 長度）
-pub fn apply(ctx: &ITfContext, ec: u32, range: &ITfRange, atoms: Atoms, target: Option<(i32, i32)>) {
+pub fn apply(
+    ctx: &ITfContext,
+    ec: u32,
+    range: &ITfRange,
+    atoms: Atoms,
+    target: Option<(i32, i32)>,
+) {
     unsafe {
         let Ok(prop) = ctx.GetProperty(&GUID_PROP_ATTRIBUTE) else {
             return;
@@ -181,8 +193,12 @@ pub fn apply(ctx: &ITfContext, ec: u32, range: &ITfRange, atoms: Atoms, target: 
         let Ok(sub) = range.Clone() else { return };
         let mut moved = 0;
         if sub.Collapse(ec, TF_ANCHOR_START).is_err()
-            || sub.ShiftEnd(ec, start + len, &mut moved, std::ptr::null()).is_err()
-            || sub.ShiftStart(ec, start, &mut moved, std::ptr::null()).is_err()
+            || sub
+                .ShiftEnd(ec, start + len, &mut moved, std::ptr::null())
+                .is_err()
+            || sub
+                .ShiftStart(ec, start, &mut moved, std::ptr::null())
+                .is_err()
         {
             return;
         }

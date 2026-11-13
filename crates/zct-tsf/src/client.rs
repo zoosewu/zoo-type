@@ -106,7 +106,10 @@ impl Ipc {
     ///
     /// 不從 AppContainer（沙箱）或提權程序啟動：子程序會繼承受限 / 管理員權限
     fn spawn_service(&mut self) {
-        if self.spawned_at.is_some_and(|t| t.elapsed() < SPAWN_COOLDOWN) {
+        if self
+            .spawned_at
+            .is_some_and(|t| t.elapsed() < SPAWN_COOLDOWN)
+        {
             return;
         }
         if is_app_container() || is_elevated() {

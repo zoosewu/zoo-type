@@ -47,11 +47,11 @@ impl Settings {
             return Err("舊版服務程序不寫設定（已安裝新版）".into());
         }
         let (_, mut apps) = self.current();
-        match apps
-            .apps
-            .iter_mut()
-            .find(|r| r.windows.as_deref().is_some_and(|w| w.eq_ignore_ascii_case(exe)))
-        {
+        match apps.apps.iter_mut().find(|r| {
+            r.windows
+                .as_deref()
+                .is_some_and(|w| w.eq_ignore_ascii_case(exe))
+        }) {
             Some(rule) => rule.composition_bar = Some(on),
             None => apps.apps.push(zct_core::AppRule {
                 name: exe.trim_end_matches(".exe").to_owned(),

@@ -52,10 +52,26 @@ fn general_from(c: &Config) -> General {
 }
 
 fn apply_general(c: &mut Config, g: &General) {
-    c.input.default_mode = if g.default_mode == 1 { InputMode::English } else { InputMode::Chinese };
-    c.input.punctuation = if g.punctuation == 1 { Width::Half } else { Width::Full };
-    c.input.output = if g.output == 1 { Output::Simplified } else { Output::Traditional };
-    c.input.on_focus = if g.on_focus == 1 { OnFocus::Reset } else { OnFocus::Remember };
+    c.input.default_mode = if g.default_mode == 1 {
+        InputMode::English
+    } else {
+        InputMode::Chinese
+    };
+    c.input.punctuation = if g.punctuation == 1 {
+        Width::Half
+    } else {
+        Width::Full
+    };
+    c.input.output = if g.output == 1 {
+        Output::Simplified
+    } else {
+        Output::Traditional
+    };
+    c.input.on_focus = if g.on_focus == 1 {
+        OnFocus::Reset
+    } else {
+        OnFocus::Remember
+    };
     c.toggle.shift = match g.shift {
         1 => ShiftToggle::Left,
         2 => ShiftToggle::Right,
@@ -75,7 +91,11 @@ fn apply_general(c: &mut Config, g: &General) {
         2 => PrimarySymbols::Both,
         _ => PrimarySymbols::Backtick,
     };
-    c.punctuation.secondary = if g.secondary == 1 { SecondarySymbols::Layer } else { SecondarySymbols::Shift };
+    c.punctuation.secondary = if g.secondary == 1 {
+        SecondarySymbols::Layer
+    } else {
+        SecondarySymbols::Shift
+    };
     // 舊版欄位已轉換，不再保留
     c.punctuation.shift = None;
     c.punctuation.right_alt = None;
@@ -166,7 +186,11 @@ fn theme_from(c: &Config) -> Theme {
 
 fn apply_theme(c: &mut Config, t: &Theme) -> Result<(), String> {
     let color = |s: &SharedString| s.parse::<Color>();
-    c.theme.layout = if t.layout == 1 { Layout::Horizontal } else { Layout::Vertical };
+    c.theme.layout = if t.layout == 1 {
+        Layout::Horizontal
+    } else {
+        Layout::Vertical
+    };
     c.theme.font = t.font.trim().to_string();
     c.theme.font_size = t.size.clamp(8, 48) as f32;
     c.theme.background = color(&t.background)?;
@@ -178,7 +202,9 @@ fn apply_theme(c: &mut Config, t: &Theme) -> Result<(), String> {
 
 /// 0 = 沿用全域；其餘依序對應選項
 fn pick<T: Copy>(i: i32, options: &[T]) -> Option<T> {
-    usize::try_from(i - 1).ok().and_then(|i| options.get(i).copied())
+    usize::try_from(i - 1)
+        .ok()
+        .and_then(|i| options.get(i).copied())
 }
 
 fn index_of<T: PartialEq>(v: Option<T>, options: &[T]) -> i32 {
@@ -235,7 +261,13 @@ fn table_rows(rows: &VecModel<AppRuleRow>) -> ModelRc<ModelRc<StandardListViewIt
     let item = |s: &SharedString| StandardListViewItem::from(s.clone());
     let v: Vec<ModelRc<StandardListViewItem>> = rows
         .iter()
-        .map(|r| ModelRc::new(VecModel::from(vec![item(&r.name), item(&r.windows), item(&r.macos)])))
+        .map(|r| {
+            ModelRc::new(VecModel::from(vec![
+                item(&r.name),
+                item(&r.windows),
+                item(&r.macos),
+            ]))
+        })
         .collect();
     ModelRc::new(VecModel::from(v))
 }
@@ -358,12 +390,15 @@ const WINDOW_TITLE: &str = "動物園輸入法 設定";
 fn single_instance(wait_for_old: bool) -> bool {
     use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
     use windows::Win32::System::Threading::CreateMutexW;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    };
     use windows::core::{HSTRING, PCWSTR};
     let tries = if wait_for_old { 25 } else { 1 };
     for _ in 0..tries {
         unsafe {
-            let Ok(handle) = CreateMutexW(None, false, &HSTRING::from(r"Local\ZooType-settings")) else {
+            let Ok(handle) = CreateMutexW(None, false, &HSTRING::from(r"Local\ZooType-settings"))
+            else {
                 return true;
             };
             if GetLastError() != ERROR_ALREADY_EXISTS {
@@ -429,7 +464,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_sync(sync_from(&config));
     ui.set_ai(ai_from(&config));
     ui.set_has_api_key(zct_ipc::secret::read_ai_key().is_some());
-    let apps = Rc::new(VecModel::from(rules.apps.iter().map(row_from).collect::<Vec<_>>()));
+    let apps = Rc::new(VecModel::from(
+        rules.apps.iter().map(row_from).collect::<Vec<_>>(),
+    ));
     ui.set_apps(ModelRc::from(apps.clone()));
     ui.set_apps_rows(table_rows(&apps));
 
@@ -702,7 +739,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let (ui_weak, state, refresh) = (ui.as_weak(), state.clone(), refresh.clone());
         ui.on_phrase_state(move |p, to| {
-            let Some(action) = state_action(p.state, to) else { return };
+            let Some(action) = state_action(p.state, to) else {
+                return;
+            };
             let r = state.borrow_mut().service.call(Request::Phrase {
                 word: p.word.to_string(),
                 bopomofo: p.bopomofo.to_string(),
@@ -733,7 +772,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (ui_weak, state) = (ui.as_weak(), state.clone());
         ui.on_restore(move |day| {
             let ui = ui_weak.unwrap();
-            let r = state.borrow_mut().service.call(Request::Restore { day: day.to_string() });
+            let r = state.borrow_mut().service.call(Request::Restore {
+                day: day.to_string(),
+            });
             ui.set_restore_pending("".into());
             match r {
                 Ok(_) => {
@@ -753,14 +794,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let ui = ui_weak.unwrap();
             let current = state.borrow().data.root().to_path_buf();
             let start = current.parent().unwrap_or(&current).to_path_buf();
-            let Some(new) = pick_folder(&start) else { return };
-            let Some(pointer) = zct_core::paths::pointer_dir() else { return };
+            let Some(new) = pick_folder(&start) else {
+                return;
+            };
+            let Some(pointer) = zct_core::paths::pointer_dir() else {
+                return;
+            };
             // 先讓服務程序存檔並停止寫入，複製時資料才不會變動
-            let online = state.borrow_mut().service.call(Request::Command(Command::PrepareMove)).is_ok();
+            let online = state
+                .borrow_mut()
+                .service
+                .call(Request::Command(Command::PrepareMove))
+                .is_ok();
             let result = zct_core::paths::change_data_root(&pointer, &current, &new);
             // 不論成功與否都重新啟動服務程序（成功：讀新位置；失敗：解除停止寫入）
             if online {
-                let _ = state.borrow_mut().service.call(Request::Command(Command::Restart));
+                let _ = state
+                    .borrow_mut()
+                    .service
+                    .call(Request::Command(Command::Restart));
             }
             match result {
                 Ok(mode) => {
@@ -768,10 +820,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         zct_core::paths::ChangeRoot::Copied => "已把資料複製到",
                         zct_core::paths::ChangeRoot::Adopted => "已改用",
                     };
-                    let msg = format!("{what} {}（原本的資料保留在 {}）", new.display(), current.display());
+                    let msg = format!(
+                        "{what} {}（原本的資料保留在 {}）",
+                        new.display(),
+                        current.display()
+                    );
                     // 重新開啟設定程式，讀新位置的設定
                     if let Ok(exe) = std::env::current_exe() {
-                        let _ = std::process::Command::new(exe).args(["--page", "6", "--notice", &msg]).spawn();
+                        let _ = std::process::Command::new(exe)
+                            .args(["--page", "6", "--notice", &msg])
+                            .spawn();
                     }
                     std::process::exit(0);
                 }
@@ -787,24 +845,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Windows 原生的資料夾選擇視窗；取消時回傳 None
 #[cfg(windows)]
 fn pick_folder(start: &std::path::Path) -> Option<std::path::PathBuf> {
-    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree};
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+        CoTaskMemFree,
+    };
     use windows::Win32::UI::Shell::{
-        FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
-        SIGDN_FILESYSPATH,
+        FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem,
+        SHCreateItemFromParsingName, SIGDN_FILESYSPATH,
     };
     use windows::core::HSTRING;
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let dialog: IFileOpenDialog =
+            CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
         let options = dialog.GetOptions().ok()?;
-        dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
+        dialog
+            .SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)
+            .ok()?;
         let _ = dialog.SetTitle(&HSTRING::from("選擇學習資料位置"));
-        if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(start.as_os_str()), None) {
+        if let Ok(item) =
+            SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(start.as_os_str()), None)
+        {
             let _ = dialog.SetFolder(&item);
         }
         // 按取消時 Show 回傳錯誤
         dialog.Show(None).ok()?;
-        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = dialog
+            .GetResult()
+            .ok()?
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .ok()?;
         let text = path.to_string().ok();
         CoTaskMemFree(Some(path.0 as _));
         text.map(std::path::PathBuf::from)
@@ -883,7 +953,10 @@ mod tests {
             composition_bar: Some(true),
         };
         assert_eq!(rule_from(&row_from(&rule)), rule);
-        assert_eq!(rule_from(&row_from(&AppRule::default())), AppRule::default());
+        assert_eq!(
+            rule_from(&row_from(&AppRule::default())),
+            AppRule::default()
+        );
     }
 
     #[test]

@@ -23,12 +23,11 @@ pub fn is_tone(c: u8) -> bool {
 
 fn kind(c: u8) -> Option<Kind> {
     Some(match c {
-        b'1' | b'q' | b'a' | b'z' | b'2' | b'w' | b's' | b'x' | b'e' | b'd' | b'c' | b'r' | b'f'
-        | b'v' | b'5' | b't' | b'g' | b'b' | b'y' | b'h' | b'n' => Kind::Initial,
+        b'1' | b'q' | b'a' | b'z' | b'2' | b'w' | b's' | b'x' | b'e' | b'd' | b'c' | b'r'
+        | b'f' | b'v' | b'5' | b't' | b'g' | b'b' | b'y' | b'h' | b'n' => Kind::Initial,
         b'u' | b'j' | b'm' => Kind::Medial,
-        b'8' | b'i' | b'k' | b',' | b'9' | b'o' | b'l' | b'.' | b'0' | b'p' | b';' | b'/' | b'-' => {
-            Kind::Rime
-        }
+        b'8' | b'i' | b'k' | b',' | b'9' | b'o' | b'l' | b'.' | b'0' | b'p' | b';' | b'/'
+        | b'-' => Kind::Rime,
         b'3' | b'4' | b'6' | b'7' => Kind::Tone,
         _ => return None,
     })

@@ -6,7 +6,11 @@ use zct_ipc::pipe::{Client, Listener, pipe_name_with};
 use zct_ipc::{Error, Request, Response};
 
 fn hello() -> Request {
-    Request::Hello { version: zct_ipc::PROTOCOL_VERSION, pid: 1, exe: "test.exe".into() }
+    Request::Hello {
+        version: zct_ipc::PROTOCOL_VERSION,
+        pid: 1,
+        exe: "test.exe".into(),
+    }
 }
 
 #[test]
@@ -31,12 +35,20 @@ fn request_response_roundtrip() {
         }
         std::thread::sleep(Duration::from_millis(5));
     };
-    assert_eq!(client.call(&hello(), Duration::from_secs(1)).unwrap(), Response::Ok);
+    assert_eq!(
+        client.call(&hello(), Duration::from_secs(1)).unwrap(),
+        Response::Ok
+    );
 
     let start = Instant::now();
     let n = 1000;
     for _ in 0..n {
-        assert_eq!(client.call(&Request::Reset, Duration::from_secs(1)).unwrap(), Response::Eat(true));
+        assert_eq!(
+            client
+                .call(&Request::Reset, Duration::from_secs(1))
+                .unwrap(),
+            Response::Eat(true)
+        );
     }
     println!("往返平均 {:?}", start.elapsed() / n);
     drop(client);
@@ -94,14 +106,27 @@ fn large_response_is_read_completely() {
         }
         std::thread::sleep(Duration::from_millis(5));
     };
-    let size = zct_ipc::encode(&Response::Phrases(expected.clone())).unwrap().len();
-    assert!(size > 4 * zct_ipc::INITIAL_BUFFER, "測試資料要大於緩衝區：{size}");
-    match client.call(&Request::ListPhrases, Duration::from_secs(5)).unwrap() {
+    let size = zct_ipc::encode(&Response::Phrases(expected.clone()))
+        .unwrap()
+        .len();
+    assert!(
+        size > 4 * zct_ipc::INITIAL_BUFFER,
+        "測試資料要大於緩衝區：{size}"
+    );
+    match client
+        .call(&Request::ListPhrases, Duration::from_secs(5))
+        .unwrap()
+    {
         Response::Phrases(p) => assert_eq!(p, expected),
         other => panic!("{other:?}"),
     }
     // 大型回應之後，一般的小訊息照常運作
-    assert_eq!(client.call(&Request::Reset, Duration::from_secs(1)).unwrap(), Response::Ok);
+    assert_eq!(
+        client
+            .call(&Request::Reset, Duration::from_secs(1))
+            .unwrap(),
+        Response::Ok
+    );
     drop(client);
     server.join().unwrap();
 }

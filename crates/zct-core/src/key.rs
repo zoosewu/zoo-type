@@ -1,9 +1,9 @@
 //! 平台無關的按鍵事件。平台層（TSF / IMK）負責把系統按鍵轉成這裡的型別。
 
 use chewing::input::KeyboardEvent;
-use serde::{Deserialize, Serialize};
 use chewing::input::keymap::{QWERTY_MAP, map_ascii};
 use chewing::input::{keycode, keysym};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {

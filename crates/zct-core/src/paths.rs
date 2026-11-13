@@ -56,19 +56,32 @@ pub fn migrate_dir(old: &Path, new: &Path) -> std::io::Result<Option<String>> {
         return Ok(None);
     }
     if std::fs::rename(old, new).is_ok() {
-        return Ok(Some(format!("資料夾改名：{} → {}", old.display(), new.display())));
+        return Ok(Some(format!(
+            "資料夾改名：{} → {}",
+            old.display(),
+            new.display()
+        )));
     }
     copy_dir(old, new)?;
     let _ = std::fs::write(
         old.join("已搬移到 ZooType.txt"),
-        format!("這個資料夾的內容已複製到 {}，舊版程式都關閉後可以刪除這個資料夾。\r\n", new.display()),
+        format!(
+            "這個資料夾的內容已複製到 {}，舊版程式都關閉後可以刪除這個資料夾。\r\n",
+            new.display()
+        ),
     );
-    Ok(Some(format!("資料夾複製：{} → {}（舊資料夾使用中）", old.display(), new.display())))
+    Ok(Some(format!(
+        "資料夾複製：{} → {}（舊資料夾使用中）",
+        old.display(),
+        new.display()
+    )))
 }
 
 /// 資料夾裡已經有輸入法的資料（設定、App 規則、自訂英文單字或學習紀錄）
 pub fn has_data(dir: &Path) -> bool {
-    ["config.toml", "apps.toml", "dict"].iter().any(|f| dir.join(f).exists())
+    ["config.toml", "apps.toml", "dict"]
+        .iter()
+        .any(|f| dir.join(f).exists())
         || dir.join("local").join("learning").exists()
 }
 
@@ -84,7 +97,10 @@ pub enum ChangeRoot {
 /// Windows 路徑不分大小寫；比較前先轉成絕對路徑
 fn same_or_inside(a: &Path, b: &Path) -> (bool, bool) {
     let norm = |p: &Path| {
-        let s = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf()).to_string_lossy().to_lowercase();
+        let s = std::path::absolute(p)
+            .unwrap_or_else(|_| p.to_path_buf())
+            .to_string_lossy()
+            .to_lowercase();
         PathBuf::from(s.trim_end_matches(['\\', '/']))
     };
     let (a, b) = (norm(a), norm(b));
@@ -94,7 +110,11 @@ fn same_or_inside(a: &Path, b: &Path) -> (bool, bool) {
 /// 變更資料根目錄：新位置是空的就複製目前的資料過去，已有資料就直接改用；最後更新指標檔。
 ///
 /// 舊位置的資料保留不刪（當作備份）。呼叫前要先讓服務程序停止寫檔。
-pub fn change_data_root(pointer_dir: &Path, current: &Path, new: &Path) -> Result<ChangeRoot, String> {
+pub fn change_data_root(
+    pointer_dir: &Path,
+    current: &Path,
+    new: &Path,
+) -> Result<ChangeRoot, String> {
     let (same, nested) = same_or_inside(current, new);
     if same {
         return Err("和目前的位置相同".into());
@@ -194,7 +214,10 @@ impl DataRoot {
 
     pub fn discover() -> Option<DataRoot> {
         let dir = pointer_dir()?;
-        Some(DataRoot::new(resolve(std::env::var_os(ENV_HOME).map(PathBuf::from), &dir)))
+        Some(DataRoot::new(resolve(
+            std::env::var_os(ENV_HOME).map(PathBuf::from),
+            &dir,
+        )))
     }
 
     pub fn root(&self) -> &Path {
@@ -236,10 +259,17 @@ mod tests {
         let (old, new) = (base.path().join("zct"), base.path().join("ZooType"));
         std::fs::create_dir_all(old.join("local").join("learning")).unwrap();
         std::fs::write(old.join("config.toml"), "x").unwrap();
-        std::fs::write(old.join("local").join("learning").join("user_dict.csv"), "y").unwrap();
+        std::fs::write(
+            old.join("local").join("learning").join("user_dict.csv"),
+            "y",
+        )
+        .unwrap();
         assert!(migrate_dir(&old, &new).unwrap().is_some());
         assert!(!old.exists());
-        assert_eq!(std::fs::read_to_string(new.join("local/learning/user_dict.csv")).unwrap(), "y");
+        assert_eq!(
+            std::fs::read_to_string(new.join("local/learning/user_dict.csv")).unwrap(),
+            "y"
+        );
         // 新資料夾已存在：不動
         std::fs::create_dir_all(&old).unwrap();
         assert!(migrate_dir(&old, &new).unwrap().is_none());
@@ -254,7 +284,10 @@ mod tests {
         std::fs::write(src.join(".git").join("HEAD"), "ref").unwrap();
         std::fs::write(src.join("location.toml"), "data_root = 'D:/x'").unwrap();
         copy_dir(&src, &dst).unwrap();
-        assert_eq!(std::fs::read_to_string(dst.join(".git/HEAD")).unwrap(), "ref");
+        assert_eq!(
+            std::fs::read_to_string(dst.join(".git/HEAD")).unwrap(),
+            "ref"
+        );
         assert!(dst.join("location.toml").exists());
     }
 
@@ -266,8 +299,14 @@ mod tests {
         std::fs::write(pointer.join("config.toml"), "c").unwrap();
         std::fs::write(pointer.join("local/learning/user_dict.csv"), "u").unwrap();
         let new = base.path().join("D").join("我的 資料");
-        assert_eq!(change_data_root(&pointer, &pointer, &new).unwrap(), ChangeRoot::Copied);
-        assert_eq!(std::fs::read_to_string(new.join("local/learning/user_dict.csv")).unwrap(), "u");
+        assert_eq!(
+            change_data_root(&pointer, &pointer, &new).unwrap(),
+            ChangeRoot::Copied
+        );
+        assert_eq!(
+            std::fs::read_to_string(new.join("local/learning/user_dict.csv")).unwrap(),
+            "u"
+        );
         assert!(!new.join(POINTER_FILE).exists(), "指標檔不複製");
         assert_eq!(resolve(None, &pointer), std::path::absolute(&new).unwrap());
         assert!(pointer.join("config.toml").exists(), "舊位置保留");
@@ -283,11 +322,20 @@ mod tests {
         let old = base.path().join("D").join("ZooType");
         std::fs::create_dir_all(old.join("local").join("learning")).unwrap();
         std::fs::write(old.join("config.toml"), "kept").unwrap();
-        assert_eq!(change_data_root(&pointer, &pointer, &old).unwrap(), ChangeRoot::Adopted);
-        assert_eq!(std::fs::read_to_string(old.join("config.toml")).unwrap(), "kept");
+        assert_eq!(
+            change_data_root(&pointer, &pointer, &old).unwrap(),
+            ChangeRoot::Adopted
+        );
+        assert_eq!(
+            std::fs::read_to_string(old.join("config.toml")).unwrap(),
+            "kept"
+        );
         assert_eq!(resolve(None, &pointer), std::path::absolute(&old).unwrap());
         // 改回預設位置：刪掉指標檔
-        assert_eq!(change_data_root(&pointer, &old, &pointer).unwrap(), ChangeRoot::Adopted);
+        assert_eq!(
+            change_data_root(&pointer, &old, &pointer).unwrap(),
+            ChangeRoot::Adopted
+        );
         assert!(!pointer.join(POINTER_FILE).exists());
     }
 
@@ -309,7 +357,10 @@ mod tests {
             "\u{feff}data_root = \"D:\\\\My Data\\\\學習資料\"\r\n",
         )
         .unwrap();
-        assert_eq!(resolve(None, dir.path()), PathBuf::from("D:\\My Data\\學習資料"));
+        assert_eq!(
+            resolve(None, dir.path()),
+            PathBuf::from("D:\\My Data\\學習資料")
+        );
     }
 
     #[test]

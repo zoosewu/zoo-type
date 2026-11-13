@@ -11,23 +11,58 @@ fn main() {
     let mut c = Client::connect().expect("服務程序沒有在執行");
     let t = Duration::from_millis(500);
     let call = |c: &mut Client, r: Request| c.call(&r, t).expect("呼叫失敗");
-    println!("{:?}", call(&mut c, Request::Hello { version: PROTOCOL_VERSION, pid: std::process::id(), exe: "drive.exe".into() }));
-    let caret = Some(Rect { left: 400, top: 300, right: 402, bottom: 324 });
+    println!(
+        "{:?}",
+        call(
+            &mut c,
+            Request::Hello {
+                version: PROTOCOL_VERSION,
+                pid: std::process::id(),
+                exe: "drive.exe".into()
+            }
+        )
+    );
+    let caret = Some(Rect {
+        left: 400,
+        top: 300,
+        right: 402,
+        bottom: 324,
+    });
     let mut now = 0u64;
     let mut key = |c: &mut Client, k: Key, mods: Mods| {
         now += 40;
         let r = call(c, Request::Key(KeyEvent::down(k, mods, now)));
         now += 40;
-        let up_mods = if matches!(k, Key::Shift(_)) { Mods::NONE } else { mods };
+        let up_mods = if matches!(k, Key::Shift(_)) {
+            Mods::NONE
+        } else {
+            mods
+        };
         let r2 = call(c, Request::Key(KeyEvent::up(k, up_mods, now)));
-        call(c, Request::Caret { rect: caret, fresh: true });
+        call(
+            c,
+            Request::Caret {
+                rect: caret,
+                fresh: true,
+            },
+        );
         if let (Response::Key(a), Response::Key(b)) = (r, r2) {
-            println!("{k:?} eaten={} preedit={:?} commit={:?} cand={:?} mode={:?}",
-                a.eaten, b.preedit.text, a.commit.or(b.commit), b.candidates.map(|p| p.items), a.mode_changed.or(b.mode_changed));
+            println!(
+                "{k:?} eaten={} preedit={:?} commit={:?} cand={:?} mode={:?}",
+                a.eaten,
+                b.preedit.text,
+                a.commit.or(b.commit),
+                b.candidates.map(|p| p.items),
+                a.mode_changed.or(b.mode_changed)
+            );
         }
     };
     for b in b"wu0 fu4" {
-        let k = if *b == b' ' { Key::Space } else { Key::Char(*b) };
+        let k = if *b == b' ' {
+            Key::Space
+        } else {
+            Key::Char(*b)
+        };
         key(&mut c, k, Mods::NONE);
     }
     key(&mut c, Key::Left, Mods::NONE);

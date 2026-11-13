@@ -12,16 +12,16 @@
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
+use windows::Win32::Foundation::RECT;
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::System::Variant::VT_I4;
 use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED, ITfCompartmentMgr,
     ITfContext, ITfThreadMgr, TS_SS_TRANSITORY,
-};
-use windows::Win32::Foundation::RECT;
-use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowRect,
@@ -73,7 +73,10 @@ fn compartment_on(mgr: &ITfCompartmentMgr, guid: &GUID) -> bool {
 fn compartments(tm: &ITfThreadMgr, ctx: &ITfContext) -> (bool, bool) {
     let mut disabled = false;
     let mut empty = false;
-    let mgrs = [tm.cast::<ITfCompartmentMgr>().ok(), ctx.cast::<ITfCompartmentMgr>().ok()];
+    let mgrs = [
+        tm.cast::<ITfCompartmentMgr>().ok(),
+        ctx.cast::<ITfCompartmentMgr>().ok(),
+    ];
     for mgr in mgrs.iter().flatten() {
         disabled |= compartment_on(mgr, &GUID_COMPARTMENT_KEYBOARD_DISABLED);
         empty |= compartment_on(mgr, &GUID_COMPARTMENT_EMPTYCONTEXT);
@@ -192,9 +195,18 @@ mod tests {
     fn system_signals_always_apply() {
         for s in [
             Signals::default(),
-            Signals { has_context: false, ..normal() },
-            Signals { keyboard_disabled: true, ..normal() },
-            Signals { empty_context: true, ..normal() },
+            Signals {
+                has_context: false,
+                ..normal()
+            },
+            Signals {
+                keyboard_disabled: true,
+                ..normal()
+            },
+            Signals {
+                empty_context: true,
+                ..normal()
+            },
         ] {
             assert!(not_input(&s, NONE), "{s:?}");
         }
@@ -202,23 +214,41 @@ mod tests {
 
     #[test]
     fn fullscreen_legacy_app_without_caret_is_not_input() {
-        let game = Signals { transitory: true, covers_monitor: true, ..normal() };
+        let game = Signals {
+            transitory: true,
+            covers_monitor: true,
+            ..normal()
+        };
         assert!(not_input(&game, ALL));
         assert!(!not_input(&game, NONE), "可以用設定關掉");
-        let legacy_edit = Signals { transitory: true, has_caret: true, covers_monitor: true, ..normal() };
-        assert!(!not_input(&legacy_edit, ALL), "舊式程式的輸入框有游標，照常輸入");
+        let legacy_edit = Signals {
+            transitory: true,
+            has_caret: true,
+            covers_monitor: true,
+            ..normal()
+        };
+        assert!(
+            !not_input(&legacy_edit, ALL),
+            "舊式程式的輸入框有游標，照常輸入"
+        );
     }
 
     #[test]
     fn windowed_legacy_app_without_caret_is_still_input() {
         // IntelliJ 等 Java / Qt 程式：舊式介面、沒有系統游標，但不是全螢幕
-        let ide = Signals { transitory: true, ..normal() };
+        let ide = Signals {
+            transitory: true,
+            ..normal()
+        };
         assert!(!not_input(&ide, ALL));
     }
 
     #[test]
     fn exclusive_fullscreen_is_not_input() {
-        let s = Signals { exclusive_fullscreen: true, ..normal() };
+        let s = Signals {
+            exclusive_fullscreen: true,
+            ..normal()
+        };
         assert!(not_input(&s, ALL));
         assert!(!not_input(&s, NONE));
     }

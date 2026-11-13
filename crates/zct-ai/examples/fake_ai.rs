@@ -14,9 +14,15 @@ fn main() {
             let mut line = String::new();
             reader.read_line(&mut line).unwrap();
             let l = line.to_ascii_lowercase();
-            if let Some(v) = l.strip_prefix("content-length:") { len = v.trim().parse().unwrap(); }
-            if l.contains("transfer-encoding: chunked") { chunked = true; }
-            if line == "\r\n" { break; }
+            if let Some(v) = l.strip_prefix("content-length:") {
+                len = v.trim().parse().unwrap();
+            }
+            if l.contains("transfer-encoding: chunked") {
+                chunked = true;
+            }
+            if line == "\r\n" {
+                break;
+            }
         }
         let mut body = vec![0; len];
         reader.read_exact(&mut body).unwrap();
@@ -27,13 +33,20 @@ fn main() {
                 let n = usize::from_str_radix(size.trim(), 16).unwrap();
                 let mut chunk = vec![0; n + 2];
                 reader.read_exact(&mut chunk).unwrap();
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 body.extend_from_slice(&chunk[..n]);
             }
         }
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let text = json["messages"][1]["content"].as_str().unwrap_or("").replace('在', "再");
-        let reply = serde_json::json!({"choices":[{"message":{"role":"assistant","content":text}}]}).to_string();
+        let text = json["messages"][1]["content"]
+            .as_str()
+            .unwrap_or("")
+            .replace('在', "再");
+        let reply =
+            serde_json::json!({"choices":[{"message":{"role":"assistant","content":text}}]})
+                .to_string();
         write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).unwrap();
     }
 }

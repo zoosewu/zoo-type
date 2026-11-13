@@ -153,9 +153,12 @@ mod tests {
 
     #[test]
     fn detect_can_be_disabled_globally_or_per_app() {
-        let rules = AppRules::parse("[[app]]
+        let rules = AppRules::parse(
+            "[[app]]
 windows = 'chat.exe'
-detect = false").unwrap();
+detect = false",
+        )
+        .unwrap();
         let config = Config::default();
         let e = Effective::resolve(&config, None);
         assert!(e.detect_legacy && e.detect_fullscreen);

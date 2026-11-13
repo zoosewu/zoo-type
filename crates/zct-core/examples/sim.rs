@@ -33,7 +33,11 @@ fn main() {
         let r = s.process_key(&KeyEvent::down(key, mods, t));
         let took = start.elapsed();
         t += 50;
-        let up_mods = if matches!(key, Key::Shift(_)) { Mods::NONE } else { mods };
+        let up_mods = if matches!(key, Key::Shift(_)) {
+            Mods::NONE
+        } else {
+            mods
+        };
         let r_up = s.process_key(&KeyEvent::up(key, up_mods, t));
         let commit = r.commit.or(r_up.commit);
         let mode = r.mode_changed.or(r_up.mode_changed);

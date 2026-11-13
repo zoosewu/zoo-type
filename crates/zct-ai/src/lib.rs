@@ -153,13 +153,19 @@ mod tests {
 
     #[test]
     fn clean_strips_think_and_quotes() {
-        assert_eq!(clean("<think>嗯…</think>\n「可以再簡單一點」\n"), "可以再簡單一點");
+        assert_eq!(
+            clean("<think>嗯…</think>\n「可以再簡單一點」\n"),
+            "可以再簡單一點"
+        );
         assert_eq!(clean("  今天天氣很好 "), "今天天氣很好");
     }
 
     #[test]
     fn validate_rejects_rewrites() {
-        assert_eq!(validate("可以在簡單一點", "可以再簡單一點").unwrap(), "可以再簡單一點");
+        assert_eq!(
+            validate("可以在簡單一點", "可以再簡單一點").unwrap(),
+            "可以再簡單一點"
+        );
         assert!(matches!(
             validate("可以在簡單一點", "可以再簡單一點。"),
             Err(AiError::Rewritten(_))
@@ -189,7 +195,10 @@ mod tests {
             let mut body = vec![0; len];
             reader.read_exact(&mut body).unwrap();
             // ureq 傳 JSON 時可能用 chunked 編碼
-            if head.to_ascii_lowercase().contains("transfer-encoding: chunked") {
+            if head
+                .to_ascii_lowercase()
+                .contains("transfer-encoding: chunked")
+            {
                 loop {
                     let mut size = String::new();
                     reader.read_line(&mut size).unwrap();

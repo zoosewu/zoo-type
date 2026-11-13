@@ -164,7 +164,10 @@ mod tests {
     #[test]
     fn half_is_same_key_in_half_width() {
         for style in [Keyboard, Chinese] {
-            assert_eq!(s(b',', true, Half, style), Some(if style == Keyboard { '<' } else { ',' }));
+            assert_eq!(
+                s(b',', true, Half, style),
+                Some(if style == Keyboard { '<' } else { ',' })
+            );
         }
         assert_eq!(s(b'\'', true, Half, Keyboard), Some('"'));
         assert_eq!(s(b'\'', true, Half, Chinese), Some(';'));

@@ -66,7 +66,8 @@ pub fn parse(text: &str) -> BTreeMap<Key, (PhraseState, u64)> {
     let mut map: BTreeMap<Key, (PhraseState, u64)> = BTreeMap::new();
     for line in text.lines() {
         let mut it = line.split('\t');
-        let (Some(word), Some(bopo), Some(state), Some(ts)) = (it.next(), it.next(), it.next(), it.next())
+        let (Some(word), Some(bopo), Some(state), Some(ts)) =
+            (it.next(), it.next(), it.next(), it.next())
         else {
             continue;
         };
@@ -90,8 +91,10 @@ pub fn parse(text: &str) -> BTreeMap<Key, (PhraseState, u64)> {
 pub fn export(engine: &Engine, prev: &str, now: u64) -> String {
     let mut map = parse(prev);
     let local = engine.phrases();
-    let present: std::collections::BTreeSet<Key> =
-        local.iter().map(|p| (p.bopomofo.clone(), p.word.clone())).collect();
+    let present: std::collections::BTreeSet<Key> = local
+        .iter()
+        .map(|p| (p.bopomofo.clone(), p.word.clone()))
+        .collect();
     for (key, (state, ts)) in map.iter_mut() {
         if *state != PhraseState::Removed && !present.contains(key) {
             *state = PhraseState::Removed;
@@ -128,7 +131,10 @@ pub fn import(engine: &Engine, text: &str) -> usize {
         if current == Some(state) {
             continue;
         }
-        if engine.set_phrase_state(&word, &bopo, state, current).is_ok() {
+        if engine
+            .set_phrase_state(&word, &bopo, state, current)
+            .is_ok()
+        {
             changed += 1;
         }
     }

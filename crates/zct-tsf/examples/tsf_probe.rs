@@ -16,8 +16,8 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_InputProcessorProfiles, ITfInputProcessorProfileMgr, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
-    TF_IPPMF_FORPROCESS, TF_PROFILETYPE_INPUTPROCESSOR,
+    CLSID_TF_InputProcessorProfiles, ITfInputProcessorProfileMgr,
+    TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_FORPROCESS, TF_PROFILETYPE_INPUTPROCESSOR,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{GUID, w};
@@ -50,7 +50,11 @@ fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
             ki: KEYBDINPUT {
                 wVk: vk,
                 wScan: unsafe { MapVirtualKeyW(vk.0 as u32, MAPVK_VK_TO_VSC) } as u16,
-                dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                dwFlags: if up {
+                    KEYEVENTF_KEYUP
+                } else {
+                    KEYBD_EVENT_FLAGS(0)
+                },
                 ..Default::default()
             },
         },
@@ -199,7 +203,9 @@ fn main() {
         let fg = GetForegroundWindow();
         let fg_thread = GetWindowThreadProcessId(fg, None);
         let me = windows::Win32::System::Threading::GetCurrentThreadId();
-        let attached = fg_thread != 0 && fg_thread != me && windows::Win32::System::Threading::AttachThreadInput(me, fg_thread, true).as_bool();
+        let attached = fg_thread != 0
+            && fg_thread != me
+            && windows::Win32::System::Threading::AttachThreadInput(me, fg_thread, true).as_bool();
         let _ = BringWindowToTop(main);
         let _ = SetForegroundWindow(main);
         let _ = SetFocus(Some(edit));

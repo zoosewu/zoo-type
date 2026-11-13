@@ -21,7 +21,9 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES,
     FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
 };
-use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, GetOverlappedResultEx, OVERLAPPED};
+use windows::Win32::System::IO::{
+    CancelIoEx, GetOverlappedResult, GetOverlappedResultEx, OVERLAPPED,
+};
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_MESSAGE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
@@ -178,7 +180,9 @@ impl ServerConn {
         let mut read = 0u32;
         match unsafe { ReadFile(self.pipe.0, Some(&mut self.buf), Some(&mut read), None) } {
             Ok(()) => decode(&self.buf[..read as usize]).map(Some),
-            Err(e) if e.code() == ERROR_MORE_DATA.to_hresult() => Err(Error::TooLarge(INITIAL_BUFFER)),
+            Err(e) if e.code() == ERROR_MORE_DATA.to_hresult() => {
+                Err(Error::TooLarge(INITIAL_BUFFER))
+            }
             // ERROR_BROKEN_PIPE 等：用戶端已離開
             Err(_) => Ok(None),
         }
@@ -249,7 +253,12 @@ impl Client {
     /// 等一個 overlapped 操作完成；回傳（讀到的位元組數, 訊息是否還有剩）
     ///
     /// 逾時會取消 I/O 並等待取消完成，確保核心不再寫入緩衝區
-    unsafe fn finish(&self, ov: &OVERLAPPED, started: windows::core::Result<()>, ms: u32) -> Result<(usize, bool)> {
+    unsafe fn finish(
+        &self,
+        ov: &OVERLAPPED,
+        started: windows::core::Result<()>,
+        ms: u32,
+    ) -> Result<(usize, bool)> {
         let more = |e: &windows::core::Error| e.code() == ERROR_MORE_DATA.to_hresult();
         let mut n = 0u32;
         unsafe {
@@ -258,7 +267,9 @@ impl Client {
                     match GetOverlappedResultEx(self.pipe.0, ov, &mut n, ms, false) {
                         Ok(()) => Ok((n as usize, false)),
                         Err(e) if more(&e) => Ok((n as usize, true)),
-                        Err(e) if e.code() == windows::core::HRESULT::from_win32(WAIT_TIMEOUT.0) => {
+                        Err(e)
+                            if e.code() == windows::core::HRESULT::from_win32(WAIT_TIMEOUT.0) =>
+                        {
                             let _ = CancelIoEx(self.pipe.0, Some(ov));
                             let _ = GetOverlappedResult(self.pipe.0, ov, &mut n, true);
                             Err(Error::Timeout)

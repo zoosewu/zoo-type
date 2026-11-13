@@ -149,7 +149,10 @@ pub fn today() -> String {
 }
 
 /// 先寫暫存檔再改名：寫到一半當機也不會留下損壞的檔案
-fn write_atomic(path: &Path, f: impl FnOnce(&mut BufWriter<File>) -> std::io::Result<()>) -> std::io::Result<()> {
+fn write_atomic(
+    path: &Path,
+    f: impl FnOnce(&mut BufWriter<File>) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     {
         let mut w = BufWriter::new(File::create(&tmp)?);
@@ -181,7 +184,9 @@ fn load_char_usage(path: &Path) -> CharUsage {
         let (Some(word), Some(freq), Some(bopomofo)) = (it.next(), it.next(), it.next()) else {
             continue;
         };
-        let Ok(freq) = freq.trim().parse::<u64>() else { continue };
+        let Ok(freq) = freq.trim().parse::<u64>() else {
+            continue;
+        };
         let readings: Vec<&str> = bopomofo.split(' ').collect();
         if readings.len() != word.chars().count() {
             continue;
@@ -253,10 +258,11 @@ impl Engine {
             HistoryDict::new(string_table.clone())
         };
 
-        let mut words = crate::mixed::WordList::load(&sys_dir.join("english.txt")).unwrap_or_else(|e| {
-            log::warn!("沒有英文單字表，只用內建的補充單字：{e}");
-            crate::mixed::WordList::default()
-        });
+        let mut words =
+            crate::mixed::WordList::load(&sys_dir.join("english.txt")).unwrap_or_else(|e| {
+                log::warn!("沒有英文單字表，只用內建的補充單字：{e}");
+                crate::mixed::WordList::default()
+            });
         // 一般字典沒有的技術用語與縮寫（repo、config、api…）
         words.extend(include_str!("../data/english-extra.txt"));
 
@@ -297,7 +303,9 @@ impl Engine {
         let old: Vec<_> = self
             .user_dict
             .entries()
-            .filter(|(syl, word)| self.boost_of(syl.as_ref(), word) == Some(PhraseEntry::LEGACY_NORMAL))
+            .filter(|(syl, word)| {
+                self.boost_of(syl.as_ref(), word) == Some(PhraseEntry::LEGACY_NORMAL)
+            })
             .collect();
         for (syl, word) in &old {
             self.set_boost(syl.as_ref(), word, PhraseEntry::NORMAL);
@@ -347,7 +355,9 @@ impl Engine {
 
     /// 把只屬於簡體的字換成繁體（一對一，字數不變，游標位置不受影響）
     pub fn to_traditional(&self, text: &str) -> String {
-        text.chars().map(|c| self.simplified_only(c).unwrap_or(c)).collect()
+        text.chars()
+            .map(|c| self.simplified_only(c).unwrap_or(c))
+            .collect()
     }
 
     /// 使用者的英文單字檔（資料資料夾 `dict/english.txt`，隨 git 同步）
@@ -363,7 +373,9 @@ impl Engine {
     /// 是不是英文單字：使用者的設定優先，其次看字典
     pub fn is_english(&self, word: &str) -> bool {
         let w = word.to_ascii_lowercase();
-        self.user_words().verdict(&w).unwrap_or_else(|| self.words.contains(&w))
+        self.user_words()
+            .verdict(&w)
+            .unwrap_or_else(|| self.words.contains(&w))
     }
 
     /// C：按空白時要自動變成英文嗎（使用者加入的字不限長度）
@@ -381,11 +393,15 @@ impl Engine {
 
     /// 學到一個英文單字（在組字區用 Shift 打的）；字典已有的不重複記
     pub fn learn_english(&self, word: &str) {
-        if word.len() < 2 || !word.bytes().all(|b| b.is_ascii_alphabetic()) || self.is_english(word) {
+        if word.len() < 2 || !word.bytes().all(|b| b.is_ascii_alphabetic()) || self.is_english(word)
+        {
             return;
         }
         log::info!("學到英文單字（{} 個字母）", word.len());
-        self.user_words.write().unwrap_or_else(|e| e.into_inner()).add(word);
+        self.user_words
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .add(word);
     }
 
     /// 不再把這個字當英文；回傳原本是不是英文
@@ -463,7 +479,8 @@ impl Engine {
         {
             self.set_boost(syllables, word, PhraseEntry::NORMAL);
         }
-        self.corrections_lock().remove(&correction_key(syllables, word));
+        self.corrections_lock()
+            .remove(&correction_key(syllables, word));
         self.mark_dirty();
     }
 
@@ -477,7 +494,10 @@ impl Engine {
             Some(b) if b != PhraseEntry::BANNED => {}
             _ => self.user_dict.insert(syllables, word),
         }
-        let cur = || self.boost_of(syllables, word).unwrap_or(PhraseEntry::NORMAL);
+        let cur = || {
+            self.boost_of(syllables, word)
+                .unwrap_or(PhraseEntry::NORMAL)
+        };
         // 次數上限只是保險，正常情況幾次就結束
         for _ in 0..30 {
             if cur() <= PhraseEntry::NORMAL {
@@ -496,7 +516,9 @@ impl Engine {
         }
     }
 
-    fn corrections_lock(&self) -> std::sync::MutexGuard<'_, std::collections::BTreeMap<String, u32>> {
+    fn corrections_lock(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::BTreeMap<String, u32>> {
         self.corrections.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -586,7 +608,10 @@ impl Engine {
             .map_err(|_| format!("注音格式錯誤：{bopomofo}"))?;
         let n = word.chars().count();
         if n == 0 || n != syl.as_ref().len() {
-            return Err(format!("「{word}」有 {n} 個字，注音有 {} 個音節", syl.as_ref().len()));
+            return Err(format!(
+                "「{word}」有 {n} 個字，注音有 {} 個音節",
+                syl.as_ref().len()
+            ));
         }
         Ok(syl)
     }
@@ -602,7 +627,12 @@ impl Engine {
         Ok(())
     }
 
-    pub fn phrase_action(&self, word: &str, bopomofo: &str, action: PhraseAction) -> Result<(), String> {
+    pub fn phrase_action(
+        &self,
+        word: &str,
+        bopomofo: &str,
+        action: PhraseAction,
+    ) -> Result<(), String> {
         let syl = Self::parse(word, bopomofo)?;
         match action {
             PhraseAction::Ban => {
@@ -628,7 +658,8 @@ impl Engine {
     fn remove_phrase(&self, syllables: &[Syllable], word: &str) {
         self.user_dict.remove(syllables, word);
         self.history.remove(syllables, word);
-        self.corrections_lock().remove(&correction_key(syllables, word));
+        self.corrections_lock()
+            .remove(&correction_key(syllables, word));
     }
 
     /// 同步匯入：把一個詞設成指定狀態（`current` 是本機目前狀態，None 表示不在詞庫）
@@ -739,7 +770,9 @@ impl Engine {
     pub fn backup(&self, backup_dir: &Path, keep: usize) -> std::io::Result<()> {
         let target = backup_dir.join(today());
         // 還沒有任何資料時不建立備份：否則會留下空的當日備份，當天之後也不會再補
-        let has_data = [USER_DICT, HISTORY].iter().any(|n| self.dir.join(n).exists());
+        let has_data = [USER_DICT, HISTORY]
+            .iter()
+            .any(|n| self.dir.join(n).exists());
         if has_data && !target.exists() {
             std::fs::create_dir_all(&target)?;
             for name in [USER_DICT, HISTORY, STATS] {
@@ -777,7 +810,6 @@ impl Engine {
         }
         Ok(moved)
     }
-
 }
 
 /// 修正次數的鍵：`詞 \t 注音`

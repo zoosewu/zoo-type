@@ -13,8 +13,8 @@ use windows::Win32::Graphics::Direct2D::Common::{
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1CreateFactory, ID2D1Factory, ID2D1HwndRenderTarget,
+    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_ROUNDED_RECT, D2D1CreateFactory, ID2D1Factory, ID2D1HwndRenderTarget,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
@@ -32,15 +32,15 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, HWND_TOPMOST,
-    KillTimer, LoadCursorW, IDC_ARROW, MA_NOACTIVATE, MSG, PostMessageW, RegisterClassExW,
-    SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetTimer, SetWindowPos, ShowWindow,
-    TranslateMessage, WM_APP, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_TIMER, WNDCLASSEXW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    IDC_ARROW, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG, PostMessageW, RegisterClassExW, SW_HIDE,
+    SWP_NOACTIVATE, SWP_SHOWWINDOW, SetTimer, SetWindowPos, ShowWindow, TranslateMessage, WM_APP,
+    WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{HSTRING, Result, w};
 use windows_numerics::Vector2;
-use zct_core::{CandidatePage, Preedit};
 use zct_core::config::{Color, Layout, ThemeConfig};
+use zct_core::{CandidatePage, Preedit};
 use zct_ipc::Rect;
 
 const WM_WAKE: u32 = WM_APP + 1;
@@ -100,18 +100,11 @@ pub enum UiCmd {
         anchor: Option<Rect>,
     },
     /// 隱藏候選窗與組字提示列（失焦、重設、連線結束）
-    Hide {
-        owner: u64,
-    },
+    Hide { owner: u64 },
     /// 只隱藏候選窗（每次按鍵後沒有候選時；組字提示列由 Composition 控制）
-    HideCandidates {
-        owner: u64,
-    },
+    HideCandidates { owner: u64 },
     /// 狀態提示：中 / A / 全形 / 半形
-    Hint {
-        text: String,
-        anchor: Option<Rect>,
-    },
+    Hint { text: String, anchor: Option<Rect> },
     /// 設定檔的主題變更了
     Theme(ThemeConfig),
     /// 組字提示列；None 表示隱藏
@@ -149,8 +142,9 @@ impl UiHandle {
 pub fn spawn(theme: ThemeConfig) -> std::result::Result<UiHandle, Box<dyn std::error::Error>> {
     let (tx, rx) = channel();
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
-    std::thread::Builder::new().name("ui".into()).spawn(move || {
-        match Ui::new(rx, theme) {
+    std::thread::Builder::new()
+        .name("ui".into())
+        .spawn(move || match Ui::new(rx, theme) {
             Ok(ui) => {
                 let wake = ui.cand.hwnd.0 as isize;
                 UI.with(|cell| *cell.borrow_mut() = Some(ui));
@@ -160,8 +154,7 @@ pub fn spawn(theme: ThemeConfig) -> std::result::Result<UiHandle, Box<dyn std::e
             Err(e) => {
                 let _ = ready_tx.send(Err(e.to_string()));
             }
-        }
-    })?;
+        })?;
     let wake = ready_rx.recv()??;
     Ok(UiHandle { tx, wake })
 }
@@ -402,7 +395,11 @@ impl Ui {
         let mut items = Vec::new();
         let mut row_h: f32 = 0.0;
         for (i, item) in page.items.iter().enumerate() {
-            let mark = if page.pinned.get(i).copied().unwrap_or(false) { "★" } else { "" };
+            let mark = if page.pinned.get(i).copied().unwrap_or(false) {
+                "★"
+            } else {
+                ""
+            };
             let num = self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?;
             let text = self.layout(item, &self.text_fmt)?;
             row_h = row_h.max(text.2).max(num.2);
@@ -437,8 +434,10 @@ impl Ui {
             x += w;
         }
         if page.total_pages > 1 {
-            let (layout, w, h) =
-                self.layout(&format!("{}/{}", page.page + 1, page.total_pages), &self.num_fmt)?;
+            let (layout, w, h) = self.layout(
+                &format!("{}/{}", page.page + 1, page.total_pages),
+                &self.num_fmt,
+            )?;
             runs.push(Run {
                 layout,
                 x: x + ROW_PAD_X,
@@ -463,7 +462,11 @@ impl Ui {
             let mut text_w: f32 = 0.0;
             for (i, item) in items.iter().enumerate() {
                 let num = if c == active {
-                    let mark = if page.pinned.get(i).copied().unwrap_or(false) { "★" } else { "" };
+                    let mark = if page.pinned.get(i).copied().unwrap_or(false) {
+                        "★"
+                    } else {
+                        ""
+                    };
                     Some(self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?)
                 } else {
                     None
@@ -513,8 +516,10 @@ impl Ui {
             x += col_w;
         }
         let width = x - PAD_X;
-        let (layout, w, h) =
-            self.layout(&format!("{}/{}", page.page + 1, page.total_pages), &self.num_fmt)?;
+        let (layout, w, h) = self.layout(
+            &format!("{}/{}", page.page + 1, page.total_pages),
+            &self.num_fmt,
+        )?;
         runs.push(Run {
             layout,
             x: PAD_X + width - ROW_PAD_X - w,
@@ -533,7 +538,11 @@ impl Ui {
         let mut row_h: f32 = 0.0;
         let mut text_w: f32 = 0.0;
         for (i, item) in page.items.iter().enumerate() {
-            let mark = if page.pinned.get(i).copied().unwrap_or(false) { "★" } else { "" };
+            let mark = if page.pinned.get(i).copied().unwrap_or(false) {
+                "★"
+            } else {
+                ""
+            };
             let num = self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?;
             let text = self.layout(item, &self.text_fmt)?;
             row_h = row_h.max(text.2).max(num.2);
@@ -573,8 +582,10 @@ impl Ui {
         }
         let mut width = row_w;
         if page.total_pages > 1 {
-            let (layout, w, h) =
-                self.layout(&format!("{}/{}", page.page + 1, page.total_pages), &self.num_fmt)?;
+            let (layout, w, h) = self.layout(
+                &format!("{}/{}", page.page + 1, page.total_pages),
+                &self.num_fmt,
+            )?;
             width = width.max(w + ROW_PAD_X * 2.0);
             runs.push(Run {
                 layout,
@@ -619,7 +630,9 @@ impl Ui {
         let end = (start + len).min(chars.len());
         let pieces = [
             chars[..start.min(chars.len())].iter().collect::<String>(),
-            chars[start.min(chars.len())..end].iter().collect::<String>(),
+            chars[start.min(chars.len())..end]
+                .iter()
+                .collect::<String>(),
             chars[end..].iter().collect::<String>(),
         ];
         let mut runs = Vec::new();
@@ -663,7 +676,11 @@ impl Ui {
         // 游標：游標前文字的寬度
         let x0 = PAD_X + ROW_PAD_X;
         let before: String = chars[..p.cursor.min(chars.len())].iter().collect();
-        let caret_x = if before.is_empty() { x0 } else { x0 + self.layout(&before, &self.text_fmt)?.1 };
+        let caret_x = if before.is_empty() {
+            x0
+        } else {
+            x0 + self.layout(&before, &self.text_fmt)?.1
+        };
         let caret = D2D_RECT_F {
             left: caret_x - 0.5,
             top: PAD_Y + ROW_PAD_Y,
@@ -728,7 +745,11 @@ fn place_at(p: &mut Popup, anchor: Rect, dip: (f32, f32), above: bool) -> Result
         let w = (dip.0 * scale).ceil() as i32;
         let h = (dip.1 * scale).ceil() as i32;
         let gap = (OFFSET_DIP * scale) as i32;
-        let mut y = if above { rc.top - gap - h } else { rc.bottom + gap };
+        let mut y = if above {
+            rc.top - gap - h
+        } else {
+            rc.bottom + gap
+        };
         if above && y < work.top {
             y = rc.bottom + gap;
         } else if !above && y + h > work.bottom {

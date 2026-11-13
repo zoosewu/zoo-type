@@ -1,7 +1,7 @@
 //! 機密資料（AI API Key）存在 Windows 認證管理員，絕不寫進會被 git 同步的設定檔
 
 use windows::Win32::Security::Credentials::{
-    CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CredDeleteW, CredFree, CredReadW,
+    CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree, CredReadW,
     CredWriteW,
 };
 use windows::core::{HSTRING, PWSTR};
@@ -46,7 +46,8 @@ pub fn read(target: &str) -> Option<String> {
         CredReadW(&HSTRING::from(target), CRED_TYPE_GENERIC, None, &mut p).ok()?;
         let cred = &*p;
         let bytes =
-            std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize).to_vec();
+            std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize)
+                .to_vec();
         CredFree(p as *const _);
         String::from_utf8(bytes).ok()
     }

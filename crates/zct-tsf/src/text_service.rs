@@ -24,8 +24,8 @@ use zct_ipc::{Command, Rect, Request, Response};
 use crate::client::Ipc;
 use crate::detect::{self, FullscreenCache};
 use crate::display::{self, Atoms};
-use crate::langbar::{self, Action, LangBarButton};
 use crate::edit::EditSession;
+use crate::langbar::{self, Action, LangBarButton};
 use crate::{guard, keys};
 
 #[derive(Default)]
@@ -100,7 +100,10 @@ impl TextService {
             Ok(mut ipc) => ipc.heuristics(),
             Err(_) => return true,
         };
-        detect::not_input(&detect::gather(&tm, heuristics, &self.fullscreen), heuristics)
+        detect::not_input(
+            &detect::gather(&tm, heuristics, &self.fullscreen),
+            heuristics,
+        )
     }
 }
 
@@ -232,7 +235,10 @@ impl TextService_Impl {
             rect.set(got.or(self.last_rect.get()).or_else(fallback_rect));
         }
         let fresh = needs_caret && self.last_fresh.get();
-        self.call(&Request::Caret { rect: rect.get(), fresh });
+        self.call(&Request::Caret {
+            rect: rect.get(),
+            fresh,
+        });
     }
 
     /// App 自己結束了組字卻沒通知（Windows 11 記事本按 Ctrl + , 這類 App 自己的快捷鍵時）：
@@ -261,7 +267,8 @@ impl TextService_Impl {
             Ok(())
         });
         unsafe {
-            let _ = ctx.RequestEditSession(self.client_id(), &session, TF_ES_SYNC | TF_ES_READWRITE);
+            let _ =
+                ctx.RequestEditSession(self.client_id(), &session, TF_ES_SYNC | TF_ES_READWRITE);
         }
         if lost.get() {
             self.reset(Request::Reset);
@@ -300,7 +307,11 @@ impl TextService_Impl {
             return;
         }
         let tsf = self.tsf.borrow();
-        let Some(km) = tsf.thread_mgr.as_ref().and_then(|tm| tm.cast::<ITfKeystrokeMgr>().ok()) else {
+        let Some(km) = tsf
+            .thread_mgr
+            .as_ref()
+            .and_then(|tm| tm.cast::<ITfKeystrokeMgr>().ok())
+        else {
             return;
         };
         preserve_right_alt(&km, tsf.client_id, enabled);
@@ -362,8 +373,11 @@ fn update_document(
                 }
                 None => {
                     let ins: ITfInsertAtSelection = ctx.cast()?;
-                    let range =
-                        ins.InsertTextAtSelection(ec, INSERT_TEXT_AT_SELECTION_FLAGS(0), &wide(text))?;
+                    let range = ins.InsertTextAtSelection(
+                        ec,
+                        INSERT_TEXT_AT_SELECTION_FLAGS(0),
+                        &wide(text),
+                    )?;
                     range.Collapse(ec, TF_ANCHOR_END)?;
                     set_selection(ctx, ec, &range)?;
                 }
@@ -400,7 +414,12 @@ fn update_document(
 
         // 底線：整段組字 + 選字目標（字元位置換成 UTF-16）
         let utf16 = |chars: usize| -> i32 {
-            preedit.text.chars().take(chars).map(char::len_utf16).sum::<usize>() as i32
+            preedit
+                .text
+                .chars()
+                .take(chars)
+                .map(char::len_utf16)
+                .sum::<usize>() as i32
         };
         let target = preedit
             .target
@@ -461,7 +480,8 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                         }
                         let _ = km.UnadviseKeyEventSink(tsf.client_id);
                     }
-                    if let (Some(cookie), Ok(src)) = (tsf.thread_sink_cookie, tm.cast::<ITfSource>())
+                    if let (Some(cookie), Ok(src)) =
+                        (tsf.thread_sink_cookie, tm.cast::<ITfSource>())
                     {
                         let _ = src.UnadviseSink(cookie);
                     }
@@ -490,7 +510,10 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
                 let src: ITfSource = tm.cast()?;
                 let thread_sink: ITfThreadMgrEventSink = self.to_interface();
                 let cookie = src
-                    .AdviseSink(&ITfThreadMgrEventSink::IID, &thread_sink.cast::<IUnknown>()?)
+                    .AdviseSink(
+                        &ITfThreadMgrEventSink::IID,
+                        &thread_sink.cast::<IUnknown>()?,
+                    )
                     .ok();
 
                 // 輸入法圖示：處理函式持有 TextService，Deactivate 時解除
@@ -527,7 +550,10 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 return Ok(false.into());
             }
             let ev = keys::event(w, l, false);
-            let eat = matches!(self.call(&Request::TestKeyDown(ev)), Some(Response::Eat(true)));
+            let eat = matches!(
+                self.call(&Request::TestKeyDown(ev)),
+                Some(Response::Eat(true))
+            );
             Ok(eat.into())
         })
     }
@@ -611,7 +637,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             let Some((_, _, shift, c)) = keys::right_alt_keys().find(|(g, ..)| *g == guid) else {
                 return Ok(false.into());
             };
-            let Some(Response::Key(r)) = self.call(&Request::Key(keys::right_alt_event(c, shift))) else {
+            let Some(Response::Key(r)) = self.call(&Request::Key(keys::right_alt_event(c, shift)))
+            else {
                 return Ok(false.into());
             };
             let eaten = r.eaten;
@@ -635,7 +662,11 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
     /// 焦點換到別的文件：丟棄組字狀態、隱藏候選窗，依設定重設中英狀態
     fn OnSetFocus(&self, focus: Ref<ITfDocumentMgr>, _prev: Ref<ITfDocumentMgr>) -> Result<()> {
         guard(|| {
-            let req = if focus.is_some() { Request::Focus } else { Request::Reset };
+            let req = if focus.is_some() {
+                Request::Focus
+            } else {
+                Request::Reset
+            };
             self.reset(req);
             Ok(())
         })

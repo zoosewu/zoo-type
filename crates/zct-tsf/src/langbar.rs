@@ -94,13 +94,26 @@ impl LangBarButton_Impl {
         unsafe {
             let Ok(menu) = CreatePopupMenu() else { return };
             let _ = AppendMenuW(menu, MF_STRING, ID_SETTINGS as usize, w!("設定…"));
-            let game = if self.game.get() { MF_STRING | MF_CHECKED } else { MF_STRING };
+            let game = if self.game.get() {
+                MF_STRING | MF_CHECKED
+            } else {
+                MF_STRING
+            };
             let _ = AppendMenuW(menu, game, ID_GAME as usize, w!("遊戲模式"));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-            let _ = AppendMenuW(menu, MF_STRING, ID_RESTART as usize, w!("重新啟動動物園輸入法"));
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                ID_RESTART as usize,
+                w!("重新啟動動物園輸入法"),
+            );
             let owner: HWND = {
                 let f = GetFocus();
-                if f.is_invalid() { GetForegroundWindow() } else { f }
+                if f.is_invalid() {
+                    GetForegroundWindow()
+                } else {
+                    f
+                }
             };
             let cmd = TrackPopupMenu(
                 menu,
@@ -127,7 +140,8 @@ pub fn set_state(button: &ITfLangBarItemButton, chinese: bool, simplified: bool,
     let Ok(obj) = button.cast_object_ref::<LangBarButton>() else {
         return;
     };
-    if obj.chinese.get() != chinese || obj.simplified.get() != simplified || obj.game.get() != game {
+    if obj.chinese.get() != chinese || obj.simplified.get() != simplified || obj.game.get() != game
+    {
         obj.chinese.set(chinese);
         obj.simplified.set(simplified);
         obj.game.set(game);
@@ -175,11 +189,13 @@ impl ITfLangBarItem_Impl for LangBarButton_Impl {
     }
 
     fn GetTooltipString(&self) -> Result<BSTR> {
-        Ok(BSTR::from(match (self.chinese.get(), self.simplified.get()) {
-            (false, _) => "動物園輸入法：英文（左鍵切換、右鍵選單）",
-            (true, true) => "動物園輸入法：中文・简体（左鍵切換、右鍵選單）",
-            (true, false) => "動物園輸入法：中文（左鍵切換、右鍵選單）",
-        }))
+        Ok(BSTR::from(
+            match (self.chinese.get(), self.simplified.get()) {
+                (false, _) => "動物園輸入法：英文（左鍵切換、右鍵選單）",
+                (true, true) => "動物園輸入法：中文・简体（左鍵切換、右鍵選單）",
+                (true, false) => "動物園輸入法：中文（左鍵切換、右鍵選單）",
+            },
+        ))
     }
 }
 
@@ -251,7 +267,11 @@ fn light_taskbar() -> bool {
 /// 只有一個字的線條圖示：沒有底色，字的灰階反鋸齒當作透明度
 fn make_icon(text: &str) -> Result<HICON> {
     // 0x00RRGGBB（DIB 的像素順序是 BGRA，數值寫法剛好是 RGB）
-    let color: u32 = if light_taskbar() { 0x0020_2020 } else { 0x00FF_FFFF };
+    let color: u32 = if light_taskbar() {
+        0x0020_2020
+    } else {
+        0x00FF_FFFF
+    };
     unsafe {
         let size = GetSystemMetrics(SM_CXSMICON).max(16);
         let screen = GetDC(None);
@@ -298,7 +318,12 @@ fn make_icon(text: &str) -> Result<HICON> {
             right: size,
             bottom: size,
         };
-        DrawTextW(dc, &mut wide, &mut rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(
+            dc,
+            &mut wide,
+            &mut rc,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+        );
         SelectObject(dc, old_font);
         SelectObject(dc, old);
         let px = std::slice::from_raw_parts_mut(bits as *mut u32, (size * size) as usize);

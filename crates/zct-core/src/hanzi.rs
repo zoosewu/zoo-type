@@ -16,8 +16,11 @@ fn table() -> &'static HashMap<char, char> {
             .filter_map(|l| {
                 let (key, values) = l.split_once('\t')?;
                 let mut kc = key.chars();
-                let (k, None) = (kc.next()?, kc.next()) else { return None };
-                let targets: Vec<char> = values.split(' ').filter_map(|v| v.chars().next()).collect();
+                let (k, None) = (kc.next()?, kc.next()) else {
+                    return None;
+                };
+                let targets: Vec<char> =
+                    values.split(' ').filter_map(|v| v.chars().next()).collect();
                 if targets.contains(&k) {
                     return None;
                 }

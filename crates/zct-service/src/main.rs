@@ -134,13 +134,17 @@ mod app {
                 same_protocol: true,
                 current_exe,
             } => {
-                log::info!("已有新版（協定相同），改由新版服務：{}", current_exe.display());
+                log::info!(
+                    "已有新版（協定相同），改由新版服務：{}",
+                    current_exe.display()
+                );
                 // 新版還沒啟動時（舊 DLL 叫起了舊服務程序）先啟動新版；它會等這個程序結束才拿到 mutex
                 let _ = std::process::Command::new(&current_exe).spawn();
                 std::process::exit(0);
             }
             version::State::Stale {
-                same_protocol: false, ..
+                same_protocol: false,
+                ..
             } => {
                 if !version::read_only() {
                     log::info!("已有新版（協定不同），繼續服務舊 App，但不再寫入使用者資料");

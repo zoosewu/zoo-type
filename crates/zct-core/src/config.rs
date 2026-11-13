@@ -331,7 +331,9 @@ impl Serialize for Color {
 
 impl<'de> Deserialize<'de> for Color {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Color, D::Error> {
-        String::deserialize(d)?.parse().map_err(serde::de::Error::custom)
+        String::deserialize(d)?
+            .parse()
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -397,7 +399,12 @@ pub struct PunctuationTable {
 
 impl PunctuationConfig {
     /// 實際生效的打法（含舊版欄位的轉換）
-    pub fn effective(&self) -> (crate::symbols::PrimarySymbols, crate::symbols::SecondarySymbols) {
+    pub fn effective(
+        &self,
+    ) -> (
+        crate::symbols::PrimarySymbols,
+        crate::symbols::SecondarySymbols,
+    ) {
         use crate::symbols::{PrimarySymbols, SecondarySymbols, SymbolStyle};
         let primary = match (self.primary, self.right_alt) {
             (PrimarySymbols::Backtick, Some(true)) => PrimarySymbols::Both,
@@ -472,10 +479,7 @@ impl std::error::Error for ConfigError {}
 impl Config {
     pub fn parse(text: &str) -> Result<Config, ConfigError> {
         let config: Config = toml::from_str(text).map_err(ConfigError::Parse)?;
-        config
-            .punctuation
-            .compile()
-            .map_err(ConfigError::Invalid)?;
+        config.punctuation.compile().map_err(ConfigError::Invalid)?;
         if !(8.0..=48.0).contains(&config.theme.font_size) {
             return Err(ConfigError::Invalid(format!(
                 "候選字字級應在 8–48 之間：{}",
@@ -553,15 +557,28 @@ mod tests {
 
     #[test]
     fn theme_colors_and_size_are_validated() {
-        let c = Config::parse("[theme]
+        let c = Config::parse(
+            "[theme]
 layout = 'horizontal'
-background = '#202020'").unwrap();
+background = '#202020'",
+        )
+        .unwrap();
         assert_eq!(c.theme.layout, Layout::Horizontal);
         assert_eq!(c.theme.background, Color(0x202020));
-        assert!(Config::parse("[theme]
-text = 'red'").is_err());
-        assert!(Config::parse("[theme]
-font_size = 200.0").is_err());
+        assert!(
+            Config::parse(
+                "[theme]
+text = 'red'"
+            )
+            .is_err()
+        );
+        assert!(
+            Config::parse(
+                "[theme]
+font_size = 200.0"
+            )
+            .is_err()
+        );
     }
 
     #[test]

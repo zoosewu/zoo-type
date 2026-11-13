@@ -164,7 +164,9 @@ impl<'de> Deserialize<'de> for Binding {
         if s.trim().is_empty() {
             return Ok(Binding(None));
         }
-        s.parse().map(|h| Binding(Some(h))).map_err(serde::de::Error::custom)
+        s.parse()
+            .map(|h| Binding(Some(h)))
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -208,7 +210,11 @@ mod tests {
         let ev = |mods| KeyEvent::down(Key::Space, mods, 0);
         assert!(h.matches(&ev(Mods::shift())));
         assert!(!h.matches(&ev(Mods::NONE)));
-        assert!(!h.matches(&ev(Mods { ctrl: true, shift: true, ..Mods::NONE })));
+        assert!(!h.matches(&ev(Mods {
+            ctrl: true,
+            shift: true,
+            ..Mods::NONE
+        })));
         assert!(!h.matches(&KeyEvent::up(Key::Space, Mods::shift(), 0)));
     }
 

@@ -17,13 +17,13 @@ use ferrous_opencc::config::BuiltinConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::apps::{AppRule, Effective};
-use crate::engine::Engine;
 use crate::config::{
     Config, GameMode, HotkeyConfig, InputMode, MixedConfig, OnFocus, Output, PunctuationTable,
     Width,
 };
-use crate::mixed::{is_cjk, is_latin, is_tone};
+use crate::engine::Engine;
 use crate::key::{Key, KeyEvent, Mods, ascii_event, shifted, to_chewing};
+use crate::mixed::{is_cjk, is_latin, is_tone};
 use crate::shift::ShiftTap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -210,7 +210,10 @@ impl Session {
             rule_width: opts.rule.as_ref().and_then(|r| r.punctuation),
             output: eff.output,
             global_game: false,
-            shift: ShiftTap::new(opts.config.toggle.shift, opts.config.toggle.shift_tap_max_ms),
+            shift: ShiftTap::new(
+                opts.config.toggle.shift,
+                opts.config.toggle.shift_tap_max_ms,
+            ),
             hotkeys: opts.config.hotkeys.clone(),
             punct: opts.config.punctuation.compile().map_err(SessionError)?,
             per_page,
@@ -341,7 +344,13 @@ impl Session {
         if std::mem::take(&mut self.symbol_prefix) {
             if let Key::Char(c) = ev.key
                 && !ev.mods.has_command_modifier()
-                && let Some(sym) = crate::symbols::symbol(c, ev.mods.shift, true, self.width, self.punct.secondary.shift_style())
+                && let Some(sym) = crate::symbols::symbol(
+                    c,
+                    ev.mods.shift,
+                    true,
+                    self.width,
+                    self.punct.secondary.shift_style(),
+                )
             {
                 // 刪掉等待中的 `，換成符號
                 self.chewing_key(Key::Backspace);
@@ -392,7 +401,10 @@ impl Session {
         }
         // AI 建議顯示中：Enter / 1 採用、Esc 放棄，其他鍵照常（並放棄建議）
         if self.ai_suggestion().is_some()
-            && matches!(ev.key, Key::Enter | Key::Esc | Key::Char(b'1') | Key::Numpad(b'1'))
+            && matches!(
+                ev.key,
+                Key::Enter | Key::Esc | Key::Char(b'1') | Key::Numpad(b'1')
+            )
         {
             return true;
         }
@@ -410,7 +422,10 @@ impl Session {
             return false;
         }
         // 右 Alt + 注音鍵：打那個鍵本身的符號（設定開啟時）
-        if self.mode == InputMode::Chinese && self.right_alt_symbol(ev) && !self.editor.is_selecting() {
+        if self.mode == InputMode::Chinese
+            && self.right_alt_symbol(ev)
+            && !self.editor.is_selecting()
+        {
             return true;
         }
         // P3：沒有綁定的 Ctrl / Alt / Meta 組合鍵一律交給 App
@@ -479,14 +494,18 @@ impl Session {
                 let upper = ev.mods.shift ^ ev.mods.caps_lock;
                 Some(if upper { c.to_ascii_uppercase() } else { c } as char)
             }
-            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() && !ev.mods.shift => Some(c as char),
+            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() && !ev.mods.shift => {
+                Some(c as char)
+            }
             _ => None,
         }
     }
 
     /// 把一段文字接到送出內容後面；中英文交界依設定補空格（E：盤古之白）
     fn join(&self, out: &mut String, piece: &str) {
-        let Some(first) = piece.chars().next() else { return };
+        let Some(first) = piece.chars().next() else {
+            return;
+        };
         let prev = out.chars().last().or(self.last_char);
         if self.mixed.auto_space
             && let Some(prev) = prev
@@ -638,7 +657,9 @@ impl Session {
     }
 
     fn letters_after(&self, start: usize) -> usize {
-        (start..self.editor.len()).take_while(|&i| self.sym_letter(i)).count()
+        (start..self.editor.len())
+            .take_while(|&i| self.sym_letter(i))
+            .count()
     }
 
     /// 組字區中英文單字當成一個單位：← → 跳過整個單字；Backspace / Delete 刪整個完整單字
@@ -726,10 +747,9 @@ impl Session {
     /// 服務程序交回 AI 結果；組字內容已經改變（使用者繼續打字）時忽略。回傳是否採用為候選
     pub fn set_ai_suggestion(&mut self, original: &str, suggestion: String) -> bool {
         let current = self.editor.display();
-        let valid = self
-            .ai
-            .as_ref()
-            .is_some_and(|a| a.original == original && current == original && suggestion != original);
+        let valid = self.ai.as_ref().is_some_and(|a| {
+            a.original == original && current == original && suggestion != original
+        });
         if valid {
             self.ai = Some(AiPick {
                 original: original.to_owned(),
@@ -784,7 +804,9 @@ impl Session {
 
     fn emoji_key(&mut self, ev: &KeyEvent, commit: &mut String) {
         let per_page = self.per_page;
-        let Some(pick) = self.emoji.as_mut() else { return };
+        let Some(pick) = self.emoji.as_mut() else {
+            return;
+        };
         let pages = pick.items.len().div_ceil(per_page).max(1);
         let page_len = |page: usize| (pick.items.len() - page * per_page).min(per_page);
         let mut chosen = None;
@@ -928,7 +950,10 @@ impl Session {
             }
             if ev.key == Key::Down && !self.editor.is_selecting() && self.emoji.is_none() {
                 // 游標停在英文上時沒有候選可選
-                if self.select_target().is_some_and(|i| self.sym_letter(i) || self.sym_space(i)) {
+                if self
+                    .select_target()
+                    .is_some_and(|i| self.sym_letter(i) || self.sym_space(i))
+                {
                     return self.finish(r, commit);
                 }
             }
@@ -1060,7 +1085,8 @@ impl Session {
 
     /// chewing 的加詞提示（Shift + ← / → 選範圍 + Enter）：加入的詞設為優先，提示改清楚
     fn added_phrase_notice(&self, notice: &str) -> String {
-        let (word, existed) = match (notice.strip_prefix("加入："), notice.strip_prefix("已有：")) {
+        let (word, existed) = match (notice.strip_prefix("加入："), notice.strip_prefix("已有："))
+        {
             (Some(w), _) => (w, false),
             (_, Some(w)) => (w, true),
             _ => return notice.to_owned(),
@@ -1109,7 +1135,9 @@ impl Session {
             return false;
         }
         let per_page = self.per_page;
-        let Some(menu) = self.menu.as_mut() else { return false };
+        let Some(menu) = self.menu.as_mut() else {
+            return false;
+        };
         let len = menu.items.len();
         if len == 0 {
             return false;
@@ -1123,7 +1151,11 @@ impl Session {
             Key::Left | Key::Right | Key::Space | Key::PageUp | Key::PageDown => {
                 let forward = matches!(ev.key, Key::Right | Key::Space | Key::PageDown);
                 let row = menu.sel % per_page;
-                let to = if forward { (page + 1) % pages } else { (page + pages - 1) % pages };
+                let to = if forward {
+                    (page + 1) % pages
+                } else {
+                    (page + pages - 1) % pages
+                };
                 menu.sel = to * per_page + row.min(page_len(to) - 1);
                 self.expanded = pages > 1;
             }
@@ -1145,8 +1177,12 @@ impl Session {
 
     /// 選取候選清單第 `i` 項：換算回 chewing 的（詞長那一組, 頁, 索引）後選字
     fn select_menu(&mut self, i: usize) {
-        let Some(menu) = self.menu.as_ref() else { return };
-        let Some(item) = menu.items.get(i).cloned() else { return };
+        let Some(menu) = self.menu.as_ref() else {
+            return;
+        };
+        let Some(item) = menu.items.get(i).cloned() else {
+            return;
+        };
         let pick = self.pick_at(i);
         match item.kind {
             MenuKind::English => self.apply_english(),
@@ -1177,7 +1213,9 @@ impl Session {
         let mut pages: Vec<usize> = Vec::new();
         let mut wrapped = false;
         for _ in 0..12 {
-            let Ok(all) = self.editor.all_candidates() else { break };
+            let Ok(all) = self.editor.all_candidates() else {
+                break;
+            };
             if groups.first() == Some(&all) {
                 wrapped = true;
                 break;
@@ -1205,7 +1243,10 @@ impl Session {
             // 只顯示繁體：含有只屬於簡體的字（机、烛…）的候選都不出現
             entries.retain(|(_, w)| w.chars().all(|c| self.engine.simplified_only(c).is_none()));
             let single = entries.first().is_some_and(|(_, w)| w.chars().count() == 1);
-            if single && let Some(reading) = syl(&entries[0].1[..]).and_then(|v| v.first().map(|s| s.to_string())) {
+            if single
+                && let Some(reading) =
+                    syl(&entries[0].1[..]).and_then(|v| v.first().map(|s| s.to_string()))
+            {
                 // 使用者加權的（固頂、學到的）在前；其餘依常用程度的數量級分組，
                 // 同一級維持 chewing 的順序（企 86884 / 氣 86740 同級 → 仍是「氣」在前；
                 // 重 40186 比 蟲 7618 高一級 → 「重」往前）
@@ -1251,7 +1292,11 @@ impl Session {
                 },
             );
         }
-        let pos = if wrapped { (0, 0) } else { (groups.len() % pages.len().max(1), 0) };
+        let pos = if wrapped {
+            (0, 0)
+        } else {
+            (groups.len() % pages.len().max(1), 0)
+        };
         self.menu = Some(Menu {
             items,
             pages,
@@ -1377,10 +1422,6 @@ impl Session {
         true
     }
 
-
-
-
-
     /// 候選清單第一個詞（Emoji 關鍵字）
     fn first_word(&self) -> Option<String> {
         self.menu
@@ -1432,14 +1473,18 @@ impl Session {
         let picks = std::mem::take(&mut self.picks);
         let intervals: Vec<_> = self.editor.intervals().collect();
         let symbols = self.editor.symbols();
-        let syllables_of = |it: &chewing::conversion::Interval| -> Option<Vec<chewing::zhuyin::Syllable>> {
-            symbols.get(it.start..it.end)?.iter().map(|s| s.to_syllable()).collect()
-        };
+        let syllables_of =
+            |it: &chewing::conversion::Interval| -> Option<Vec<chewing::zhuyin::Syllable>> {
+                symbols
+                    .get(it.start..it.end)?
+                    .iter()
+                    .map(|s| s.to_syllable())
+                    .collect()
+            };
         for pick in picks {
-            let Some(i) = intervals
-                .iter()
-                .position(|it| *it.text == *pick.word && syllables_of(it).as_ref() == Some(&pick.syllables))
-            else {
+            let Some(i) = intervals.iter().position(|it| {
+                *it.text == *pick.word && syllables_of(it).as_ref() == Some(&pick.syllables)
+            }) else {
                 continue; // 送出前又改掉了
             };
             if pick.word.chars().count() > 1 {
@@ -1449,8 +1494,12 @@ impl Session {
             let mut merged = false;
             let neighbors = [i.checked_sub(1).map(|p| (p, i)), Some((i, i + 1))];
             for (a, b) in neighbors.into_iter().flatten() {
-                let (Some(x), Some(y)) = (intervals.get(a), intervals.get(b)) else { continue };
-                let (Some(sx), Some(sy)) = (syllables_of(x), syllables_of(y)) else { continue };
+                let (Some(x), Some(y)) = (intervals.get(a), intervals.get(b)) else {
+                    continue;
+                };
+                let (Some(sx), Some(sy)) = (syllables_of(x), syllables_of(y)) else {
+                    continue;
+                };
                 let other = if a == i { y } else { x };
                 if !other.is_phrase || sx.len() + sy.len() > 4 {
                     continue;
@@ -1567,8 +1616,12 @@ impl Session {
         let syllable = self.editor.syllable_buffer_display();
         let cursor = self.editor.cursor().min(converted.len());
         // 自動轉換偶爾會選到只屬於簡體的字（手机）：一律顯示成繁體（一對一換字，位置不變）
-        let before = self.engine.to_traditional(&converted[..cursor].iter().collect::<String>());
-        let after = self.engine.to_traditional(&converted[cursor..].iter().collect::<String>());
+        let before = self
+            .engine
+            .to_traditional(&converted[..cursor].iter().collect::<String>());
+        let after = self
+            .engine
+            .to_traditional(&converted[cursor..].iter().collect::<String>());
         let shift = before.chars().count() + syllable.chars().count();
         // 選字目標：候選窗開啟時是正在選的詞；否則是游標後的字（英文單字整個）；
         // 游標在最後或正在打注音時不標示（使用者可能根本不打算選字）
@@ -1637,7 +1690,8 @@ impl Session {
         let per_page = self.per_page;
         let total_pages = menu.items.len().div_ceil(per_page).max(1);
         let page = menu.sel / per_page;
-        let slice = &menu.items[(page * per_page).min(menu.items.len())..((page + 1) * per_page).min(menu.items.len())];
+        let slice = &menu.items[(page * per_page).min(menu.items.len())
+            ..((page + 1) * per_page).min(menu.items.len())];
         let start = self.editor.cursor();
         let symbols = self.editor.symbols();
         let pinned = slice
@@ -1646,7 +1700,11 @@ impl Session {
                 it.kind != MenuKind::English
                     && symbols
                         .get(start..start + it.word.chars().count())
-                        .and_then(|s| s.iter().map(|s| s.to_syllable()).collect::<Option<Vec<_>>>())
+                        .and_then(|s| {
+                            s.iter()
+                                .map(|s| s.to_syllable())
+                                .collect::<Option<Vec<_>>>()
+                        })
                         .and_then(|syl| self.engine.boost_of(&syl, &it.word))
                         .is_some_and(|b| b >= crate::engine::PhraseEntry::PINNED)
             })
@@ -1676,8 +1734,6 @@ impl Session {
         })
     }
 
-
-
     fn take_commit(&mut self) -> String {
         let text = self.editor.display_commit().to_owned();
         if !text.is_empty() {
@@ -1695,7 +1751,8 @@ fn contains_word(text: &str, word: &str) -> bool {
     text.match_indices(word).any(|(i, _)| {
         let before = text[..i].chars().next_back();
         let after = text[i + word.len()..].chars().next();
-        !before.is_some_and(|c| c.is_ascii_alphabetic()) && !after.is_some_and(|c| c.is_ascii_alphabetic())
+        !before.is_some_and(|c| c.is_ascii_alphabetic())
+            && !after.is_some_and(|c| c.is_ascii_alphabetic())
     })
 }
 

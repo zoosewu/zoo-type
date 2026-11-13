@@ -51,7 +51,9 @@ fn debug_key(shared: &Shared, id: u64, stage: &str, ev: &zct_core::KeyEvent, res
     }
     // 字元鍵不記哪一個字（log 不能有打字內容）；只記帶 Ctrl / Alt / Win 的組合鍵有出現
     let key = match ev.key {
-        Key::Char(_) | Key::Numpad(_) if ev.mods.has_command_modifier() => "字元鍵（隱藏）".to_string(),
+        Key::Char(_) | Key::Numpad(_) if ev.mods.has_command_modifier() => {
+            "字元鍵（隱藏）".to_string()
+        }
         Key::Char(_) | Key::Numpad(_) => return,
         k => format!("{k:?}"),
     };
@@ -81,14 +83,19 @@ fn composition_bar_for(exe: &str, shared: &Shared) -> bool {
     let (config, apps) = shared.settings.current();
     apps.find(exe)
         .and_then(|r| r.composition_bar)
-        .unwrap_or_else(|| TERMINALS.iter().any(|t| t.eq_ignore_ascii_case(exe)) || config.theme.composition_bar)
+        .unwrap_or_else(|| {
+            TERMINALS.iter().any(|t| t.eq_ignore_ascii_case(exe)) || config.theme.composition_bar
+        })
 }
 
 fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> {
     let (config, apps) = shared.settings.current();
     let rule = apps.find(exe).cloned();
     if let Some(r) = &rule {
-        log::info!("[{id}] 套用 App 規則「{}」", if r.name.is_empty() { exe } else { &r.name });
+        log::info!(
+            "[{id}] 套用 App 規則「{}」",
+            if r.name.is_empty() { exe } else { &r.name }
+        );
     }
     Session::new(&SessionOptions {
         engine: shared.engine.clone(),
@@ -223,7 +230,11 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     app_pid = Some(pid);
                     match open_session(id, &exe, shared) {
                         Ok(mut s) => {
-                            let saved = shared.last_mode.lock().ok().and_then(|m| m.get(&pid).copied());
+                            let saved = shared
+                                .last_mode
+                                .lock()
+                                .ok()
+                                .and_then(|m| m.get(&pid).copied());
                             if let Some(mode) = saved {
                                 s.restore_mode(mode);
                             }
@@ -287,7 +298,10 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                         if let Err(e) = shared.settings.set_composition_bar(&app, bar) {
                             log::warn!("[{id}] 寫入 App 規則失敗：{e}");
                         }
-                        log::info!("[{id}] 組字提示列：{}（{app}）", if bar { "開" } else { "關" });
+                        log::info!(
+                            "[{id}] 組字提示列：{}（{app}）",
+                            if bar { "開" } else { "關" }
+                        );
                         tip = Some(format!("組字提示列：{}", if bar { "開" } else { "關" }));
                     }
                     last = Some((r.clone(), tip));
@@ -358,8 +372,12 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 Err(e) => Response::Error(e.to_string()),
             },
             Request::Status => Response::Status {
-                chinese: session.as_ref().is_none_or(|s| s.mode() == InputMode::Chinese),
-                simplified: session.as_ref().is_some_and(|s| s.output() == Output::Simplified),
+                chinese: session
+                    .as_ref()
+                    .is_none_or(|s| s.mode() == InputMode::Chinese),
+                simplified: session
+                    .as_ref()
+                    .is_some_and(|s| s.output() == Output::Simplified),
                 game: shared.game.load(Ordering::Relaxed),
                 right_alt: session.as_ref().is_some_and(|s| s.right_alt_enabled()),
             },

@@ -23,7 +23,9 @@ impl Readings {
             let (Some(word), Some(freq), Some(bopo)) = (it.next(), it.next(), it.next()) else {
                 continue;
             };
-            let Ok(freq) = freq.trim().parse::<u64>() else { continue };
+            let Ok(freq) = freq.trim().parse::<u64>() else {
+                continue;
+            };
             let syllables: Vec<String> = bopo.split_whitespace().map(str::to_owned).collect();
             if syllables.len() != word.chars().count() {
                 continue;

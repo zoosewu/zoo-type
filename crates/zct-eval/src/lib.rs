@@ -11,12 +11,43 @@ use zct_core::{Engine, Key, KeyEvent, Mods, Session, SessionOptions};
 /// 注音 → 大千按鍵
 fn key_of(b: char) -> Option<char> {
     const MAP: &[(char, char)] = &[
-        ('ㄅ', '1'), ('ㄆ', 'q'), ('ㄇ', 'a'), ('ㄈ', 'z'), ('ㄉ', '2'), ('ㄊ', 'w'), ('ㄋ', 's'),
-        ('ㄌ', 'x'), ('ㄍ', 'e'), ('ㄎ', 'd'), ('ㄏ', 'c'), ('ㄐ', 'r'), ('ㄑ', 'f'), ('ㄒ', 'v'),
-        ('ㄓ', '5'), ('ㄔ', 't'), ('ㄕ', 'g'), ('ㄖ', 'b'), ('ㄗ', 'y'), ('ㄘ', 'h'), ('ㄙ', 'n'),
-        ('ㄧ', 'u'), ('ㄨ', 'j'), ('ㄩ', 'm'), ('ㄚ', '8'), ('ㄛ', 'i'), ('ㄜ', 'k'), ('ㄝ', ','),
-        ('ㄞ', '9'), ('ㄟ', 'o'), ('ㄠ', 'l'), ('ㄡ', '.'), ('ㄢ', '0'), ('ㄣ', 'p'), ('ㄤ', ';'),
-        ('ㄥ', '/'), ('ㄦ', '-'),
+        ('ㄅ', '1'),
+        ('ㄆ', 'q'),
+        ('ㄇ', 'a'),
+        ('ㄈ', 'z'),
+        ('ㄉ', '2'),
+        ('ㄊ', 'w'),
+        ('ㄋ', 's'),
+        ('ㄌ', 'x'),
+        ('ㄍ', 'e'),
+        ('ㄎ', 'd'),
+        ('ㄏ', 'c'),
+        ('ㄐ', 'r'),
+        ('ㄑ', 'f'),
+        ('ㄒ', 'v'),
+        ('ㄓ', '5'),
+        ('ㄔ', 't'),
+        ('ㄕ', 'g'),
+        ('ㄖ', 'b'),
+        ('ㄗ', 'y'),
+        ('ㄘ', 'h'),
+        ('ㄙ', 'n'),
+        ('ㄧ', 'u'),
+        ('ㄨ', 'j'),
+        ('ㄩ', 'm'),
+        ('ㄚ', '8'),
+        ('ㄛ', 'i'),
+        ('ㄜ', 'k'),
+        ('ㄝ', ','),
+        ('ㄞ', '9'),
+        ('ㄟ', 'o'),
+        ('ㄠ', 'l'),
+        ('ㄡ', '.'),
+        ('ㄢ', '0'),
+        ('ㄣ', 'p'),
+        ('ㄤ', ';'),
+        ('ㄥ', '/'),
+        ('ㄦ', '-'),
     ];
     MAP.iter().find(|(z, _)| *z == b).map(|(_, k)| *k)
 }
@@ -82,7 +113,10 @@ pub fn evaluate(engine: Arc<Engine>, config: Config, readings: &Readings, corpus
     .expect("建立 session");
     let mut report = Report::default();
     let mut t = 0u64;
-    for line in corpus.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')) {
+    for line in corpus
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+    {
         for run in runs(line) {
             let Some(keys) = readings
                 .read(&run)
@@ -129,7 +163,9 @@ mod tests {
 
     #[test]
     fn readings_pick_most_frequent_and_longest() {
-        let r = Readings::from_csv("行,34993,ㄒㄧㄥˊ\n行,4839,ㄏㄤˊ\n銀行,14560,ㄧㄣˊ ㄏㄤˊ\n銀,1,ㄧㄣˊ\n");
+        let r = Readings::from_csv(
+            "行,34993,ㄒㄧㄥˊ\n行,4839,ㄏㄤˊ\n銀行,14560,ㄧㄣˊ ㄏㄤˊ\n銀,1,ㄧㄣˊ\n",
+        );
         assert_eq!(r.read("行").unwrap(), vec!["ㄒㄧㄥˊ"]);
         assert_eq!(r.read("銀行").unwrap(), vec!["ㄧㄣˊ", "ㄏㄤˊ"]);
         assert!(r.read("火").is_none());
