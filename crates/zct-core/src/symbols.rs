@@ -1,21 +1,64 @@
 //! 中文模式下符號鍵的輸出
 //!
-//! 大千排列中 `, . / ; -` 和數字、字母都是注音鍵，其餘符號鍵（`[ ] \ ' =`）與 Shift + 任何非字母鍵
-//! 由輸入法自己決定輸出：
+//! 大千排列中 `, . / ; -` 和數字、字母都是注音鍵。符號分兩種，打法各自可以設定：
 //!
-//! - **照鍵盤**（預設）：按鍵上印什麼就出什麼；全形是同一個符號的全形版（Shift + , → ＜、Shift + ' → ＂）
-//! - **中文標點**：chewing 的傳統對照（Shift + , → ，、Shift + ' → ；、[ → 「）
+//! - **主要符號**（鍵帽下排：，。；＇／－＝１ｗ…）：`` ` `` 再按那個鍵，或按住右 Alt + 那個鍵
+//! - **次要符號**（鍵帽上排：：＂＜＞？＿＋｛…）：Shift + 鍵（預設），
+//!   或 `` ` `` / 右 Alt + Shift + 鍵（這時 Shift + 鍵改出中文標點：，。；、「」）
 //!
-//! 半形永遠是全形同一個鍵的半形版，只差寬度。被注音占用的 `, . / ; -` 本身的符號
-//! 用 ` 符號選單，或開啟「右 Alt」：右 Alt + 任何鍵都照鍵帽輸出（Shift 照樣作用），
-//! 例如右 Alt + 1 → １、右 Alt + w → ｗ、右 Alt + Shift + [ → ｛。
+//! `` ` `` 和右 Alt 是同一層的兩種按法：`` ` `` 先按一下，右 Alt 按住。
+//! 半形永遠是全形同一個鍵的半形版，只差寬度。
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::Width;
 use crate::key::shifted;
 
-/// Shift + 符號鍵的輸出方式
+/// 主要符號（鍵帽下排）的打法
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrimarySymbols {
+    /// `` ` `` 再按那個鍵
+    #[default]
+    Backtick,
+    /// 按住右 Alt + 那個鍵
+    RightAlt,
+    /// 兩種都可以
+    Both,
+}
+
+impl PrimarySymbols {
+    pub fn backtick(self) -> bool {
+        matches!(self, PrimarySymbols::Backtick | PrimarySymbols::Both)
+    }
+
+    pub fn right_alt(self) -> bool {
+        matches!(self, PrimarySymbols::RightAlt | PrimarySymbols::Both)
+    }
+}
+
+/// 次要符號（鍵帽上排）的打法
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecondarySymbols {
+    /// Shift + 鍵
+    #[default]
+    Shift,
+    /// 和主要符號同一層再加 Shift（`` ` `` / 右 Alt + Shift + 鍵）；Shift + 鍵改出中文標點
+    Layer,
+}
+
+impl SecondarySymbols {
+    /// Shift + 符號鍵（不經過 `` ` `` / 右 Alt）的輸出方式
+    pub fn shift_style(self) -> SymbolStyle {
+        match self {
+            SecondarySymbols::Shift => SymbolStyle::Keyboard,
+            SecondarySymbols::Layer => SymbolStyle::Chinese,
+        }
+    }
+}
+
+/// Shift + 符號鍵的輸出方式（舊版設定 `shift = "keyboard" | "chinese"`，讀入時轉換）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SymbolStyle {
@@ -59,12 +102,12 @@ fn chinese_half(c: u8) -> char {
     }
 }
 
-/// 中文模式下這個鍵要輸出的符號；`None` 代表不是符號鍵（注音、字母、` 符號選單），交給 chewing
+/// 中文模式下這個鍵要輸出的符號；`None` 代表不是符號鍵（注音、字母、`），交給 chewing
 ///
-/// `c` 是沒按 Shift 時的按鍵字元。
-pub fn symbol(c: u8, shift: bool, right_alt: bool, width: Width, style: SymbolStyle) -> Option<char> {
-    if right_alt {
-        // 右 Alt + 任何鍵：照鍵帽輸出（，。沿用中文的句讀）
+/// `c` 是沒按 Shift 時的按鍵字元；`layer`：經過 `` ` `` 或右 Alt（照鍵帽輸出）。
+pub fn symbol(c: u8, shift: bool, layer: bool, width: Width, style: SymbolStyle) -> Option<char> {
+    if layer {
+        // ` / 右 Alt + 任何鍵：照鍵帽輸出（，。沿用中文的句讀）
         if !c.is_ascii_graphic() {
             return None;
         }

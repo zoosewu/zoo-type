@@ -160,6 +160,8 @@ pub struct HotkeyConfig {
     pub ai: Binding,
     /// 切換目前 App 的組字提示列（寫進 App 規則記住；看不到組字的終端機用）
     pub composition_bar: Binding,
+    /// chewing 的符號選單（…、※、括號、希臘字母…）；預設不綁定（` 用來打主要符號）
+    pub symbols: Binding,
 }
 
 impl Default for HotkeyConfig {
@@ -174,6 +176,7 @@ impl Default for HotkeyConfig {
             emoji: Binding::key("ctrl+shift+;"),
             ai: Binding::key("ctrl+shift+'"),
             composition_bar: Binding::key("ctrl+shift+f11"),
+            symbols: Binding(None),
         }
     }
 }
@@ -365,14 +368,19 @@ impl Default for ThemeConfig {
     }
 }
 
-/// 符號鍵的輸出方式（見 [`crate::symbols`]）與自訂標點
+/// 符號的打法（見 [`crate::symbols`]）與自訂標點
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct PunctuationConfig {
-    /// Shift + 符號鍵："keyboard" 按鍵上印的符號 | "chinese" 中文標點（，。；）
-    pub shift: crate::symbols::SymbolStyle,
-    /// 右 Alt + 注音鍵（, . / ; -）打那個鍵本身的符號（，。／；－）
-    pub right_alt: bool,
+    /// 主要符號（，。；＇／－…）："backtick" ` + 鍵 | "right_alt" 右 Alt + 鍵 | "both"
+    pub primary: crate::symbols::PrimarySymbols,
+    /// 次要符號（：＂＜＞？…）："shift" Shift + 鍵 | "layer" ` / 右 Alt + Shift + 鍵（Shift + 鍵改出中文標點）
+    pub secondary: crate::symbols::SecondarySymbols,
+    /// 舊版欄位：讀入時轉換成 primary / secondary，不再寫出
+    #[serde(skip_serializing)]
+    pub shift: Option<crate::symbols::SymbolStyle>,
+    #[serde(skip_serializing)]
+    pub right_alt: Option<bool>,
     /// 自訂：`"shift+," = "，"`，優先於上面的對照
     pub full: BTreeMap<String, String>,
     pub half: BTreeMap<String, String>,
@@ -381,13 +389,27 @@ pub struct PunctuationConfig {
 /// 驗證過的標點對照表
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PunctuationTable {
-    pub style: crate::symbols::SymbolStyle,
-    pub right_alt: bool,
+    pub primary: crate::symbols::PrimarySymbols,
+    pub secondary: crate::symbols::SecondarySymbols,
     pub full: Vec<(Hotkey, String)>,
     pub half: Vec<(Hotkey, String)>,
 }
 
 impl PunctuationConfig {
+    /// 實際生效的打法（含舊版欄位的轉換）
+    pub fn effective(&self) -> (crate::symbols::PrimarySymbols, crate::symbols::SecondarySymbols) {
+        use crate::symbols::{PrimarySymbols, SecondarySymbols, SymbolStyle};
+        let primary = match (self.primary, self.right_alt) {
+            (PrimarySymbols::Backtick, Some(true)) => PrimarySymbols::Both,
+            (p, _) => p,
+        };
+        let secondary = match (self.secondary, self.shift) {
+            (SecondarySymbols::Shift, Some(SymbolStyle::Chinese)) => SecondarySymbols::Layer,
+            (s, _) => s,
+        };
+        (primary, secondary)
+    }
+
     pub fn compile(&self) -> Result<PunctuationTable, String> {
         let compile = |map: &BTreeMap<String, String>| {
             map.iter()
@@ -403,9 +425,10 @@ impl PunctuationConfig {
                 })
                 .collect::<Result<Vec<_>, String>>()
         };
+        let (primary, secondary) = self.effective();
         Ok(PunctuationTable {
-            style: self.shift,
-            right_alt: self.right_alt,
+            primary,
+            secondary,
             full: compile(&self.full)?,
             half: compile(&self.half)?,
         })

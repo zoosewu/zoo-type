@@ -38,6 +38,7 @@ pin = "shift+enter"        # 候選窗中：固頂選擇框所在的詞並選它
 emoji = "ctrl+shift+;"     # Emoji：以組字內容當關鍵字搜尋；沒有組字時列出常用 Emoji
 ai = "ctrl+shift+'"         # AI 修正組字內容中的同音錯字
 composition_bar = "ctrl+shift+f11"  # 切換目前 App 的組字提示列（自動寫進 apps.toml 記住）
+symbols = ""               # chewing 的符號選單（…、※、希臘字母）；預設不綁定，` 用來打主要符號
 
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
@@ -76,8 +77,8 @@ per_page = 9               # 每頁候選字數（1–10）
 sort_by_frequency = true   # 候選字依常用程度與個人學習排序
 
 [punctuation]
-shift = "keyboard"         # Shift + 符號鍵："keyboard" 鍵盤上印的符號 | "chinese" 中文標點，見下方說明
-right_alt = false          # 右 Alt + 任何鍵照鍵帽輸出（右 Alt + , → ，、右 Alt + Shift + [ → ｛）
+primary = "backtick"       # 主要符號（，。；＇…）："backtick" ` + 鍵 | "right_alt" 右 Alt + 鍵 | "both"
+secondary = "shift"        # 次要符號（：＂＜＞…）："shift" Shift + 鍵 | "layer" ` / 右 Alt + Shift + 鍵
 
 # 自訂符號：優先於上面的對照，鍵名寫法同快捷鍵
 [punctuation.full]
@@ -90,17 +91,18 @@ right_alt = false          # 右 Alt + 任何鍵照鍵帽輸出（右 Alt + , �
 
 ### 符號鍵
 
-大千排列中數字、字母和 `, . / ; -` 是注音鍵，其餘符號鍵（`[ ] \ ' =`）與 Shift + 非字母鍵由輸入法輸出符號。**半形永遠是全形同一個鍵的半形版**，只差寬度。
+大千排列中數字、字母和 `, . / ; -` 是注音鍵。符號分兩種：**主要符號**是鍵帽下排的字元，**次要符號**是鍵帽上排的符號。**半形永遠是全形同一個鍵的半形版**，只差寬度。
 
-| 按鍵 | `keyboard`（預設） | `chinese` |
-|------|------|------|
-| Shift + , / Shift + . | ＜ ＞ | ， 。 |
-| Shift + ; / Shift + ' | ： ＂ | ： ； |
-| Shift + / | ？ | ？ |
-| ' / [ ] / Shift + [ ] | ＇ ［ ］ ｛ ｝ | 、 「 」 『 』 |
-| Shift + 1–0、= \ 等 | 全形版（！＠＃…） | 同左（^ 是 ︿、_ 是 —） |
+| 打法 | 例子（全形） |
+|------|------|
+| `` ` `` 再按一個鍵（主要符號，預設） | `` ` `` `,` → ，、`` ` `` `.` → 。、`` ` `` `1` → １、`` ` `` `` ` `` → ｀ |
+| 右 Alt + 鍵（`primary = "right_alt"` 或 `"both"`） | 右 Alt + , → ，（按住右 Alt，效果和 `` ` `` 相同） |
+| Shift + 鍵（次要符號，預設） | Shift + , → ＜、Shift + ' → ＂、Shift + ; → ： |
+| `` ` `` 再按 Shift + 鍵（`secondary = "layer"`） | `` ` `` Shift + [ → ｛；這時 Shift + 鍵改出中文標點：，。；、「」 |
 
-被注音占用的鍵（數字、字母、`, . / ; -`）本身的字元從 `` ` `` 符號選單選或切英文；開啟 `right_alt` 後，**右 Alt + 任何鍵都照鍵帽輸出**，加 Shift 就是上排的符號（右 Alt + 1 → １、右 Alt + Shift + = → ＋）。開啟時程式收不到右 Alt 組合鍵；左 Alt 照常交給 App。
+- 不是注音的鍵（`[ ] \ ' =`）不必加 `` ` ``，直接按就是主要符號（預設 ［］＼＇＝；`secondary = "layer"` 時是 「」＼、＝）
+- `` ` `` 後面接的不是可以打字的鍵時，`` ` `` 留著當一般字元；注音打到一半按 `` ` `` 會提示
+- 選了右 Alt 時，程式收不到右 Alt 組合鍵；左 Alt 照常交給 App
 
 全形符號會放進組字區和前後文一起送出；半形符號在組字中才放進組字區。
 

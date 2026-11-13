@@ -13,7 +13,7 @@ use slint::{Model, ModelRc, SharedString, StandardListViewItem, VecModel};
 use zct_core::config::{Color, GameMode, InputMode, Layout, OnFocus, Output, ShiftToggle, Width};
 use zct_core::hotkey::{Binding, Hotkey};
 use zct_core::paths::DataRoot;
-use zct_core::symbols::SymbolStyle;
+use zct_core::symbols::{PrimarySymbols, SecondarySymbols};
 use zct_core::{AppRule, AppRules, Config, PhraseAction, PhraseEntry};
 use zct_ipc::pipe::Client;
 use zct_ipc::{Command, PROTOCOL_VERSION, Request, Response};
@@ -42,8 +42,12 @@ fn general_from(c: &Config) -> General {
         auto_english: c.mixed.auto_english,
         english_candidate: c.mixed.english_candidate,
         auto_space: c.mixed.auto_space,
-        symbol_style: (c.punctuation.shift == SymbolStyle::Chinese) as i32,
-        right_alt: c.punctuation.right_alt,
+        primary: match c.punctuation.effective().0 {
+            PrimarySymbols::Backtick => 0,
+            PrimarySymbols::RightAlt => 1,
+            PrimarySymbols::Both => 2,
+        },
+        secondary: (c.punctuation.effective().1 == SecondarySymbols::Layer) as i32,
     }
 }
 
@@ -66,8 +70,15 @@ fn apply_general(c: &mut Config, g: &General) {
     c.mixed.auto_english = g.auto_english;
     c.mixed.english_candidate = g.english_candidate;
     c.mixed.auto_space = g.auto_space;
-    c.punctuation.shift = if g.symbol_style == 1 { SymbolStyle::Chinese } else { SymbolStyle::Keyboard };
-    c.punctuation.right_alt = g.right_alt;
+    c.punctuation.primary = match g.primary {
+        1 => PrimarySymbols::RightAlt,
+        2 => PrimarySymbols::Both,
+        _ => PrimarySymbols::Backtick,
+    };
+    c.punctuation.secondary = if g.secondary == 1 { SecondarySymbols::Layer } else { SecondarySymbols::Shift };
+    // 舊版欄位已轉換，不再保留
+    c.punctuation.shift = None;
+    c.punctuation.right_alt = None;
 }
 
 fn ai_from(c: &Config) -> AiSettings {
@@ -123,6 +134,7 @@ fn hotkeys_from(c: &Config) -> Hotkeys {
         emoji: binding_text(&h.emoji),
         ai: binding_text(&h.ai),
         bar: binding_text(&h.composition_bar),
+        symbols: binding_text(&h.symbols),
     }
 }
 
@@ -135,6 +147,7 @@ fn apply_hotkeys(c: &mut Config, h: &Hotkeys) -> Result<(), String> {
     c.hotkeys.emoji = parse_binding(&h.emoji)?;
     c.hotkeys.ai = parse_binding(&h.ai)?;
     c.hotkeys.composition_bar = parse_binding(&h.bar)?;
+    c.hotkeys.symbols = parse_binding(&h.symbols)?;
     Ok(())
 }
 

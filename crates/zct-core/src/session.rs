@@ -179,6 +179,8 @@ pub struct Session {
     menu: Option<Menu>,
     /// 剛用 Backspace 刪掉完整英文單字後面的空白：下一次 Backspace 刪整個單字
     word_backspace: bool,
+    /// 按了 `，等下一個鍵換成那個鍵帽上的符號
+    symbol_prefix: bool,
 }
 
 impl Session {
@@ -228,6 +230,7 @@ impl Session {
             picks: Vec::new(),
             menu: None,
             word_backspace: false,
+            symbol_prefix: false,
         })
     }
 
@@ -293,7 +296,8 @@ impl Session {
             && (self.hotkeys.width.matches(ev)
                 || self.hotkeys.output.matches(ev)
                 || self.hotkeys.emoji.matches(ev)
-                || self.hotkeys.ai.matches(ev))
+                || self.hotkeys.ai.matches(ev)
+                || self.hotkeys.symbols.matches(ev))
     }
 
     /// 由輸入法直接送出的文字（不經過 chewing）
@@ -326,12 +330,48 @@ impl Session {
         if ev.mods.has_command_modifier() && !right_alt {
             return None;
         }
-        crate::symbols::symbol(c, ev.mods.shift, right_alt, self.width, self.punct.style).map(String::from)
+        let style = self.punct.secondary.shift_style();
+        crate::symbols::symbol(c, ev.mods.shift, right_alt, self.width, style).map(String::from)
+    }
+
+    /// ` 前綴：` 再按一個鍵 → 那個鍵帽上的符號（和右 Alt 相同）；回傳是否已處理這個鍵
+    ///
+    /// 按下 ` 時先把 ` 放進組字區，看得到正在等下一個鍵；下一個鍵不是可以打字的鍵時，` 就留著當一般字元。
+    fn symbol_prefix_key(&mut self, ev: &KeyEvent, r: &mut KeyResult) -> bool {
+        if std::mem::take(&mut self.symbol_prefix) {
+            if let Key::Char(c) = ev.key
+                && !ev.mods.has_command_modifier()
+                && let Some(sym) = crate::symbols::symbol(c, ev.mods.shift, true, self.width, self.punct.secondary.shift_style())
+            {
+                // 刪掉等待中的 `，換成符號
+                self.chewing_key(Key::Backspace);
+                self.insert_latin(&sym.to_string());
+                return true;
+            }
+            return false;
+        }
+        if self.mode != InputMode::Chinese
+            || !self.punct.primary.backtick()
+            || ev.key != Key::Char(b'`')
+            || ev.mods.shift
+            || ev.mods.has_command_modifier()
+            || self.editor.is_selecting()
+        {
+            return false;
+        }
+        if self.editor.entering_syllable() {
+            // 注音打到一半：先完成或取消注音
+            r.bell = true;
+            return true;
+        }
+        self.insert_latin("`");
+        self.symbol_prefix = true;
+        true
     }
 
     /// 開啟「右 Alt」時，這是不是右 Alt（+ Shift）+ 可以打字的鍵
     fn right_alt_symbol(&self, ev: &KeyEvent) -> bool {
-        self.punct.right_alt
+        self.punct.primary.right_alt()
             && ev.mods.right_alt
             && !ev.mods.ctrl
             && !ev.mods.meta
@@ -340,7 +380,7 @@ impl Session {
 
     /// 設定開啟了「右 Alt 照鍵帽輸出」（DLL 依此向 TSF 登記保留按鍵）
     pub fn right_alt_enabled(&self) -> bool {
-        self.punct.right_alt
+        self.punct.primary.right_alt()
     }
 
     /// 只判斷「按下」事件是否會被吃掉，不改變任何狀態（給 TSF `OnTestKeyDown` 用）
@@ -895,6 +935,10 @@ impl Session {
             if self.ai_key(ev, &mut commit) {
             } else if self.emoji.is_some() {
                 self.emoji_key(ev, &mut commit);
+            } else if self.symbol_prefix_key(ev, &mut r) {
+            } else if self.hotkeys.symbols.matches(ev) && self.chinese_hotkey(ev) {
+                // chewing 的符號選單
+                self.editor.process_keyevent(ascii_event(b'`'));
             } else if self.hotkeys.ai.matches(ev) && self.chinese_hotkey(ev) {
                 r.notice = Some(self.request_ai(&mut r.ai_request));
             } else if self.hotkeys.emoji.matches(ev) && self.chinese_hotkey(ev) {
@@ -1496,6 +1540,7 @@ impl Session {
         self.shift_words.clear();
         self.picks.clear();
         self.menu = None;
+        self.symbol_prefix = false;
     }
 
     /// 切到別的輸入法再切回來（重新連線）：`on_focus = "remember"` 時沿用上次的中英狀態

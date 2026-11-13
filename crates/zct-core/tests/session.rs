@@ -392,17 +392,19 @@ fn symbols_follow_keycaps_by_default() {
     assert_eq!(h.s.preedit().text, "＇＜＂");
 }
 
-fn symbol_style(style: zct_core::symbols::SymbolStyle, right_alt: bool) -> Config {
+fn symbol_keys(primary: PrimarySymbols, secondary: SecondarySymbols) -> Config {
     let mut c = Config::default();
-    c.punctuation.shift = style;
-    c.punctuation.right_alt = right_alt;
+    c.punctuation.primary = primary;
+    c.punctuation.secondary = secondary;
     c
 }
 
+use zct_core::symbols::{PrimarySymbols, SecondarySymbols};
+
 #[test]
 fn chinese_symbol_style_and_its_half_width() {
-    use zct_core::symbols::SymbolStyle;
-    let mut h = Harness::with_config(symbol_style(SymbolStyle::Chinese, false));
+    // 次要符號改用 ` + Shift 時，Shift + 鍵出中文標點
+    let mut h = Harness::with_config(symbol_keys(PrimarySymbols::Backtick, SecondarySymbols::Layer));
     h.press(Key::Char(b'\''), Mods::NONE);
     h.press(Key::Char(b','), Mods::shift());
     h.press(Key::Char(b'\''), Mods::shift());
@@ -419,13 +421,12 @@ fn chinese_symbol_style_and_its_half_width() {
 
 #[test]
 fn right_alt_follows_keycaps_for_every_key() {
-    use zct_core::symbols::SymbolStyle;
     let ralt = Mods { alt: true, right_alt: true, ..Mods::NONE };
     let lalt = Mods { alt: true, ..Mods::NONE };
     // 預設關閉：右 Alt 組合鍵交給 App
     let mut h = Harness::new();
     assert!(!h.press(Key::Char(b','), ralt).eaten);
-    let mut h = Harness::with_config(symbol_style(SymbolStyle::Keyboard, true));
+    let mut h = Harness::with_config(symbol_keys(PrimarySymbols::RightAlt, SecondarySymbols::Shift));
     assert!(!h.press(Key::Char(b','), lalt).eaten, "左 Alt 照常交給 App");
     h.type_str("wu0 ");
     assert!(h.press(Key::Char(b','), ralt).eaten);
@@ -436,6 +437,62 @@ fn right_alt_follows_keycaps_for_every_key() {
     h.press(Key::Char(b'='), Mods { shift: true, ..ralt });
     assert_eq!(h.s.preedit().text, "天，。１ｗ｛＋");
     assert!(h.s.right_alt_enabled());
+}
+
+#[test]
+fn backtick_then_key_types_the_keycap() {
+    // 預設：` 再按一個鍵 → 那個鍵帽上的字元；Shift 照樣作用
+    let mut h = Harness::new();
+    assert!(!h.s.right_alt_enabled(), "預設不攔右 Alt");
+    let r = h.press(Key::Char(b'`'), Mods::NONE);
+    assert!(r.eaten && r.candidates.is_none(), "` 不再開符號選單");
+    assert_eq!(h.s.preedit().text, "`", "等下一個鍵時看得到 `");
+    h.press(Key::Char(b','), Mods::NONE);
+    assert_eq!(h.s.preedit().text, "，");
+    for (c, shift) in [(b'.', false), (b'1', false), (b';', false), (b'[', true), (b'`', false)] {
+        h.press(Key::Char(b'`'), Mods::NONE);
+        h.press(Key::Char(c), if shift { Mods::shift() } else { Mods::NONE });
+    }
+    assert_eq!(h.s.preedit().text, "，。１；｛｀");
+    // Shift + 鍵仍是次要符號
+    h.press(Key::Char(b','), Mods::shift());
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("，。１；｛｀＜"));
+}
+
+#[test]
+fn backtick_prefix_mid_sentence_and_with_other_keys() {
+    let mut h = Harness::new();
+    h.type_str("wu0 fu4");
+    h.press(Key::Char(b'`'), Mods::NONE);
+    h.press(Key::Char(b','), Mods::NONE);
+    h.type_str("ji3");
+    assert_eq!(h.s.preedit().text, "天氣，我");
+    // ` 後面接不是字元的鍵：` 留著當一般字元
+    h.press(Key::Char(b'`'), Mods::NONE);
+    assert_eq!(h.press(Key::Enter, Mods::NONE).commit.as_deref(), Some("天氣，我`"));
+    // 注音打到一半按 `：提示，不打斷注音
+    h.type_str("ji");
+    assert!(h.press(Key::Char(b'`'), Mods::NONE).bell);
+    h.press(Key::Char(b'3'), Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我");
+}
+
+#[test]
+fn symbol_menu_hotkey_opens_chewing_menu() {
+    let mut c = Config::default();
+    c.hotkeys.symbols = zct_core::hotkey::Binding::key("ctrl+shift+/");
+    let mut h = Harness::with_config(c);
+    let r = h.press(Key::Char(b'/'), Mods { ctrl: true, shift: true, ..Mods::NONE });
+    assert!(r.eaten);
+    assert!(r.candidates.is_some(), "符號選單");
+}
+
+#[test]
+fn legacy_symbol_settings_are_converted() {
+    let c = Config::parse("[punctuation]\nshift = \"chinese\"\nright_alt = true\n").unwrap();
+    assert_eq!(c.punctuation.effective(), (PrimarySymbols::Both, SecondarySymbols::Layer));
+    let out = toml::to_string(&c).unwrap();
+    assert!(!out.contains("right_alt"), "舊欄位不再寫出：{out}");
 }
 
 #[test]

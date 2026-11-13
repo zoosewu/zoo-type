@@ -14,8 +14,8 @@ export struct General {
     auto-english: bool,
     english-candidate: bool,
     auto-space: bool,
-    symbol-style: int,      // 0 照鍵盤 1 中文標點
-    right-alt: bool,
+    primary: int,           // 主要符號：0 ` + 鍵 1 右 Alt + 鍵 2 兩種都可以
+    secondary: int,         // 次要符號：0 Shift + 鍵 1 ` / 右 Alt + Shift + 鍵
 }
 
 export struct AiSettings {
@@ -40,6 +40,7 @@ export struct Hotkeys {
     emoji: string,
     ai: string,
     bar: string,
+    symbols: string,
 }
 
 export struct Theme {
@@ -281,10 +282,10 @@ export component SettingsWindow inherits Window {
                     Note { text: "新開 App 時的中英狀態。"; }
                     Row { label: "標點"; ComboBox { width: 160px; model: ["全形", "半形"]; current-index <=> root.general.punctuation; } }
                     Note { text: "中文模式下的符號：全形（，。？）或半形（,.?）。可以用快捷鍵隨時切換，所有 App 共用，切到別的輸入法再回來也會記住。"; }
-                    Row { label: "Shift + 符號鍵"; ComboBox { width: 160px; model: ["鍵盤上的符號", "中文標點"]; current-index <=> root.general.symbol-style; } }
-                    Note { text: "鍵盤上的符號：按鍵上印什麼就出什麼（Shift + , → ＜、Shift + ' → ＂）。中文標點：Shift + , → ，、Shift + . → 。、Shift + ' → ；、[ → 「。半形是同一個符號的半形版。"; }
-                    Row { label: "右 Alt 照鍵帽輸出"; Switch { checked <=> root.general.right-alt; } }
-                    Note { text: "大千排列中數字、字母和 , . / ; - 是注音鍵，它們本身的字元平常從 ` 符號選單選或切英文。開啟後按右 Alt + 任何鍵都照鍵帽輸出（右 Alt + , → ，、右 Alt + 1 → １），再加 Shift 就是上排的符號（右 Alt + Shift + [ → ｛）。開啟後程式收不到右 Alt 組合鍵；左 Alt 照常交給程式。"; }
+                    Row { label: "主要符號（，。；＇…）"; ComboBox { width: 280px; model: ["` + 鍵", "右 Alt + 鍵", "` + 鍵 或 右 Alt + 鍵"]; current-index <=> root.general.primary; } }
+                    Note { text: "鍵帽下排的字元。大千排列中數字、字母和 , . / ; - 是注音鍵，要用這個方式打：` 再按 , → ，、` 再按 1 → １。右 Alt 是按住再按那個鍵；選了右 Alt 時，程式收不到右 Alt 組合鍵（左 Alt 不受影響）。` 連按兩下打出 ` 本身。"; }
+                    Row { label: "次要符號（：＂＜＞…）"; ComboBox { width: 280px; model: ["Shift + 鍵", "` 或 右 Alt + Shift + 鍵"]; current-index <=> root.general.secondary; } }
+                    Note { text: "鍵帽上排的符號。Shift + 鍵：Shift + , → ＜、Shift + ' → ＂。選第二種時，次要符號改成 ` 再按 Shift + 鍵，Shift + 鍵則改出中文標點（Shift + , → ，、Shift + . → 。、Shift + ' → ；、[ → 「）。"; }
                     Row { label: "輸出"; ComboBox { width: 160px; model: ["繁體", "簡體"]; current-index <=> root.general.output; } }
                     Note { text: "選簡體時，組字區與候選窗仍然顯示繁體，按 Enter 送出時才整句轉成簡體（轉換較準確）。"; }
                     Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設"]; current-index <=> root.general.on-focus; } }
@@ -331,11 +332,12 @@ export component SettingsWindow inherits Window {
                     { label: "Emoji", idx: 5, help: "組字後按：用組字內容找 Emoji（例如「開心」）；沒有組字時列出常用 Emoji。選字時按 Tab 也能切到 Emoji 與純注音。" },
                     { label: "AI 修正", idx: 6, help: "組字後按：把組字內容送給「AI」頁設定的模型修正同音錯字（在 / 再），結果以候選顯示，Enter 採用。" },
                     { label: "組字提示列", idx: 7, help: "在看不到組字的程式裡（終端機、Claude Code）按一下，游標上方會另外顯示組字內容與游標；每個 App 分別記住。" },
+                    { label: "符號選單", idx: 8, help: "開啟符號選單（…、※、括號、希臘字母、數學符號）。預設不設定：` 用來打主要符號。" },
                 ]: VerticalLayout {
                   spacing: 2px;
                   Row {
                     label: item.label;
-                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : item.idx == 4 ? root.hotkeys.pin : item.idx == 5 ? root.hotkeys.emoji : item.idx == 6 ? root.hotkeys.ai : root.hotkeys.bar;
+                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : item.idx == 4 ? root.hotkeys.pin : item.idx == 5 ? root.hotkeys.emoji : item.idx == 6 ? root.hotkeys.ai : item.idx == 7 ? root.hotkeys.bar : root.hotkeys.symbols;
                     LineEdit {
                         width: 220px;
                         text: parent.value;
@@ -349,6 +351,7 @@ export component SettingsWindow inherits Window {
                             if item.idx == 5 { root.hotkeys.emoji = t; }
                             if item.idx == 6 { root.hotkeys.ai = t; }
                             if item.idx == 7 { root.hotkeys.bar = t; }
+                            if item.idx == 8 { root.hotkeys.symbols = t; }
                         }
                     }
                     Text {
