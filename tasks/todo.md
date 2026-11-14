@@ -63,6 +63,8 @@
 - [x] 服務程序（只有正式版）：開機後幾分鐘、之後每天查 GitHub Releases latest（不含 pre-release）；
   有新版就下載安裝檔與 `.sig` 到 `%ProgramData%\ZooType\update`
 - [x] 輸入法圖示右鍵選單「更新到 vX」（協定加上更新狀態）→ 服務程序啟動排程工作
+- [x] 實機驗證（2026-11-14）：本機 0.1.0 → 簽章的 0.1.1-test.1；一般使用者啟動排程工作、不跳 UAC 升級成功；竄改簽章的被拒絕；服務程序修正登入自動啟動、清掉已裝的待安裝檔
+- [ ] 線上路徑（GitHub 查詢、下載、選單「更新到 vX」）：發 0.1.1 時驗證；需要先在 GitHub Secrets 加 ZOO_TYPE_SIGNING_KEY
 - [x] 開發版與正式版分開：zct-core 的 `dev` feature（`cargo build-dev`），CLSID、語言設定檔、名稱、資料 / 安裝資料夾、管道、mutex、認證名稱都不同；install.ps1 / uninstall.ps1 加 `-Channel` 並確認程式是同一套
 - [x] 開發版不自動更新
 - [x] 設定程式「自動檢查更新」開關（預設開）
