@@ -138,8 +138,9 @@ pub fn register() -> Result<()> {
             0,
         )?;
         // 設為中文（台灣）的預設輸入法：Alt+Shift 切回中文時用的是這個，不是清單順序
-        // （寫在目前使用者的 HKCU；失敗不影響註冊）
-        if let Ok(old) = profiles.cast::<ITfInputProcessorProfiles>() {
+        // （寫在目前使用者的 HKCU；失敗不影響註冊）。只有正式版：開發版只在開發時手動切過去用
+        let official = zct_core::channel::CURRENT.id == zct_core::channel::OFFICIAL.id;
+        if official && let Ok(old) = profiles.cast::<ITfInputProcessorProfiles>() {
             let _ = old.SetDefaultLanguageProfile(LANGID_ZH_TW, &CLSID_ZCT, &PROFILE_ZCT);
         }
 
