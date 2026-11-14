@@ -63,6 +63,13 @@ jobs:
         shell: pwsh
         run: ./scripts/build-installer.ps1
 
+      # 自動更新只安裝簽章正確的安裝檔（crates/zct-update）；沒有私鑰就不發布
+      - name: 簽章
+        shell: pwsh
+        env:
+          ZOO_TYPE_SIGNING_KEY: ${{ secrets.ZOO_TYPE_SIGNING_KEY }}
+        run: cargo run -p zct-update --bin zct-release --release --locked -- sign "target/installer/zoo-type-$env:VERSION-windows-x64-setup.exe" $env:VERSION
+
       - name: GitHub Release
         shell: pwsh
         env:
@@ -81,4 +88,4 @@ jobs:
           "@ | Set-Content notes.md -Encoding utf8
           $flags = @()
           if ('${{ github.ref_name }}' -like '*-*') { $flags += '--prerelease' }
-          gh release create '${{ github.ref_name }}' $setup "$setup.sha256" --title "動物園輸入法 $env:VERSION" --notes-file notes.md --generate-notes @flags
+          gh release create '${{ github.ref_name }}' $setup "$setup.sha256" "$setup.sig" --title "動物園輸入法 $env:VERSION" --notes-file notes.md --generate-notes @flags
