@@ -41,15 +41,32 @@ function Remove-AtReboot([string]$path) {
     }
 }
 
+# 使用中的檔案（App 載入中的 DLL）不能刪但可以改名：先搬到安裝根目錄的 .trash，再排到重開機刪除。
+# 原本的位置立刻空出來：解除安裝後馬上重裝同一版時，安裝程式才不會因為「重開機要刪除這個檔案」而拒絕安裝
+$trash = Join-Path $Base '.trash'
 function Remove-OrSchedule([string]$path) {
     try {
         Remove-Item $path -Recurse -Force -ErrorAction Stop
-    } catch {
-        $paths = @(Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue |
-            Sort-Object { $_.FullName.Length } -Descending | ForEach-Object FullName) + $path
-        foreach ($p in $paths) { if (Test-Path $p) { Remove-AtReboot $p } }
-        Write-Host "  使用中，重開機後刪除：$path"
+        return
+    } catch {}
+    $null = New-Item -ItemType Directory -Force $trash
+    foreach ($f in Get-ChildItem $path -Recurse -Force -File -ErrorAction SilentlyContinue) {
+        $dest = Join-Path $trash ([guid]::NewGuid().ToString('N') + '.old')
+        try {
+            Move-Item -LiteralPath $f.FullName $dest -Force -ErrorAction Stop
+            Remove-AtReboot $dest
+        } catch {
+            Remove-AtReboot $f.FullName
+        }
     }
+    try {
+        Remove-Item $path -Recurse -Force -ErrorAction Stop
+    } catch {
+        $dirs = @(Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue |
+            Sort-Object { $_.FullName.Length } -Descending | ForEach-Object FullName) + $path
+        foreach ($p in $dirs) { if (Test-Path $p) { Remove-AtReboot $p } }
+    }
+    Write-Host "  使用中，重開機後刪除：$path"
 }
 
 Write-Host '從鍵盤清單移除'
@@ -96,6 +113,9 @@ if ($official) {
         $svc.GetFolder('\').DeleteTask('ZooType Updater', 0)
         Write-Host '已移除自動更新的排程工作'
     } catch {}
+    # 服務程序下載更新的地方（只有安裝檔，沒有使用者資料）
+    $inbox = Join-Path $env:ProgramData 'ZooType'
+    if (Test-Path $inbox) { Remove-OrSchedule $inbox }
 }
 
 Write-Host '刪除程式檔案'
@@ -109,4 +129,6 @@ if (Test-Path $Base) {
         }
     }
 }
+# .trash 本身排在裡面的檔案之後刪除（重開機時依登記順序處理）
+if (Test-Path $trash) { Remove-AtReboot $trash }
 Write-Host '完成'

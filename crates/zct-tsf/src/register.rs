@@ -172,8 +172,14 @@ pub fn unregister() -> Result<()> {
             let _ = profiles.UnregisterProfile(&CLSID_ZCT, LANGID_ZH_TW, &PROFILE_ZCT, 0);
         }
         let _ = RegDeleteTreeW(HKEY_LOCAL_MACHINE, &HSTRING::from(clsid_key()));
+        // 上面兩個 API 只拿掉設定檔與類別的對應，留下空的 Category / LanguageProfile 機碼
+        let _ = RegDeleteTreeW(HKEY_LOCAL_MACHINE, &HSTRING::from(tip_key()));
     }
     Ok(())
+}
+
+fn tip_key() -> String {
+    format!(r"SOFTWARE\Microsoft\CTF\TIP\{{{:?}}}", CLSID_ZCT)
 }
 
 #[cfg(test)]
@@ -183,6 +189,10 @@ mod tests {
         assert_eq!(
             super::clsid_key(),
             r"Software\Classes\CLSID\{68E048CC-2635-4A97-8A2F-1599AF3AFCF5}"
+        );
+        assert_eq!(
+            super::tip_key(),
+            r"SOFTWARE\Microsoft\CTF\TIP\{68E048CC-2635-4A97-8A2F-1599AF3AFCF5}"
         );
     }
 }
