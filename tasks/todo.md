@@ -68,7 +68,7 @@
 - [x] 開發版與正式版分開：zct-core 的 `dev` feature（`cargo build-dev`），CLSID、語言設定檔、名稱、資料 / 安裝資料夾、管道、mutex、認證名稱都不同；install.ps1 / uninstall.ps1 加 `-Channel` 並確認程式是同一套
 - [x] 開發版不自動更新
 - [x] 設定程式「自動檢查更新」開關（預設開）
-- [ ] `scripts/release.ps1 <版本>`：改版號、commit、打標籤
+- [x] `scripts/release.ps1 <版本>`：改版號、commit、打標籤
 
 ### 6. 驗證
 - [x] 本機產生安裝檔並實際安裝（2026-11-09）：資料夾、current.txt、註冊、鍵盤清單、自動啟動、捷徑、解除安裝登記、舊版排程刪除都正確
