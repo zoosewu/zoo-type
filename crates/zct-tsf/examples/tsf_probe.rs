@@ -212,6 +212,11 @@ fn main() {
         if attached {
             let _ = windows::Win32::System::Threading::AttachThreadInput(me, fg_thread, false);
         }
+        // 搶不到前景時（例如從背景啟動）等外部把視窗帶到前面，最多 5 秒
+        let start = Instant::now();
+        while GetForegroundWindow() != main && start.elapsed() < Duration::from_secs(5) {
+            pump(100);
+        }
         pump(800);
         ensure_foreground();
 

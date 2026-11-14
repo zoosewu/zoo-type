@@ -21,6 +21,9 @@ const CALL_TIMEOUT: Duration = Duration::from_millis(100);
 const RETRY_AFTER: Duration = Duration::from_secs(2);
 /// 啟動服務程序後多久內不重複啟動
 const SPAWN_COOLDOWN: Duration = Duration::from_secs(10);
+/// 剛啟動服務程序時，在這次按鍵裡等它就緒的上限（平常零點幾秒就好）；等到了這個鍵就不會漏給 App
+const SPAWN_WAIT: Duration = Duration::from_millis(1500);
+const SPAWN_POLL: Duration = Duration::from_millis(50);
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -66,29 +69,17 @@ impl Ipc {
         if self.retry_at.is_some_and(|t| Instant::now() < t) {
             return false;
         }
-        let mut heuristics = Heuristics::default();
-        let client = Client::connect().ok().and_then(|mut c| {
-            let hello = Request::Hello {
-                version: PROTOCOL_VERSION,
-                pid: std::process::id(),
-                exe: exe_name(),
-            };
-            match c.call(&hello, Duration::from_millis(500)) {
-                Ok(Response::Welcome {
-                    detect_legacy,
-                    detect_fullscreen,
-                }) => {
-                    heuristics = Heuristics {
-                        legacy_fullscreen: detect_legacy,
-                        exclusive_fullscreen: detect_fullscreen,
-                    };
-                    Some(c)
-                }
-                _ => None,
+        let mut found = try_connect();
+        // 連不上：啟動服務程序並等它就緒，這次的按鍵才不會漏給 App
+        if found.is_none() && self.spawn_service() {
+            let deadline = Instant::now() + SPAWN_WAIT;
+            while found.is_none() && Instant::now() < deadline {
+                std::thread::sleep(SPAWN_POLL);
+                found = try_connect();
             }
-        });
-        match client {
-            Some(c) => {
+        }
+        match found {
+            Some((c, heuristics)) => {
                 self.client = Some(c);
                 self.heuristics = heuristics;
                 self.retry_at = None;
@@ -96,7 +87,6 @@ impl Ipc {
             }
             None => {
                 self.retry_at = Some(Instant::now() + RETRY_AFTER);
-                self.spawn_service();
                 false
             }
         }
@@ -104,26 +94,50 @@ impl Ipc {
 
     /// 服務程序沒在跑時，從一般權限的桌面程式啟動它
     ///
-    /// 不從 AppContainer（沙箱）或提權程序啟動：子程序會繼承受限 / 管理員權限
-    fn spawn_service(&mut self) {
+    /// 不從 AppContainer（沙箱）或提權程序啟動：子程序會繼承受限 / 管理員權限。回傳是否啟動了
+    fn spawn_service(&mut self) -> bool {
         if self
             .spawned_at
             .is_some_and(|t| t.elapsed() < SPAWN_COOLDOWN)
         {
-            return;
+            return false;
         }
         if is_app_container() || is_elevated() {
-            return;
+            return false;
         }
-        let Some(dir) = dll_dir() else { return };
+        let Some(dir) = dll_dir() else { return false };
         let exe = dir.join("zoo-type-service.exe");
         if !exe.exists() {
-            return;
+            return false;
         }
         self.spawned_at = Some(Instant::now());
-        let _ = std::process::Command::new(exe)
+        std::process::Command::new(exe)
             .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
-            .spawn();
+            .spawn()
+            .is_ok()
+    }
+}
+
+/// 連線並打招呼；服務程序告知這個 App 要做的啟發式偵測
+fn try_connect() -> Option<(Client, Heuristics)> {
+    let mut c = Client::connect().ok()?;
+    let hello = Request::Hello {
+        version: PROTOCOL_VERSION,
+        pid: std::process::id(),
+        exe: exe_name(),
+    };
+    match c.call(&hello, Duration::from_millis(500)) {
+        Ok(Response::Welcome {
+            detect_legacy,
+            detect_fullscreen,
+        }) => Some((
+            c,
+            Heuristics {
+                legacy_fullscreen: detect_legacy,
+                exclusive_fullscreen: detect_fullscreen,
+            },
+        )),
+        _ => None,
     }
 }
 
