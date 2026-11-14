@@ -77,9 +77,9 @@ pub fn current_user_sid() -> Result<String> {
     }
 }
 
-/// 正式管道名稱
+/// 正式管道名稱（用 `ZCT_HOME` 指定資料位置時，每個資料位置各自一個）
 pub fn pipe_name() -> Result<HSTRING> {
-    pipe_name_with("")
+    pipe_name_with(&zct_core::paths::instance_suffix())
 }
 
 /// 加上後綴的管道名稱（測試用，避免與正在執行的服務程序衝突）

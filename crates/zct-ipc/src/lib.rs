@@ -1,6 +1,7 @@
 //! TSF DLL ↔ 服務程序之間的訊息（架構文件第 4 節）
 
 use serde::{Deserialize, Serialize};
+use zct_core::hotkey::Binding;
 use zct_core::{DayStats, KeyEvent, KeyResult, PhraseAction, PhraseEntry};
 
 #[cfg(windows)]
@@ -10,7 +11,7 @@ pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
 /// 12：程式改名為 zoo-type-*（舊版服務程序不能讓位給不同檔名的新版，改走協定不同的唯讀模式）
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -112,6 +113,8 @@ pub enum Response {
         right_alt: bool,
         /// 已下載、可以安裝的新版版號（輸入法圖示選單顯示「更新到 vX」）
         update: Option<String>,
+        /// 遊戲模式鎖定英文：除了這些快捷鍵，DLL 直接放行按鍵、不再詢問服務程序
+        passthrough: Option<Vec<Binding>>,
     },
     Error(String),
 }

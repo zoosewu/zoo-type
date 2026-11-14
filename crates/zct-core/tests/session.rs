@@ -650,6 +650,33 @@ fn game_hotkey_requests_toggle_in_any_mode() {
 }
 
 #[test]
+fn passthrough_keys_only_in_english_game_mode() {
+    let mut h = Harness::new();
+    assert_eq!(h.s.passthrough_keys(), None);
+    h.s.set_global_game(true);
+    let keys = h.s.passthrough_keys().expect("鎖定英文時可以直接放行");
+    let ev = |key, mods| zct_core::KeyEvent::down(key, mods, 0);
+    let ctrl_shift = Mods {
+        ctrl: true,
+        shift: true,
+        ..Mods::NONE
+    };
+    // 關掉遊戲模式的快捷鍵仍然要交給服務程序
+    assert!(keys.iter().any(|b| b.matches(&ev(Key::F(12), ctrl_shift))));
+    assert!(
+        !keys
+            .iter()
+            .any(|b| b.matches(&ev(Key::Char(b'w'), Mods::NONE)))
+    );
+
+    let keep = Harness::with_rule(
+        Config::default(),
+        rule(|r| r.game_mode = Some(GameMode::Keep)),
+    );
+    assert_eq!(keep.s.passthrough_keys(), None, "保持中英時還能打中文");
+}
+
+#[test]
 fn simplified_output_shows_traditional_and_converts_on_commit() {
     // 簡體模式：組字區與候選窗一律顯示繁體，送出時整句轉成簡體
     let mut c = Config::default();

@@ -24,8 +24,14 @@ const MAX_DOWNLOAD: u64 = 128 * 1024 * 1024;
 /// 已下載、驗證過，等使用者按「更新」的版本
 pub type Available = Arc<Mutex<Option<String>>>;
 
+/// 只有使用者平常用的正式版服務程序管更新：開發版、或用 `ZCT_HOME` 另開的服務程序（測試用）都不管
+fn manages_updates() -> bool {
+    zct_core::channel::CURRENT.id == zct_core::channel::OFFICIAL.id
+        && zct_core::paths::instance_suffix().is_empty()
+}
+
 pub fn spawn(settings: Arc<Settings>, available: Available) -> std::io::Result<()> {
-    if zct_core::channel::CURRENT.id != zct_core::channel::OFFICIAL.id {
+    if !manages_updates() {
         return Ok(());
     }
     std::thread::Builder::new()
@@ -173,7 +179,7 @@ pub fn fix_autostart() {
         HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegGetValueW, RegSetKeyValueW,
     };
     use windows::core::HSTRING;
-    if zct_core::channel::CURRENT.id != zct_core::channel::OFFICIAL.id {
+    if !manages_updates() {
         return;
     }
     let Ok(exe) = std::env::current_exe() else {

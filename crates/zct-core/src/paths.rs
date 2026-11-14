@@ -39,6 +39,26 @@ pub fn pointer_dir() -> Option<PathBuf> {
     app_data().map(|p| p.join(DIR_NAME))
 }
 
+/// 用 `ZCT_HOME` 指定資料位置時，服務程序的連線名稱與單一實例要加上的後綴：一個資料位置一個服務程序。
+/// 例如 tsf_probe 在獨立資料夾測試時，啟動的是自己的服務程序，不會連到、也不會改到使用者正在用的那個
+pub fn instance_suffix() -> String {
+    std::env::var_os(ENV_HOME)
+        .filter(|home| !home.is_empty())
+        .map(|home| suffix_for(&home.to_string_lossy()))
+        .unwrap_or_default()
+}
+
+fn suffix_for(home: &str) -> String {
+    // FNV-1a；Windows 路徑不分大小寫
+    let hash = home
+        .to_lowercase()
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x0100_0000_01b3)
+        });
+    format!("-h{hash:016x}")
+}
+
 /// 改名前的資料夾（`%APPDATA%\zct`）搬到新名稱；回傳做了什麼（記在 log）
 ///
 /// 服務程序與設定程式啟動時、找資料根目錄之前呼叫。新資料夾已存在就不動。
@@ -520,6 +540,14 @@ mod tests {
     fn no_pointer_falls_back_to_pointer_dir() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(resolve(None, dir.path()), dir.path());
+    }
+
+    #[test]
+    fn instance_suffix_per_data_folder() {
+        let a = suffix_for(r"C:\Temp\zct-probe");
+        assert_eq!(a, suffix_for(r"c:\temp\ZCT-PROBE"), "路徑不分大小寫");
+        assert_ne!(a, suffix_for(r"C:\Temp\other"));
+        assert!(a.starts_with("-h") && a.len() == 18);
     }
 
     #[test]

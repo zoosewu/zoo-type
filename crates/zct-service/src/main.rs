@@ -183,11 +183,12 @@ mod app {
     }
 
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-        // 單一實例：同一個登入工作階段、同一個協定版本只跑一個服務程序
+        // 單一實例：同一個登入工作階段、同一個協定版本、同一個資料位置只跑一個服務程序
         let name = HSTRING::from(format!(
-            "Local\\{}-service-v{}",
+            "Local\\{}-service-v{}{}",
             zct_core::channel::CURRENT.pipe,
-            zct_ipc::PROTOCOL_VERSION
+            zct_ipc::PROTOCOL_VERSION,
+            zct_core::paths::instance_suffix()
         ));
         let mut mutex = unsafe { CreateMutexW(None, true, &name)? };
         if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {

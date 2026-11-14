@@ -18,7 +18,8 @@ use windows::Win32::UI::TextServices::*;
 use windows::Win32::UI::WindowsAndMessaging::{GUITHREADINFO, GetGUIThreadInfo, GetWindowRect};
 use windows::core::{BOOL, GUID, IUnknown, Interface, Ref, Result, implement};
 use windows_core::{ComObject, IUnknownImpl};
-use zct_core::KeyResult;
+use zct_core::hotkey::Binding;
+use zct_core::{KeyEvent, KeyResult};
 use zct_ipc::{Command, Rect, Request, Response};
 
 use crate::client::Ipc;
@@ -61,6 +62,8 @@ pub struct TextService {
     /// 最後一次從 App 取得的游標位置：App 暫時回報不出來時沿用（VS Code 終端機打注音途中常取不到），
     /// 避免視窗跳到備用位置再跳回來；焦點換到別的輸入框時清掉
     last_rect: Cell<Option<Rect>>,
+    /// 遊戲模式鎖定英文時，還要交給服務程序的快捷鍵；其他按鍵直接放行（`refresh_langbar` 更新）
+    passthrough: RefCell<Option<Vec<Binding>>>,
 }
 
 impl TextService {
@@ -75,7 +78,16 @@ impl TextService {
             ipc: RefCell::default(),
             fullscreen: FullscreenCache::default(),
             last_rect: Cell::new(None),
+            passthrough: RefCell::new(None),
         }
+    }
+
+    /// 遊戲模式鎖定英文：快捷鍵以外的按鍵（含所有放開事件）直接交給 App，不詢問服務程序
+    fn game_passes(&self, ev: &KeyEvent) -> bool {
+        self.passthrough
+            .borrow()
+            .as_ref()
+            .is_some_and(|keys| !keys.iter().any(|b| b.matches(ev)))
     }
 
     fn call(&self, req: &Request) -> Option<Response> {
@@ -284,23 +296,29 @@ impl TextService_Impl {
         self.refresh_langbar();
     }
 
-    /// 向服務程序查詢中英與遊戲模式，更新輸入法圖示
+    /// 向服務程序查詢中英與遊戲模式，更新輸入法圖示與遊戲模式的直接放行
+    ///
+    /// 焦點換到別的文件、切換遊戲模式時都會呼叫，在別的 App 切換的全域遊戲模式也會在這時同步。
+    /// 查不到（服務程序沒在跑）時取消直接放行，按鍵才會走到重新啟動服務程序的路徑
     fn refresh_langbar(&self) {
+        let Some(Response::Status {
+            chinese,
+            simplified,
+            game,
+            right_alt,
+            update,
+            passthrough,
+        }) = self.call(&Request::Status)
+        else {
+            self.passthrough.replace(None);
+            return;
+        };
+        self.passthrough.replace(passthrough);
         let button = self.tsf.borrow().langbar.clone();
-        if let (
-            Some(button),
-            Some(Response::Status {
-                chinese,
-                simplified,
-                game,
-                right_alt,
-                update,
-            }),
-        ) = (button, self.call(&Request::Status))
-        {
+        if let Some(button) = button {
             langbar::set_state(&button, chinese, simplified, game, update);
-            self.sync_right_alt(right_alt);
         }
+        self.sync_right_alt(right_alt);
     }
 
     /// 依設定登記或取消右 Alt 的保留按鍵（設定關閉時完全不攔右 Alt 組合鍵）
@@ -496,6 +514,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             }
             self.composition.borrow_mut().take();
             self.tested_up.set(None);
+            self.passthrough.replace(None);
             if let Ok(mut ipc) = self.ipc.try_borrow_mut() {
                 ipc.disconnect();
             }
@@ -555,10 +574,10 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         guard(|| {
             // 新的按鍵：上一個放開事件的記錄作廢（同一個鍵的放開事件 lparam 每次都一樣）
             self.tested_up.set(None);
-            if self.not_input() {
+            let ev = keys::event(w, l, false);
+            if self.game_passes(&ev) || self.not_input() {
                 return Ok(false.into());
             }
-            let ev = keys::event(w, l, false);
             let eat = matches!(
                 self.call(&Request::TestKeyDown(ev)),
                 Some(Response::Eat(true))
@@ -571,13 +590,13 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         guard(|| {
             // 新的按鍵：上一個放開事件的記錄作廢（同一個鍵的放開事件 lparam 每次都一樣）
             self.tested_up.set(None);
-            if self.not_input() {
+            let ev = keys::event(w, l, false);
+            if self.game_passes(&ev) || self.not_input() {
                 return Ok(false.into());
             }
             if let Some(ctx) = pic.as_ref() {
                 self.drop_lost_composition(ctx);
             }
-            let ev = keys::event(w, l, false);
             let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
                 return Ok(false.into());
             };
@@ -593,11 +612,11 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     /// 例如單按 Shift 切中英後，設定程式的 Tab 變成 Shift + Tab。需要更新文件時改用非同步的 edit session
     fn OnTestKeyUp(&self, pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
-            if self.not_input() {
+            let ev = keys::event(w, l, true);
+            if self.game_passes(&ev) || self.not_input() {
                 return Ok(false.into());
             }
             self.tested_up.set(Some((w.0, l.0)));
-            let ev = keys::event(w, l, true);
             if let Some(Response::Key(r)) = self.call(&Request::Key(ev))
                 && (r.commit.is_some() || r.mode_changed.is_some())
                 && let Some(ctx) = pic.as_ref()
@@ -612,10 +631,13 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     /// 這時要在這裡處理放開事件，否則單按 Shift 永遠不會切換中英
     fn OnKeyUp(&self, pic: Ref<ITfContext>, w: WPARAM, l: LPARAM) -> Result<BOOL> {
         guard(|| {
-            if self.tested_up.take() == Some((w.0, l.0)) || self.not_input() {
+            let ev = keys::event(w, l, true);
+            if self.tested_up.take() == Some((w.0, l.0))
+                || self.game_passes(&ev)
+                || self.not_input()
+            {
                 return Ok(false.into());
             }
-            let ev = keys::event(w, l, true);
             if let Some(Response::Key(r)) = self.call(&Request::Key(ev))
                 && (r.commit.is_some() || r.mode_changed.is_some())
                 && let Some(ctx) = pic.as_ref()
@@ -628,7 +650,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnPreservedKey(&self, pic: Ref<ITfContext>, guid: *const GUID) -> Result<BOOL> {
         guard(|| {
-            if guid.is_null() || self.not_input() {
+            if guid.is_null() || self.passthrough.borrow().is_some() || self.not_input() {
                 return Ok(false.into());
             }
             if let Some(ctx) = pic.as_ref() {

@@ -6,6 +6,9 @@
 //! cargo run -p zct-tsf --example tsf_probe -- "wu0 fu4" "{enter}" "{ctrl+alt+e}"
 //! 環境變數 ZCT_PROBE_RICH=1：改用 RichEdit（Windows 11 記事本的控制項，有 Ctrl+Alt+E = € 等內建快捷鍵）
 //! 按鍵：一般字元依美式鍵盤；{enter} {space} {esc} {bs} {left} {right} {down} {shift} {ctrl+shift+;} …
+//!
+//! 資料：在獨立的資料夾（`%TEMP%\zct-probe`，每次清空成預設設定）跑自己的服務程序，結束時關掉它，
+//! 測試中切換的模式、學到的詞都不會進到使用者的資料。要用指定的資料就先設好環境變數 `ZCT_HOME`（不會清空）
 
 use std::time::{Duration, Instant};
 
@@ -140,7 +143,41 @@ fn press(combo: &str) {
     }
 }
 
+/// 關掉這個資料位置的服務程序（存檔後結束）；沒有在跑就什麼都不做
+fn stop_service() {
+    use zct_ipc::{Command, PROTOCOL_VERSION, Request, pipe::Client};
+    let Ok(mut c) = Client::connect() else {
+        return;
+    };
+    let timeout = Duration::from_millis(500);
+    let hello = Request::Hello {
+        version: PROTOCOL_VERSION,
+        pid: std::process::id(),
+        exe: "tsf_probe.exe".into(),
+    };
+    if c.call(&hello, timeout).is_ok() {
+        let _ = c.call(&Request::Command(Command::Restart), timeout);
+    }
+}
+
+/// 獨立的資料位置：DLL 從這個程序啟動的服務程序會繼承 `ZCT_HOME`，連線名稱也跟著不同
+fn isolate_data() {
+    if std::env::var_os(zct_core::paths::ENV_HOME).is_some_and(|v| !v.is_empty()) {
+        return;
+    }
+    let home = std::env::temp_dir().join("zct-probe");
+    // 還沒啟動任何執行緒，設定環境變數是安全的
+    unsafe { std::env::set_var(zct_core::paths::ENV_HOME, &home) };
+    // 上次沒正常結束時先關掉舊的服務程序，再清成預設設定
+    stop_service();
+    std::thread::sleep(Duration::from_millis(500));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("無法建立測試資料夾");
+    println!("測試資料：{}", home.display());
+}
+
 fn main() {
+    isolate_data();
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let hinst = GetModuleHandleW(None).unwrap();
@@ -239,4 +276,5 @@ fn main() {
         let n = GetWindowTextW(edit, &mut buf) as usize;
         println!("編輯框內容：{:?}", String::from_utf16_lossy(&buf[..n]));
     }
+    stop_service();
 }

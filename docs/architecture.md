@@ -86,6 +86,10 @@ impl Session {
 
 設定（`config.toml`、`apps.toml`）放在使用者自選的資料根目錄 → 滿足「config 自訂位置」。
 
+用 `ZCT_HOME` 指定資料位置時，服務程序的連線名稱與單一實例 mutex 會加上由路徑算出的後綴：
+一個資料位置一個服務程序。DLL 啟動的服務程序繼承 App 的環境變數，所以 tsf_probe 這類測試程式
+設好 `ZCT_HOME` 就會用自己的服務程序與資料，不會碰到使用者正在用的。
+
 ## 6. 執行緒與延遲
 
 - 服務程序：每條 pipe 連線一個 worker；引擎呼叫在 worker 內同步完成

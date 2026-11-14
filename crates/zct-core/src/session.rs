@@ -22,6 +22,7 @@ use crate::config::{
     Width,
 };
 use crate::engine::Engine;
+use crate::hotkey::Binding;
 use crate::key::{Key, KeyEvent, Mods, ascii_event, shifted, to_chewing};
 use crate::mixed::{is_cjk, is_latin, is_tone};
 use crate::shift::ShiftTap;
@@ -275,6 +276,15 @@ impl Session {
             ..Default::default()
         };
         self.finish(r, commit)
+    }
+
+    /// 遊戲模式鎖定英文、沒有組字時：除了回傳的這幾個快捷鍵，按鍵都交給 App，
+    /// 平台層可以直接放行、不必每鍵詢問
+    pub fn passthrough_keys(&self) -> Option<Vec<Binding>> {
+        (self.game_mode() == GameMode::English
+            && !self.is_composing()
+            && self.ai_suggestion().is_none())
+        .then(|| vec![self.hotkeys.game_mode, self.hotkeys.composition_bar])
     }
 
     pub fn set_global_game(&mut self, on: bool) {

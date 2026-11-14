@@ -391,6 +391,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .clone(),
+                passthrough: session.as_ref().and_then(|s| s.passthrough_keys()),
             },
             Request::ToggleMode => match session.as_mut() {
                 Some(s) => {
