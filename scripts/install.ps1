@@ -132,6 +132,9 @@ public static extern bool MoveFileEx(string existing, string replacement, int fl
     $protocol = Get-ServiceOutput 'protocol'
     if ($protocol -notmatch '^\d+$') { throw "讀不到協定版本：$protocol" }
 
+    # 圖示用固定路徑的複本（見 crates/zct-tsf/src/register.rs 的 icon_path）；被讀取中而無法覆蓋時沿用舊的（圖示一樣）
+    try { Copy-Item $dll (Join-Path $base 'zoo-type-icon.dll') -Force -ErrorAction Stop } catch { Write-Host '  沿用原本的圖示檔' }
+
     Write-Host '註冊 TSF 文字服務'
     $p = Start-Process regsvr32.exe -ArgumentList '/s', "`"$dll`"" -Wait -PassThru
     if ($p.ExitCode -ne 0) { throw "regsvr32 失敗（$($p.ExitCode)）" }

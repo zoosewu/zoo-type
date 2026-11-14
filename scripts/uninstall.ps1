@@ -104,7 +104,7 @@ if ($official -and (Test-Path $legacyBase) -and ($legacyBase -ne $Base)) { Remov
 if (Test-Path $Base) {
     foreach ($item in Get-ChildItem $Base -Force) {
         $isVersion = $item.PSIsContainer -and ((Test-Path (Join-Path $item.FullName 'zoo_type.dll')) -or (Test-Path (Join-Path $item.FullName 'zct_tsf.dll')))
-        if ($isVersion -or $item.Name -in $legacyNames -or $item.Name -like 'zct_tsf.dll.*.old' -or $item.Name -in 'current.txt', 'update') {
+        if ($isVersion -or $item.Name -in $legacyNames -or $item.Name -like 'zct_tsf.dll.*.old' -or $item.Name -in 'current.txt', 'update', 'zoo-type-icon.dll') {
             Remove-OrSchedule $item.FullName
         }
     }

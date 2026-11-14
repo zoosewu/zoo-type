@@ -45,6 +45,21 @@ fn dll_path() -> String {
     String::from_utf16_lossy(&buf[..n])
 }
 
+/// 圖示檔：安裝根目錄的 `zoo-type-icon.dll`（install.ps1 複製的，路徑不隨版本改變）；沒有時用 DLL 本身
+///
+/// 工作列會記住語言設定檔的圖示路徑，更新換了版本資料夾、舊資料夾刪掉後就讀不到，改顯示「繁體」，
+/// 要重啟 explorer 才會重讀。固定路徑就不會發生。
+fn icon_path() -> String {
+    let dll = dll_path();
+    std::path::Path::new(&dll)
+        .parent()
+        .and_then(std::path::Path::parent)
+        .map(|base| base.join("zoo-type-icon.dll"))
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(dll)
+}
+
 fn check(e: WIN32_ERROR) -> Result<()> {
     if e == ERROR_SUCCESS {
         Ok(())
@@ -109,7 +124,7 @@ pub fn register() -> Result<()> {
             CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
         // 圖示：DLL 內第 0 個圖示資源（白底黑字「動」，見 build.rs）；
         // 工作列只認 DLL / EXE 的圖示資源，讀不到時會改顯示語言簡稱「繁體」
-        let icon = wide(&dll_path());
+        let icon = wide(&icon_path());
         profiles.RegisterProfile(
             &CLSID_ZCT,
             LANGID_ZH_TW,
