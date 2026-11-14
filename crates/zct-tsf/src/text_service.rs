@@ -294,10 +294,11 @@ impl TextService_Impl {
                 simplified,
                 game,
                 right_alt,
+                update,
             }),
         ) = (button, self.call(&Request::Status))
         {
-            langbar::set_state(&button, chinese, simplified, game);
+            langbar::set_state(&button, chinese, simplified, game, update);
             self.sync_right_alt(right_alt);
         }
     }
@@ -349,6 +350,11 @@ impl TextService_Impl {
             }
             Action::ToggleGame => Command::ToggleGame,
             Action::Restart => Command::Restart,
+            Action::InstallUpdate => Command::InstallUpdate,
+            Action::Refresh => {
+                self.refresh_langbar();
+                return;
+            }
         };
         self.call(&Request::Command(command));
         self.refresh_langbar();

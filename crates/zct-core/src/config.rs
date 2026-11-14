@@ -245,6 +245,19 @@ impl Default for SyncConfig {
     }
 }
 
+/// 自動更新（只有正式版）：每天檢查 GitHub Releases，有新版時輸入法圖示的選單出現「更新到 vX」
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpdateConfig {
+    pub auto_check: bool,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        UpdateConfig { auto_check: true }
+    }
+}
+
 /// 中英混打（需求 4.5：B + C + E）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -451,6 +464,7 @@ pub struct Config {
     pub detect: DetectConfig,
     pub mixed: MixedConfig,
     pub sync: SyncConfig,
+    pub update: UpdateConfig,
     pub ai: AiConfig,
     pub candidates: CandidateConfig,
     pub punctuation: PunctuationConfig,

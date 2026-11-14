@@ -42,6 +42,7 @@ fn general_from(c: &Config) -> General {
         auto_english: c.mixed.auto_english,
         english_candidate: c.mixed.english_candidate,
         auto_space: c.mixed.auto_space,
+        auto_update: c.update.auto_check,
         primary: match c.punctuation.effective().0 {
             PrimarySymbols::Backtick => 0,
             PrimarySymbols::RightAlt => 1,
@@ -86,6 +87,7 @@ fn apply_general(c: &mut Config, g: &General) {
     c.mixed.auto_english = g.auto_english;
     c.mixed.english_candidate = g.english_candidate;
     c.mixed.auto_space = g.auto_space;
+    c.update.auto_check = g.auto_update;
     c.punctuation.primary = match g.primary {
         1 => PrimarySymbols::RightAlt,
         2 => PrimarySymbols::Both,
@@ -437,6 +439,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = SettingsWindow::new()?;
     ui.set_window_title(zct_core::channel::settings_title().into());
     ui.set_app_name(zct_core::channel::CURRENT.name.into());
+    ui.set_official(zct_core::channel::CURRENT.id == zct_core::channel::OFFICIAL.id);
     // --page N：直接開啟某一頁（系統匣與開發截圖用）
     // --notice 文字：開啟後在狀態列顯示（變更資料位置後重新開啟時用）
     let mut notice: Option<String> = None;

@@ -89,13 +89,22 @@ Get-Process zoo-type-service, zoo-type-settings, zct-service, zct-settings -Erro
     Stop-Process -Force
 Start-Sleep -Milliseconds 300
 
+if ($official) {
+    try {
+        $svc = New-Object -ComObject Schedule.Service
+        $svc.Connect()
+        $svc.GetFolder('\').DeleteTask('ZooType Updater', 0)
+        Write-Host '已移除自動更新的排程工作'
+    } catch {}
+}
+
 Write-Host '刪除程式檔案'
 # 改名前的安裝根目錄整個移除
 if ($official -and (Test-Path $legacyBase) -and ($legacyBase -ne $Base)) { Remove-OrSchedule $legacyBase }
 if (Test-Path $Base) {
     foreach ($item in Get-ChildItem $Base -Force) {
         $isVersion = $item.PSIsContainer -and ((Test-Path (Join-Path $item.FullName 'zoo_type.dll')) -or (Test-Path (Join-Path $item.FullName 'zct_tsf.dll')))
-        if ($isVersion -or $item.Name -in $legacyNames -or $item.Name -like 'zct_tsf.dll.*.old' -or $item.Name -eq 'current.txt') {
+        if ($isVersion -or $item.Name -in $legacyNames -or $item.Name -like 'zct_tsf.dll.*.old' -or $item.Name -in 'current.txt', 'update') {
             Remove-OrSchedule $item.FullName
         }
     }

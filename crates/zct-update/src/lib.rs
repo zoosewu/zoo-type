@@ -18,6 +18,18 @@ pub const PUBLIC_KEY: [u8; 32] = [
 
 const MAGIC: &str = "zoo-type-update-v1";
 
+/// 服務程序把下載的安裝檔放在 `%ProgramData%\ZooType\update`（檔名固定），updater 從這裡取
+pub const INBOX_SETUP: &str = "setup.exe";
+pub const INBOX_SIG: &str = "setup.exe.sig";
+
+pub fn inbox() -> Option<std::path::PathBuf> {
+    std::env::var_os("ProgramData")
+        .map(|p| std::path::PathBuf::from(p).join("ZooType").join("update"))
+}
+
+/// 排程工作名稱（安裝時建立、服務程序啟動它）
+pub const TASK_NAME: &str = "ZooType Updater";
+
 /// 版號：`主.次.修`，可以帶 `-rc.1` 這類後綴（比新舊時後綴版比正式版舊）
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Version {

@@ -14,6 +14,7 @@ export struct General {
     auto-english: bool,
     english-candidate: bool,
     auto-space: bool,
+    auto-update: bool,
     primary: int,           // 主要符號：0 ` + 鍵 1 右 Alt + 鍵 2 兩種都可以
     secondary: int,         // 次要符號：0 Shift + 鍵 1 ` / 右 Alt + Shift + 鍵
 }
@@ -227,6 +228,8 @@ export component SettingsWindow inherits Window {
     // 正式版與開發版不同（zct_core::channel）
     in property <string> window-title: "動物園輸入法 設定";
     in property <string> app-name: "動物園輸入法";
+    // 正式版才有自動更新
+    in property <bool> official: true;
     title: root.window-title;
     preferred-width: 820px;
     preferred-height: 600px;
@@ -662,6 +665,8 @@ export component SettingsWindow inherits Window {
                 alignment: start;
                 Section { text: root.app-name; }
                 Text { text: "版本 " + root.version; }
+                if root.official: Row { label: "自動檢查更新"; Switch { checked <=> root.general.auto-update; } }
+                if root.official: Note { text: "每天檢查一次；有新版時，輸入法圖示的選單會出現「更新到」。"; }
                 Help { text: "注音輸入法，以 MIT 或 Apache-2.0 授權。\n原始碼與問題回報：https://github.com/zoosewu/zoo-type"; }
                 Section { text: "第三方元件"; }
                 Help { text: "libchewing：注音轉換引擎（LGPL-2.1-or-later）\nlibchewing-data：詞庫（LGPL-2.1-or-later）與語言模型（CC-BY-4.0）\nOpenCC：繁簡轉換字表（Apache-2.0）\nUnicode CLDR：Emoji 中文關鍵字（Unicode-3.0）\ndwyl/english-words：英文單字表（Unlicense）\nSlint：設定程式介面\n完整清單見安裝資料夾中的 THIRD-PARTY-NOTICES.txt"; }

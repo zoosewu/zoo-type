@@ -171,6 +171,12 @@ fn run_command(cmd: Command, shared: &Shared) {
             let on = !shared.game.fetch_xor(true, Ordering::Relaxed);
             log::info!("輸入法圖示：遊戲模式{}", if on { "開" } else { "關" });
         }
+        Command::InstallUpdate => {
+            log::info!("輸入法圖示：安裝更新");
+            if let Err(e) = crate::update::install() {
+                log::warn!("{e}");
+            }
+        }
         Command::Restart => {
             log::info!("重新啟動");
             let _ = shared.engine.save();
@@ -380,6 +386,11 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     .is_some_and(|s| s.output() == Output::Simplified),
                 game: shared.game.load(Ordering::Relaxed),
                 right_alt: session.as_ref().is_some_and(|s| s.right_alt_enabled()),
+                update: shared
+                    .update
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
             },
             Request::ToggleMode => match session.as_mut() {
                 Some(s) => {

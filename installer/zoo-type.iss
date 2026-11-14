@@ -109,13 +109,26 @@ begin
     SuppressibleMsgBox('安裝步驟「' + Part + '」失敗（代碼 ' + IntToStr(Code) + '）。', mbError, MB_OK, IDOK);
 end;
 
+{ 自動更新（zoo-type-updater 以 SYSTEM 執行）帶 /SYSTEMUPDATE：沒有使用者可以代表，略過使用者部分
+  （鍵盤清單與資料位置沿用；登入自動啟動的路徑由服務程序啟動時自己更新） }
+function IsSystemUpdate: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/SYSTEMUPDATE') = 0 then
+      Result := True;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
-    { 系統部分：註冊輸入法、current.txt、清除舊版（系統管理員） }
+    { 系統部分：註冊輸入法、current.txt、自動更新的排程工作、清除舊版（系統管理員） }
     RunPart('System', False);
     { 使用者部分：鍵盤清單、開機自動啟動、學習資料位置（以安裝者本人的身分） }
-    RunPart('User', True);
+    if not IsSystemUpdate then
+      RunPart('User', True);
   end;
 end;

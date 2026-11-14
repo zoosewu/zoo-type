@@ -6443,11 +6443,14 @@ version = "0.1.0"
 dependencies = [
  "embed-resource",
  "log",
+ "serde",
+ "ureq",
  "windows",
  "windows-numerics",
  "zct-ai",
  "zct-core",
  "zct-ipc",
+ "zct-update",
 ]
 
 [[package]]

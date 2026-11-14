@@ -14,6 +14,7 @@ mod settings;
 mod sync;
 #[cfg(windows)]
 mod ui;
+mod update;
 #[cfg(windows)]
 mod version;
 
@@ -75,6 +76,8 @@ mod app {
         pub debug_keys: bool,
         /// 每個 App（程序 ID）最後的中英狀態：切到別的輸入法時連線會斷，切回來時沿用
         pub last_mode: std::sync::Mutex<std::collections::HashMap<u32, zct_core::InputMode>>,
+        /// 已下載、可以安裝的新版
+        pub update: crate::update::Available,
     }
 
     /// 系統詞庫：正式安裝放在執行檔旁的 `dict/`；開發時可用 `ZCT_DICT` 指定
@@ -244,6 +247,11 @@ mod app {
 
         let game = Arc::new(AtomicBool::new(false));
         let ui = ui::spawn(theme.clone())?;
+        crate::update::fix_autostart();
+        let update = crate::update::Available::default();
+        if !version::read_only() {
+            crate::update::spawn(settings.clone(), update.clone())?;
+        }
         let shared = Arc::new(Shared {
             settings,
             sync,
@@ -253,6 +261,7 @@ mod app {
             ui,
             debug_keys: data.local().join("debug-keys").exists(),
             last_mode: Default::default(),
+            update,
         });
         if shared.debug_keys {
             log::info!("按鍵診斷已開啟（只記錄非字元鍵）");

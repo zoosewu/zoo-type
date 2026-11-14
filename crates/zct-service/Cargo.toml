@@ -18,6 +18,9 @@ dev = ["zct-core/dev"]
 zct-core.workspace = true
 zct-ipc.workspace = true
 zct-ai = { path = "../zct-ai" }
+zct-update = { path = "../zct-update" }
+serde.workspace = true
+ureq = { version = "3", features = ["json"] }
 log.workspace = true
 
 [target.'cfg(windows)'.dependencies]
@@ -36,6 +39,7 @@ features = [
   "Win32_Security",
   "Win32_System_Diagnostics_Debug",
   "Win32_System_LibraryLoader",
+  "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_UI_HiDpi",
   "Win32_UI_Shell",

@@ -56,6 +56,9 @@ enabled = false
 remote = ""                # 例：git@github.com:you/zoo-type-data.git（請用私人 repo）
 interval_minutes = 10
 
+[update]                   # 自動更新（只有正式版）
+auto_check = true          # 每天檢查 GitHub Releases；有新版時輸入法圖示的選單出現「更新到 vX」，按下後不跳 UAC 直接安裝
+
 [ai]                       # AI 同音字修正（OpenAI 相容 API）；API Key 在設定程式輸入，存在 Windows 認證管理員
 enabled = false
 endpoint = "http://localhost:11434/v1"   # Ollama；LM Studio 為 http://localhost:1234/v1

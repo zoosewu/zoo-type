@@ -34,11 +34,15 @@ pub enum Action {
     OpenSettings,
     ToggleGame,
     Restart,
+    /// 打開選單前重新查詢狀態（例如背景下載好的新版）
+    Refresh,
+    InstallUpdate,
 }
 
 const ID_SETTINGS: u32 = 1;
 const ID_GAME: u32 = 2;
 const ID_RESTART: u32 = 3;
+const ID_UPDATE: u32 = 4;
 
 type Handler = Box<dyn Fn(Action)>;
 
@@ -47,6 +51,8 @@ pub struct LangBarButton {
     chinese: Cell<bool>,
     simplified: Cell<bool>,
     game: Cell<bool>,
+    /// 可以安裝的新版
+    update: RefCell<Option<String>>,
     sink: RefCell<Option<ITfLangBarItemSink>>,
     handler: RefCell<Option<Handler>>,
 }
@@ -57,6 +63,7 @@ impl LangBarButton {
             chinese: Cell::new(true),
             simplified: Cell::new(false),
             game: Cell::new(false),
+            update: RefCell::default(),
             sink: RefCell::default(),
             handler: RefCell::new(Some(handler)),
         }
@@ -92,7 +99,13 @@ impl LangBarButton_Impl {
 
     fn menu(&self, pt: &POINT) {
         unsafe {
+            self.act(Action::Refresh);
             let Ok(menu) = CreatePopupMenu() else { return };
+            if let Some(v) = self.update.borrow().as_deref() {
+                let text = windows::core::HSTRING::from(format!("更新到 {v}"));
+                let _ = AppendMenuW(menu, MF_STRING, ID_UPDATE as usize, &text);
+                let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+            }
             let _ = AppendMenuW(menu, MF_STRING, ID_SETTINGS as usize, w!("設定…"));
             let game = if self.game.get() {
                 MF_STRING | MF_CHECKED
@@ -128,17 +141,25 @@ impl LangBarButton_Impl {
                 ID_SETTINGS => self.act(Action::OpenSettings),
                 ID_GAME => self.act(Action::ToggleGame),
                 ID_RESTART => self.act(Action::Restart),
+                ID_UPDATE => self.act(Action::InstallUpdate),
                 _ => {}
             }
         }
     }
 }
 
-/// 更新圖示狀態（中英、繁簡、遊戲模式）；有變化才通知系統重畫
-pub fn set_state(button: &ITfLangBarItemButton, chinese: bool, simplified: bool, game: bool) {
+/// 更新圖示狀態（中英、繁簡、遊戲模式）；有變化才通知系統重畫。`update`：選單要不要出現「更新到 vX」
+pub fn set_state(
+    button: &ITfLangBarItemButton,
+    chinese: bool,
+    simplified: bool,
+    game: bool,
+    update: Option<String>,
+) {
     let Ok(obj) = button.cast_object_ref::<LangBarButton>() else {
         return;
     };
+    *obj.update.borrow_mut() = update;
     if obj.chinese.get() != chinese || obj.simplified.get() != simplified || obj.game.get() != game
     {
         obj.chinese.set(chinese);

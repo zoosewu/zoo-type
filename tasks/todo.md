@@ -56,16 +56,16 @@
 - [x] 簽章工具 `zct-release`：`keygen`（產生金鑰，私鑰給 GitHub Secrets `ZOO_TYPE_SIGNING_KEY`）、`sign`
   - 簽的內容：`zoo-type-update-v1` + 版號 + 安裝檔 SHA256；`.sig` 檔記版號與簽章（防止拿舊版的合法安裝檔降級）
 - [x] release.yml 用私鑰簽安裝檔，上傳 `.sig`
-- [ ] `zoo-type-updater.exe`（裝在 Program Files，以 SYSTEM 執行）：把待安裝的檔案複製到受保護的資料夾 → 驗證簽章（內建公鑰）
+- [x] `zoo-type-updater.exe`（裝在 Program Files，以 SYSTEM 執行）：把待安裝的檔案複製到受保護的資料夾 → 驗證簽章（內建公鑰）
   與版號比目前新 → `/VERYSILENT` 執行安裝檔；任何一步失敗就不安裝
-- [ ] 安裝程式建立排程工作「動物園輸入法 更新」：SYSTEM 執行 updater，一般使用者可以啟動（SDDL 給 Authenticated Users 執行權）；解除安裝時移除
-- [ ] 以 SYSTEM 靜默更新時略過安裝程式的「使用者部分」；服務程序啟動時把登入自動啟動改成目前版本的路徑
-- [ ] 服務程序（只有正式版）：開機後幾分鐘、之後每天查 GitHub Releases latest（不含 pre-release）；
+- [x] 安裝程式建立排程工作「動物園輸入法 更新」：SYSTEM 執行 updater，一般使用者可以啟動（SDDL 給 Authenticated Users 執行權）；解除安裝時移除
+- [x] 以 SYSTEM 靜默更新時略過安裝程式的「使用者部分」；服務程序啟動時把登入自動啟動改成目前版本的路徑
+- [x] 服務程序（只有正式版）：開機後幾分鐘、之後每天查 GitHub Releases latest（不含 pre-release）；
   有新版就下載安裝檔與 `.sig` 到 `%ProgramData%\ZooType\update`
-- [ ] 輸入法圖示右鍵選單「更新到 vX」（協定加上更新狀態）→ 服務程序啟動排程工作
+- [x] 輸入法圖示右鍵選單「更新到 vX」（協定加上更新狀態）→ 服務程序啟動排程工作
 - [x] 開發版與正式版分開：zct-core 的 `dev` feature（`cargo build-dev`），CLSID、語言設定檔、名稱、資料 / 安裝資料夾、管道、mutex、認證名稱都不同；install.ps1 / uninstall.ps1 加 `-Channel` 並確認程式是同一套
-- [ ] 開發版不自動更新
-- [ ] 設定程式「自動檢查更新」開關（預設開）
+- [x] 開發版不自動更新
+- [x] 設定程式「自動檢查更新」開關（預設開）
 - [ ] `scripts/release.ps1 <版本>`：改版號、commit、打標籤
 
 ### 6. 驗證

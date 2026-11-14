@@ -65,6 +65,29 @@ function Get-ServiceOutput([string]$arg) {
 $built = Get-ServiceOutput 'channel'
 if ($built -ne $Channel) { throw "版本資料夾裡是 $built 的程式，不能裝成 $Channel：$Dest" }
 
+# 自動更新（只有正式版）：以 SYSTEM 執行 zoo-type-updater 的排程工作，一般使用者可以啟動它
+# （安全性靠 updater 驗證安裝檔的簽章與版號，見 crates/zct-update）。每次安裝都指向新版本的 updater
+function Register-Updater {
+    $updater = Join-Path $Dest 'zoo-type-updater.exe'
+    if (-not (Test-Path $updater)) { return }
+    Write-Host '建立自動更新的排程工作'
+    $svc = New-Object -ComObject Schedule.Service
+    $svc.Connect()
+    $def = $svc.NewTask(0)
+    $def.RegistrationInfo.Description = '動物園輸入法：安裝已簽章的更新'
+    $def.Settings.AllowDemandStart = $true
+    $def.Settings.DisallowStartIfOnBatteries = $false
+    $def.Settings.StopIfGoingOnBatteries = $false
+    $def.Settings.ExecutionTimeLimit = 'PT30M'
+    $def.Settings.MultipleInstances = 2   # 執行中時忽略新的啟動
+    $def.Principal.RunLevel = 1           # 最高權限
+    $action = $def.Actions.Create(0)
+    $action.Path = $updater
+    # SYSTEM 與系統管理員完全控制；Authenticated Users 可以讀取與執行（啟動）這個工作
+    $sddl = 'D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;AU)'
+    $null = $svc.GetFolder('\').RegisterTaskDefinition('ZooType Updater', $def, 6, 'SYSTEM', $null, 5, $sddl)
+}
+
 function Install-System {
     Add-Type -Namespace Zct -Name Native -MemberDefinition @'
 [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -114,7 +137,10 @@ public static extern bool MoveFileEx(string existing, string replacement, int fl
     if ($p.ExitCode -ne 0) { throw "regsvr32 失敗（$($p.ExitCode)）" }
 
     Write-Host "目前版本：$name（協定 $protocol）"
+
     Set-Content -Path (Join-Path $base 'current.txt') -Value @($name, $protocol) -Encoding ASCII
+
+    if ($official) { Register-Updater }
 
     Write-Host '清除舊版'
     foreach ($item in Get-ChildItem $base -Directory -Force) {

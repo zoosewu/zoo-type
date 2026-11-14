@@ -10,7 +10,7 @@ pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
 /// 12：程式改名為 zoo-type-*（舊版服務程序不能讓位給不同檔名的新版，改走協定不同的唯讀模式）
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -26,6 +26,8 @@ pub enum Command {
     Restart,
     /// 設定程式要變更資料位置：立即存檔，之後不再寫入（搬移完成後再送 Restart）
     PrepareMove,
+    /// 安裝已下載的新版（啟動以 SYSTEM 執行的更新工作）
+    InstallUpdate,
 }
 
 /// 螢幕座標（實體像素）
@@ -108,6 +110,8 @@ pub enum Response {
         game: bool,
         /// 「右 Alt 照鍵帽輸出」開啟：DLL 要向 TSF 登記保留按鍵
         right_alt: bool,
+        /// 已下載、可以安裝的新版版號（輸入法圖示選單顯示「更新到 vX」）
+        update: Option<String>,
     },
     Error(String),
 }
