@@ -16,6 +16,16 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use zct_ipc::PROTOCOL_VERSION;
 
 static READ_ONLY: AtomicBool = AtomicBool::new(false);
+static STALE: AtomicBool = AtomicBool::new(false);
+
+/// 已經裝了更新的版本（這個程序是還在服務舊 App 的舊版）：不再提示「更新到 vX」
+pub fn stale() -> bool {
+    STALE.load(Ordering::Relaxed)
+}
+
+pub fn set_stale() {
+    STALE.store(true, Ordering::Relaxed);
+}
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 /// 舊版唯讀：不存學習、不寫設定檔、不做 git 同步

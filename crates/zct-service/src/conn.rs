@@ -386,11 +386,16 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     .is_some_and(|s| s.output() == Output::Simplified),
                 game: shared.game.load(Ordering::Relaxed),
                 right_alt: session.as_ref().is_some_and(|s| s.right_alt_enabled()),
-                update: shared
-                    .update
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone(),
+                // 新版已經裝好、這是還在服務舊 App 的舊版：選單不再出現「更新到 vX」
+                update: (!crate::version::stale())
+                    .then(|| {
+                        shared
+                            .update
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clone()
+                    })
+                    .flatten(),
                 passthrough: session.as_ref().and_then(|s| s.passthrough_keys()),
             },
             Request::ToggleMode => match session.as_mut() {

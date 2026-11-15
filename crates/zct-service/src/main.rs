@@ -154,6 +154,7 @@ mod app {
                 same_protocol: false,
                 ..
             } => {
+                version::set_stale();
                 if !version::read_only() {
                     log::info!("已有新版（協定不同），繼續服務舊 App，但不再寫入使用者資料");
                     version::set_read_only();
