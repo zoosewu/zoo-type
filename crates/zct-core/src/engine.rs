@@ -138,6 +138,11 @@ pub struct Engine {
 /// 記住最近幾段送出的文字
 const RECENT_COMMITS: usize = 50;
 
+/// 人稱代名詞：你／妳、他／她／它／牠／祂要看說話的對象，AI 看不出來，一律不讓 AI 改
+fn is_pronoun(c: char) -> bool {
+    matches!(c, '你' | '妳' | '他' | '她' | '它' | '牠' | '祂')
+}
+
 /// UTC 日期，避免為此引入時間函式庫
 pub fn today() -> String {
     let days = SystemTime::now()
@@ -370,10 +375,12 @@ impl Engine {
             .enumerate()
             .map(|(i, (o, s))| {
                 let ok = o == s
-                    || syllables
-                        .get(i)
-                        .and_then(Option::as_deref)
-                        .is_some_and(|r| self.char_usage(s, r) > 0);
+                    || (!is_pronoun(o)
+                        && !is_pronoun(s)
+                        && syllables
+                            .get(i)
+                            .and_then(Option::as_deref)
+                            .is_some_and(|r| self.char_usage(s, r) > 0));
                 if ok { s } else { o }
             })
             .collect()

@@ -2314,3 +2314,18 @@ fn arrows_jump_whole_chinese_words_but_delete_one_char() {
     // Backspace 一次刪一個字
     assert_eq!(h.press(Key::Backspace, Mods::NONE).preedit.text, "天");
 }
+
+#[test]
+fn ai_never_changes_pronouns() {
+    let h = Harness::new();
+    let syl = |v: &[&str]| v.iter().map(|s| Some(s.to_string())).collect::<Vec<_>>();
+    let e = h.s.engine();
+    assert_eq!(
+        e.keep_same_reading("你好", &syl(&["ㄋㄧˇ", "ㄏㄠˇ"]), "妳好"),
+        "你好"
+    );
+    assert_eq!(
+        e.keep_same_reading("她在", &syl(&["ㄊㄚ", "ㄗㄞˋ"]), "他再"),
+        "她再"
+    );
+}
