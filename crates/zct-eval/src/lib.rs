@@ -8,66 +8,7 @@ use zct_core::config::Config;
 pub use zct_core::readings::Readings;
 use zct_core::{Engine, Key, KeyEvent, Mods, Session, SessionOptions};
 
-/// 注音 → 大千按鍵
-fn key_of(b: char) -> Option<char> {
-    const MAP: &[(char, char)] = &[
-        ('ㄅ', '1'),
-        ('ㄆ', 'q'),
-        ('ㄇ', 'a'),
-        ('ㄈ', 'z'),
-        ('ㄉ', '2'),
-        ('ㄊ', 'w'),
-        ('ㄋ', 's'),
-        ('ㄌ', 'x'),
-        ('ㄍ', 'e'),
-        ('ㄎ', 'd'),
-        ('ㄏ', 'c'),
-        ('ㄐ', 'r'),
-        ('ㄑ', 'f'),
-        ('ㄒ', 'v'),
-        ('ㄓ', '5'),
-        ('ㄔ', 't'),
-        ('ㄕ', 'g'),
-        ('ㄖ', 'b'),
-        ('ㄗ', 'y'),
-        ('ㄘ', 'h'),
-        ('ㄙ', 'n'),
-        ('ㄧ', 'u'),
-        ('ㄨ', 'j'),
-        ('ㄩ', 'm'),
-        ('ㄚ', '8'),
-        ('ㄛ', 'i'),
-        ('ㄜ', 'k'),
-        ('ㄝ', ','),
-        ('ㄞ', '9'),
-        ('ㄟ', 'o'),
-        ('ㄠ', 'l'),
-        ('ㄡ', '.'),
-        ('ㄢ', '0'),
-        ('ㄣ', 'p'),
-        ('ㄤ', ';'),
-        ('ㄥ', '/'),
-        ('ㄦ', '-'),
-    ];
-    MAP.iter().find(|(z, _)| *z == b).map(|(_, k)| *k)
-}
-
-/// 一個音節的按鍵；一聲用空白，聲調符號不論寫在哪裡都放最後
-pub fn keys_for(syllable: &str) -> Option<String> {
-    let mut keys = String::new();
-    let mut tone = ' ';
-    for c in syllable.chars() {
-        match c {
-            'ˊ' => tone = '6',
-            'ˇ' => tone = '3',
-            'ˋ' => tone = '4',
-            '˙' => tone = '7',
-            c => keys.push(key_of(c)?),
-        }
-    }
-    keys.push(tone);
-    Some(keys)
-}
+pub use zct_core::readings::keys_for;
 
 fn is_cjk(c: char) -> bool {
     matches!(c as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF)

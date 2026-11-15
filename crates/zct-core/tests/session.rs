@@ -2172,3 +2172,99 @@ fn abbreviation_drops_separating_space_before_chinese_word() {
     h.type_str(" kk ");
     assert_eq!(h.s.preedit().text, "我 ok");
 }
+
+// ---- M9 重新選字 ----
+
+#[test]
+fn reconvert_hotkey_asks_platform_for_selection() {
+    let mut h = Harness::new();
+    let ctrl_shift = Mods {
+        ctrl: true,
+        shift: true,
+        ..Mods::NONE
+    };
+    let r = h.press(Key::Char(b'/'), ctrl_shift);
+    assert!(r.eaten && r.reconvert);
+    // 組字中交給 App
+    h.type_str("wu0");
+    assert!(!h.press(Key::Char(b'/'), ctrl_shift).reconvert);
+}
+
+#[test]
+fn reconvert_keeps_original_chars_and_enter_commits() {
+    let mut h = Harness::new();
+    // 「天器」不是平常會組出來的字：載入後每個字仍是原本的字
+    let r = h.s.reconvert("天器");
+    assert_eq!(r.preedit.text, "天器");
+    assert!(h.s.is_composing());
+    assert_eq!(
+        h.press(Key::Enter, Mods::NONE).commit.as_deref(),
+        Some("天器")
+    );
+}
+
+#[test]
+fn reconvert_esc_puts_original_back() {
+    let mut h = Harness::new();
+    h.s.reconvert("天氣");
+    // 改了一個字之後放棄
+    h.press(Key::Home, Mods::NONE);
+    h.press(Key::Down, Mods::NONE);
+    h.press(Key::Char(b'2'), Mods::NONE);
+    let r = h.press(Key::Esc, Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some("天氣"));
+    assert!(r.preedit.text.is_empty());
+    assert!(!h.s.is_composing());
+}
+
+#[test]
+fn reconvert_lists_readings_when_ambiguous() {
+    let mut h = Harness::new();
+    // 「行」有四種讀音，最常用的在前
+    let r = h.s.reconvert("行");
+    let page = r.candidates.expect("讀音選單");
+    assert_eq!(page.items[0], "ㄒㄧㄥˊ");
+    assert!(page.items.iter().any(|i| i == "ㄏㄤˊ"));
+    assert!(r.preedit.text.is_empty(), "選讀音時 App 裡的選取不動");
+    // Esc：什麼都不送出
+    let r = h.press(Key::Esc, Mods::NONE);
+    assert_eq!(r.commit, None);
+    assert!(!h.s.is_composing());
+    // 選讀音 → 組字區是原本的字
+    h.s.reconvert("行");
+    let r = h.press(Key::Char(b'2'), Mods::NONE);
+    assert_eq!(r.preedit.text, "行");
+    assert_eq!(
+        h.press(Key::Enter, Mods::NONE).commit.as_deref(),
+        Some("行")
+    );
+    // 只有一種讀音的詞直接載入
+    assert_eq!(h.s.reconvert("銀行").preedit.text, "銀行");
+}
+
+#[test]
+fn reconvert_rejects_what_it_cannot_handle() {
+    let mut h = Harness::new();
+    for (text, notice) in [
+        ("", "先選取"),
+        ("hello", "只能重新選字中文"),
+        ("一二三四五六七八九十一二三四五六七八九十一", "一次最多"),
+    ] {
+        let r = h.s.reconvert(text);
+        assert!(
+            r.notice.as_deref().is_some_and(|n| n.contains(notice)),
+            "{text}: {:?}",
+            r.notice
+        );
+        assert!(!h.s.is_composing());
+    }
+}
+
+#[test]
+fn committed_text_remembers_its_reading() {
+    let mut h = Harness::new();
+    h.type_str("wu0 fu4");
+    h.press(Key::Enter, Mods::NONE);
+    let choices = h.s.engine().reading_choices("天氣");
+    assert_eq!(choices[0], vec!["ㄊㄧㄢ".to_string(), "ㄑㄧˋ".to_string()]);
+}

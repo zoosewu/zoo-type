@@ -136,6 +136,32 @@ fn set_selection(ctx: &ITfContext, ec: u32, range: &ITfRange) -> Result<()> {
     r
 }
 
+/// App 中選取的文字（最多讀 64 個 UTF-16 單位，夠判斷是否超過重新選字的上限）；讀不到時是空字串
+fn selected_text(client_id: u32, ctx: &ITfContext) -> String {
+    let out = std::rc::Rc::new(RefCell::new(String::new()));
+    let sink = out.clone();
+    let ctx2 = ctx.clone();
+    let session = EditSession::create(move |ec| {
+        unsafe {
+            let mut sel = [TF_SELECTION::default()];
+            let mut fetched = 0u32;
+            ctx2.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
+            let range = ManuallyDrop::into_inner(std::mem::take(&mut sel[0].range));
+            if let Some(range) = range.filter(|_| fetched == 1) {
+                let mut buf = [0u16; 64];
+                let mut n = 0u32;
+                range.GetText(ec, 0, &mut buf, &mut n)?;
+                *sink.borrow_mut() = String::from_utf16_lossy(&buf[..n as usize]);
+            }
+        }
+        Ok(())
+    });
+    unsafe {
+        let _ = ctx.RequestEditSession(client_id, &session, TF_ES_SYNC | TF_ES_READ);
+    }
+    out.take()
+}
+
 /// 目前游標（選取範圍）的螢幕矩形；App 沒排版好時回傳 None
 fn caret_rect(ctx: &ITfContext, ec: u32) -> Option<Rect> {
     unsafe {
@@ -285,6 +311,20 @@ impl TextService_Impl {
         }
         if lost.get() {
             self.reset(Request::Reset);
+        }
+    }
+
+    /// 重新選字：讀取選取的文字交給服務程序；回來的組字從選取範圍開始，組字文字取代選取的內容
+    fn reconvert(&self, ctx: &ITfContext) {
+        let text = selected_text(self.client_id(), ctx);
+        let req = Request::Reconvert { text };
+        let resp = self
+            .ipc
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut ipc| ipc.call_with(&req, std::time::Duration::from_secs(1)));
+        if let Some(Response::Key(r)) = resp {
+            self.apply(ctx, r);
         }
     }
 
@@ -600,9 +640,12 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             let Some(Response::Key(r)) = self.call(&Request::Key(ev)) else {
                 return Ok(false.into());
             };
-            let eaten = r.eaten;
+            let (eaten, reconvert) = (r.eaten, r.reconvert);
             if let Some(ctx) = pic.as_ref() {
                 self.apply(ctx, r);
+                if reconvert {
+                    self.reconvert(ctx);
+                }
             }
             Ok(eaten.into())
         })

@@ -162,6 +162,8 @@ pub struct HotkeyConfig {
     pub composition_bar: Binding,
     /// chewing 的符號選單（…、※、括號、希臘字母…）；預設不綁定（` 用來打主要符號）
     pub symbols: Binding,
+    /// 重新選字：App 中選取的文字變回組字區（改選字、加詞）
+    pub reconvert: Binding,
 }
 
 impl Default for HotkeyConfig {
@@ -177,6 +179,7 @@ impl Default for HotkeyConfig {
             ai: Binding::key("ctrl+shift+'"),
             composition_bar: Binding::key("ctrl+shift+f11"),
             symbols: Binding(None),
+            reconvert: Binding::key("ctrl+shift+/"),
         }
     }
 }

@@ -315,6 +315,21 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 None => Response::Key(KeyResult::default()),
             },
+            Request::Reconvert { text } => match session.as_mut() {
+                Some(s) => {
+                    let start = std::time::Instant::now();
+                    let r = s.reconvert(&text);
+                    // 不記文字內容（log 不能有打字內容）
+                    log::info!(
+                        "[{id}] 重新選字：{} 個字，{} ms",
+                        text.chars().count(),
+                        start.elapsed().as_millis()
+                    );
+                    last = Some((r.clone(), hint(&r, None)));
+                    Response::Key(r)
+                }
+                None => Response::Key(KeyResult::default()),
+            },
             Request::Caret { rect, fresh } => {
                 if shared.debug_keys {
                     log::info!("[{id}] 游標位置 {rect:?} fresh={fresh}");

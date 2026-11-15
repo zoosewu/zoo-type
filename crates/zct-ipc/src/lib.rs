@@ -11,7 +11,7 @@ pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
 /// 12：程式改名為 zoo-type-*（舊版服務程序不能讓位給不同檔名的新版，改走協定不同的唯讀模式）
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -53,6 +53,8 @@ pub enum Request {
     TestKeyDown(KeyEvent),
     /// `OnKeyDown` / `OnTestKeyUp`：回 `Key`
     Key(KeyEvent),
+    /// 重新選字：App 中選取的文字（`KeyResult::reconvert` 之後送來；讀不到時是空字串）→ `Key`
+    Reconvert { text: String },
     /// 游標矩形；`None` 表示取不到。`fresh = false`：App 這次沒回報位置
     /// （例如 VS Code 剛輸出完還在排版），`rect` 是 DLL 沿用的舊位置或系統游標
     Caret { rect: Option<Rect>, fresh: bool },

@@ -39,11 +39,16 @@ pub struct Ipc {
 
 impl Ipc {
     pub fn call(&mut self, req: &Request) -> Option<Response> {
+        self.call_with(req, CALL_TIMEOUT)
+    }
+
+    /// 使用者明確要求、可以等久一點的呼叫（例如重新選字要讀詞庫檔）
+    pub fn call_with(&mut self, req: &Request, timeout: Duration) -> Option<Response> {
         if self.client.is_none() && !self.connect() {
             return None;
         }
         let client = self.client.as_mut()?;
-        match client.call(req, CALL_TIMEOUT) {
+        match client.call(req, timeout) {
             Ok(r) => Some(r),
             Err(_) => {
                 self.client = None;

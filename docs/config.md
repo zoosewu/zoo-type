@@ -39,6 +39,7 @@ emoji = "ctrl+shift+;"     # Emoji：以組字內容當關鍵字搜尋；沒有�
 ai = "ctrl+shift+'"         # AI 修正組字內容中的同音錯字
 composition_bar = "ctrl+shift+f11"  # 切換目前 App 的組字提示列（自動寫進 apps.toml 記住）
 symbols = ""               # chewing 的符號選單（…、※、希臘字母）；預設不綁定，` 用來打主要符號
+reconvert = "ctrl+shift+/" # 重新選字：App 中選取的文字回到組字區（改選字、加詞；Esc 放棄）
 
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
 legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）

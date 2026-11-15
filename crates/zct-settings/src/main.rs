@@ -157,6 +157,7 @@ fn hotkeys_from(c: &Config) -> Hotkeys {
         ai: binding_text(&h.ai),
         bar: binding_text(&h.composition_bar),
         symbols: binding_text(&h.symbols),
+        reconvert: binding_text(&h.reconvert),
     }
 }
 
@@ -170,6 +171,7 @@ fn apply_hotkeys(c: &mut Config, h: &Hotkeys) -> Result<(), String> {
     c.hotkeys.ai = parse_binding(&h.ai)?;
     c.hotkeys.composition_bar = parse_binding(&h.bar)?;
     c.hotkeys.symbols = parse_binding(&h.symbols)?;
+    c.hotkeys.reconvert = parse_binding(&h.reconvert)?;
     Ok(())
 }
 

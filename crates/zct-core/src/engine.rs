@@ -131,7 +131,12 @@ pub struct Engine {
     corrections: Mutex<std::collections::BTreeMap<String, u32>>,
     /// 自訂縮寫
     abbrevs: std::sync::RwLock<crate::abbrev::Abbrevs>,
+    /// 最近送出的中文與當時的讀音（新的在後）：重新選字時最準的讀音來源
+    recent: Mutex<std::collections::VecDeque<(String, Vec<String>)>>,
 }
+
+/// 記住最近幾段送出的文字
+const RECENT_COMMITS: usize = 50;
 
 /// UTC 日期，避免為此引入時間函式庫
 pub fn today() -> String {
@@ -298,6 +303,7 @@ impl Engine {
             abbrevs: std::sync::RwLock::new(crate::abbrev::Abbrevs::parse(
                 &std::fs::read_to_string(dir.join(ABBREVS)).unwrap_or_default(),
             )),
+            recent: Mutex::default(),
         };
         engine.migrate_normal_boost();
         Ok(engine)
@@ -420,6 +426,44 @@ impl Engine {
             .unwrap_or_else(|e| e.into_inner())
             .remove(word, in_dictionary);
         was
+    }
+
+    /// 記住剛送出的中文與讀音（只在記憶體，不寫檔）
+    pub(crate) fn remember_reading(&self, text: String, syllables: Vec<String>) {
+        if text.is_empty() || text.chars().count() != syllables.len() {
+            return;
+        }
+        let mut recent = self.recent.lock().unwrap_or_else(|e| e.into_inner());
+        if recent.len() == RECENT_COMMITS {
+            recent.pop_front();
+        }
+        recent.push_back((text, syllables));
+    }
+
+    /// 重新選字：一段文字可能的讀音，最可能的在前。最近送出過的用當時的讀音，其次查系統詞庫的 tsi.csv
+    pub fn reading_choices(&self, text: &str) -> Vec<Vec<String>> {
+        const MAX: usize = 9;
+        let mut out: Vec<Vec<String>> = Vec::new();
+        {
+            let recent = self.recent.lock().unwrap_or_else(|e| e.into_inner());
+            for (sent, syl) in recent.iter().rev() {
+                if let Some(at) = sent.find(text) {
+                    let start = sent[..at].chars().count();
+                    let s = syl[start..start + text.chars().count()].to_vec();
+                    if !out.contains(&s) {
+                        out.push(s);
+                    }
+                    break;
+                }
+            }
+        }
+        let csv = std::fs::read_to_string(self.sys_dir.join("tsi.csv")).unwrap_or_default();
+        for s in crate::readings::Readings::for_text(&csv, text).choices(text, MAX) {
+            if out.len() < MAX && !out.contains(&s) {
+                out.push(s);
+            }
+        }
+        out
     }
 
     /// 使用者的英文單字（設定程式的詞庫頁）：讀音留空；加入的是一般、排除的是封鎖。

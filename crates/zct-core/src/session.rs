@@ -78,6 +78,8 @@ pub struct KeyResult {
     pub bell: bool,
     /// 使用者按了組字提示列快捷鍵：由服務程序切換這個 App 的設定並記住
     pub toggle_composition_bar: bool,
+    /// 使用者按了重新選字快捷鍵：平台層讀取 App 中選取的文字，交給 [`Session::reconvert`]
+    pub reconvert: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -130,13 +132,97 @@ impl Extra {
     }
 }
 
-/// Emoji 選擇中的狀態
+/// 不經過 chewing 的候選清單（Emoji、重新選字的讀音）：翻頁與選擇框
 #[derive(Debug)]
-struct EmojiPick {
+struct ListPick {
     items: Vec<String>,
     page: usize,
     highlight: usize,
 }
+
+enum ListAction {
+    Stay,
+    Cancel,
+    /// 選了第幾項（整份清單的索引）
+    Choose(usize),
+}
+
+impl ListPick {
+    fn new(items: Vec<String>) -> ListPick {
+        ListPick {
+            items,
+            page: 0,
+            highlight: 0,
+        }
+    }
+
+    /// ↑ ↓ 移動選擇框（超出本頁就換頁）、← → 空白翻頁、Enter / 數字選擇、Esc 取消
+    fn key(&mut self, ev: &KeyEvent, per_page: usize) -> ListAction {
+        let pages = self.items.len().div_ceil(per_page).max(1);
+        let len = self.items.len();
+        let page_len = |page: usize| (len - page * per_page).min(per_page);
+        let chosen = match ev.key {
+            Key::Esc => return ListAction::Cancel,
+            Key::Down if self.highlight + 1 < page_len(self.page) => {
+                self.highlight += 1;
+                None
+            }
+            Key::Down | Key::Right | Key::PageDown | Key::Space => {
+                self.page = (self.page + 1) % pages;
+                self.highlight = 0;
+                None
+            }
+            Key::Up if self.highlight > 0 => {
+                self.highlight -= 1;
+                None
+            }
+            Key::Up | Key::Left | Key::PageUp => {
+                self.page = (self.page + pages - 1) % pages;
+                self.highlight = if ev.key == Key::Up {
+                    page_len(self.page) - 1
+                } else {
+                    0
+                };
+                None
+            }
+            Key::Enter => Some(self.highlight),
+            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() => {
+                let d = (c - b'0') as usize;
+                let i = if d == 0 { 9 } else { d - 1 };
+                (i < page_len(self.page)).then_some(i)
+            }
+            _ => None,
+        };
+        match chosen {
+            Some(i) => ListAction::Choose(self.page * per_page + i),
+            None => ListAction::Stay,
+        }
+    }
+
+    fn page(&self, per_page: usize) -> CandidatePage {
+        let start = self.page * per_page;
+        let items = self.items[start..(start + per_page).min(self.items.len())].to_vec();
+        CandidatePage {
+            pinned: vec![false; items.len()],
+            items,
+            page: self.page,
+            total_pages: self.items.len().div_ceil(per_page).max(1),
+            highlight: self.highlight,
+            ..Default::default()
+        }
+    }
+}
+
+/// 重新選字：讀音有多種時先選讀音
+#[derive(Debug)]
+struct ReadingPick {
+    text: String,
+    choices: Vec<Vec<String>>,
+    list: ListPick,
+}
+
+/// 重新選字一次最多幾個字
+const RECONVERT_MAX: usize = 20;
 
 #[derive(Debug)]
 pub struct Session {
@@ -164,7 +250,13 @@ pub struct Session {
     english_alt: Option<String>,
     /// E：游標前最後一個字（本輸入法送出的，或交給 App 的按鍵）；未知時為 None
     last_char: Option<char>,
-    emoji: Option<EmojiPick>,
+    emoji: Option<ListPick>,
+    /// 重新選字：選讀音中
+    reading: Option<ReadingPick>,
+    /// 重新選字的原文：Esc 放棄時送回去（組字清空後就不需要了）
+    reconvert_original: Option<String>,
+    /// 這次按鍵前的組字內容與每個字的讀音：送出時記住讀音，重新選字用
+    last_shape: Option<(String, Vec<Option<String>>)>,
     ai: Option<AiPick>,
     ai_enabled: bool,
     /// 候選窗目前在額外選項頁（Emoji、注音；選字時按 Tab 切換）
@@ -225,6 +317,9 @@ impl Session {
             english_alt: None,
             last_char: None,
             emoji: None,
+            reading: None,
+            reconvert_original: None,
+            last_shape: None,
             ai: None,
             ai_enabled: opts.config.ai.enabled,
             extras_page: false,
@@ -301,6 +396,7 @@ impl Session {
             || self.editor.entering_syllable()
             || self.editor.is_selecting()
             || self.emoji.is_some()
+            || self.reading.is_some()
     }
 
     fn chinese_hotkey(&self, ev: &KeyEvent) -> bool {
@@ -418,8 +514,8 @@ impl Session {
         {
             return true;
         }
-        // Emoji 選擇中：除了組合鍵，按鍵都由 Emoji 選擇處理
-        if self.emoji.is_some() {
+        // Emoji、重新選字的讀音選擇中：除了組合鍵，按鍵都由選單處理
+        if self.emoji.is_some() || self.reading.is_some() {
             return !ev.mods.has_command_modifier();
         }
         if self.hotkeys.game_mode.matches(ev)
@@ -430,6 +526,10 @@ impl Session {
         }
         if self.game_mode() == GameMode::English {
             return false;
+        }
+        // 重新選字：沒在組字時才有作用（組字中交給 App）
+        if self.hotkeys.reconvert.matches(ev) && !self.is_composing() {
+            return true;
         }
         // 右 Alt + 注音鍵：打那個鍵本身的符號（設定開啟時）
         if self.mode == InputMode::Chinese
@@ -834,11 +934,7 @@ impl Session {
         if items.is_empty() {
             return Some(format!("找不到「{keyword}」的 Emoji"));
         }
-        self.emoji = Some(EmojiPick {
-            items,
-            page: 0,
-            highlight: 0,
-        });
+        self.emoji = Some(ListPick::new(items));
         None
     }
 
@@ -847,47 +943,159 @@ impl Session {
         let Some(pick) = self.emoji.as_mut() else {
             return;
         };
-        let pages = pick.items.len().div_ceil(per_page).max(1);
-        let page_len = |page: usize| (pick.items.len() - page * per_page).min(per_page);
-        let mut chosen = None;
-        match ev.key {
-            Key::Esc => {
+        match pick.key(ev, per_page) {
+            ListAction::Stay => {}
+            ListAction::Cancel => self.emoji = None,
+            ListAction::Choose(i) => {
+                let emoji = pick.items[i].clone();
+                // 關鍵字（組字內容）由 Emoji 取代
                 self.emoji = None;
-                return;
+                self.editor.clear();
+                self.raw.clear();
+                self.english_alt = None;
+                commit.push_str(&emoji);
             }
-            Key::Down if pick.highlight + 1 < page_len(pick.page) => pick.highlight += 1,
-            Key::Down | Key::Right | Key::PageDown | Key::Space => {
-                pick.page = (pick.page + 1) % pages;
-                pick.highlight = 0;
+        }
+    }
+
+    /// 重新選字：App 中選取的文字變回組字區，每個字都選好原本的字；讀音有多種時先列讀音讓使用者選
+    pub fn reconvert(&mut self, text: &str) -> KeyResult {
+        let mut r = KeyResult {
+            eaten: true,
+            ..Default::default()
+        };
+        let text = text.trim();
+        let problem = if self.is_composing() {
+            Some("組字中不能重新選字".to_owned())
+        } else if text.is_empty() {
+            Some("先選取要重新選字的文字".to_owned())
+        } else if text.chars().count() > RECONVERT_MAX {
+            Some(format!("一次最多 {RECONVERT_MAX} 個字"))
+        } else if !text.chars().all(crate::mixed::is_cjk) {
+            Some("只能重新選字中文".to_owned())
+        } else {
+            None
+        };
+        if problem.is_some() {
+            r.notice = problem;
+            return self.finish(r, String::new());
+        }
+        let mut choices = self.engine.reading_choices(text);
+        match choices.len() {
+            0 => r.notice = Some(format!("查不到「{text}」的讀音")),
+            1 => self.load_reconvert(text, &choices.remove(0)),
+            _ => {
+                let labels = choices.iter().map(|s| s.join(" ")).collect();
+                self.reading = Some(ReadingPick {
+                    text: text.to_owned(),
+                    choices,
+                    list: ListPick::new(labels),
+                });
             }
-            Key::Up if pick.highlight > 0 => pick.highlight -= 1,
-            Key::Up | Key::Left | Key::PageUp => {
-                pick.page = (pick.page + pages - 1) % pages;
-                pick.highlight = if ev.key == Key::Up {
-                    page_len(pick.page) - 1
-                } else {
-                    0
-                };
+        }
+        self.finish(r, String::new())
+    }
+
+    /// 讀音選單的按鍵：選好就載入組字區；Esc 放棄（App 中的選取沒有動過）
+    fn reading_key(&mut self, ev: &KeyEvent) {
+        let per_page = self.per_page;
+        let Some(pick) = self.reading.as_mut() else {
+            return;
+        };
+        match pick.list.key(ev, per_page) {
+            ListAction::Stay => {}
+            ListAction::Cancel => self.reading = None,
+            ListAction::Choose(i) => {
+                let pick = self.reading.take().expect("讀音選單");
+                self.load_reconvert(&pick.text, &pick.choices[i]);
             }
-            Key::Enter => chosen = Some(pick.highlight),
-            Key::Char(c) | Key::Numpad(c) if c.is_ascii_digit() => {
-                let d = (c - b'0') as usize;
-                let i = if d == 0 { 9 } else { d - 1 };
-                if i < page_len(pick.page) {
-                    chosen = Some(i);
+        }
+    }
+
+    /// 依讀音打進組字區，再把每個位置選成原本的字
+    fn load_reconvert(&mut self, text: &str, syllables: &[String]) {
+        self.editor.clear();
+        for keys in syllables
+            .iter()
+            .filter_map(|s| crate::readings::keys_for(s))
+        {
+            for b in keys.bytes() {
+                self.chewing_key(if b == b' ' { Key::Space } else { Key::Char(b) });
+            }
+        }
+        let want: Vec<char> = text.chars().collect();
+        // 每次修正最左邊不一樣的位置：選從那裡開始、和原文一樣的最長候選
+        for _ in 0..want.len() {
+            let shown: Vec<char> = self.editor.display().chars().collect();
+            let Some(pos) = (0..want.len()).find(|&i| shown.get(i) != Some(&want[i])) else {
+                break;
+            };
+            self.chewing_key(Key::Home);
+            for _ in 0..pos {
+                self.chewing_key(Key::Right);
+            }
+            self.chewing_key(Key::Down);
+            if !self.editor.is_selecting() {
+                break;
+            }
+            self.build_menu();
+            let best = self.menu.as_ref().and_then(|m| {
+                m.items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, it)| {
+                        matches!(it.kind, MenuKind::Word { .. })
+                            && want[pos..].starts_with(&it.word.chars().collect::<Vec<_>>())
+                    })
+                    .max_by_key(|(_, it)| it.word.chars().count())
+                    .map(|(i, _)| i)
+            });
+            match best {
+                Some(i) => self.select_menu(i),
+                None => {
+                    let _ = self.editor.cancel_selecting();
+                    self.menu = None;
+                    break;
                 }
             }
-            _ => {}
         }
-        if let Some(i) = chosen {
-            let emoji = pick.items[pick.page * per_page + i].clone();
-            // 關鍵字（組字內容）由 Emoji 取代
-            self.emoji = None;
-            self.editor.clear();
-            self.raw.clear();
-            self.english_alt = None;
-            commit.push_str(&emoji);
+        if self.editor.is_selecting() {
+            let _ = self.editor.cancel_selecting();
         }
+        self.menu = None;
+        self.chewing_key(Key::End);
+        // 還原原文不算選字修正
+        self.picks.clear();
+        self.raw.clear();
+        self.english_alt = None;
+        self.reconvert_original = Some(text.to_owned());
+    }
+
+    /// 送出的文字記住讀音（用按鍵前的組字內容對照）
+    fn remember_readings(&self, committed: &str) {
+        let Some((display, syllables)) = &self.last_shape else {
+            return;
+        };
+        if !display.starts_with(committed) {
+            return;
+        }
+        let (mut text, mut syl) = (String::new(), Vec::new());
+        let flush = |text: &mut String, syl: &mut Vec<String>| {
+            if !text.is_empty() {
+                self.engine
+                    .remember_reading(std::mem::take(text), std::mem::take(syl));
+            }
+        };
+        for (c, s) in committed.chars().zip(syllables) {
+            match s {
+                Some(s) if crate::mixed::is_cjk(c) => {
+                    text.push(c);
+                    syl.push(s.clone());
+                }
+                _ => flush(&mut text, &mut syl),
+            }
+        }
+        flush(&mut text, &mut syl);
     }
 
     /// 送給 chewing 之前，依按鍵更新目前音節的原始按鍵；回傳這個鍵是否完成一個音節
@@ -941,6 +1149,32 @@ impl Session {
     pub fn process_key(&mut self, ev: &KeyEvent) -> KeyResult {
         let mut r = KeyResult::default();
         let mut commit = String::new();
+        self.last_shape = (!self.editor.is_empty()).then(|| {
+            let syllables = self
+                .editor
+                .symbols()
+                .iter()
+                .map(|s| s.to_syllable().map(|s| s.to_string()))
+                .collect();
+            (self.editor.display(), syllables)
+        });
+
+        // 重新選字中按 Esc（沒有在選字、打注音）：放棄修改，原文送回去（不做繁簡轉換）
+        if ev.key == Key::Esc
+            && !ev.released
+            && !self.editor.is_selecting()
+            && !self.editor.entering_syllable()
+            && self.emoji.is_none()
+            && let Some(original) = self.reconvert_original.take()
+        {
+            self.editor.clear();
+            self.picks.clear();
+            self.last_char = original.chars().last();
+            r.eaten = true;
+            let mut r = self.finish(r, String::new());
+            r.commit = Some(original);
+            return r;
+        }
 
         // 遊戲模式下 Shift 不切換中英
         if self.shift.observe(ev) && self.game_mode() == GameMode::Off {
@@ -963,6 +1197,10 @@ impl Session {
 
         if self.test_key(ev) {
             r.eaten = true;
+            if self.reading.is_some() {
+                self.reading_key(ev);
+                return self.finish(r, commit);
+            }
             // Enter 送出整句之前：確認這次的選字修正
             if ev.key == Key::Enter
                 && !ev.mods.shift
@@ -1013,6 +1251,8 @@ impl Session {
                 r.notice = self.open_emoji();
             } else if self.hotkeys.composition_bar.matches(ev) {
                 r.toggle_composition_bar = true;
+            } else if self.hotkeys.reconvert.matches(ev) && !self.is_composing() {
+                r.reconvert = true;
             } else if self.hotkeys.game_mode.matches(ev) {
                 let text = self.flush();
                 self.join(&mut commit, &text);
@@ -1178,6 +1418,9 @@ impl Session {
         if !commit.is_empty() {
             self.last_char = commit.chars().last();
             r.commit = Some(self.convert(&commit));
+        }
+        if self.editor.is_empty() {
+            self.reconvert_original = None;
         }
         r.preedit = self.preedit();
         r.candidates = self.candidates();
@@ -1642,6 +1885,8 @@ impl Session {
         self.english_alt = None;
         self.last_char = None;
         self.emoji = None;
+        self.reading = None;
+        self.reconvert_original = None;
         self.ai = None;
         self.extras_page = false;
         self.word_backspace = false;
@@ -1718,16 +1963,10 @@ impl Session {
             });
         }
         if let Some(pick) = &self.emoji {
-            let start = pick.page * self.per_page;
-            let items = pick.items[start..(start + self.per_page).min(pick.items.len())].to_vec();
-            return Some(CandidatePage {
-                pinned: vec![false; items.len()],
-                items,
-                page: pick.page,
-                total_pages: pick.items.len().div_ceil(self.per_page).max(1),
-                highlight: pick.highlight,
-                ..Default::default()
-            });
+            return Some(pick.page(self.per_page));
+        }
+        if let Some(pick) = &self.reading {
+            return Some(pick.list.page(self.per_page));
         }
         if !self.editor.is_selecting() {
             return None;
@@ -1798,6 +2037,7 @@ impl Session {
         let text = self.editor.display_commit().to_owned();
         if !text.is_empty() {
             self.learn_shift_words(&text);
+            self.remember_readings(&text);
             self.editor.ack();
             // chewing 送出時會更新學習紀錄（記憶體中），存檔交給服務程序
             self.engine.record(text.chars().count() as u64, 0);
