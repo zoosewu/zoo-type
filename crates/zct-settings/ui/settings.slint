@@ -671,7 +671,7 @@ export component SettingsWindow inherits Window {
                     wrap: word-wrap;
                 }
                 Row { label: "啟用"; Switch { checked <=> root.ai.enabled; } }
-                Row { label: "端點（OpenAI 相容）"; LineEdit { width: 360px; text <=> root.ai.endpoint; placeholder-text: "http://localhost:11434/v1"; } }
+                Row { label: "端點（OpenAI 相容）"; LineEdit { width: 360px; text <=> root.ai.endpoint; placeholder-text: "http://localhost:1234/v1"; } }
                 Row { label: "模型"; LineEdit { width: 240px; text <=> root.ai.model; placeholder-text: "qwen3.5:2b"; } }
                 Row { label: "逾時（秒）"; SpinBox { width: 160px; minimum: 1; maximum: 120; value <=> root.ai.timeout; } }
                 Row {

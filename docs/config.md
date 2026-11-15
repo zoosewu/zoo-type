@@ -62,7 +62,7 @@ auto_check = true          # 每天檢查 GitHub Releases；有新版時輸入�
 
 [ai]                       # AI 同音字修正（OpenAI 相容 API）；API Key 在設定程式輸入，存在 Windows 認證管理員
 enabled = false
-endpoint = "http://localhost:11434/v1"   # Ollama；LM Studio 為 http://localhost:1234/v1
+endpoint = "http://localhost:1234/v1"    # LM Studio（lms server start）；Ollama 為 http://localhost:11434/v1
 model = ""                 # 例：qwen3.5:2b
 timeout_seconds = 15
 

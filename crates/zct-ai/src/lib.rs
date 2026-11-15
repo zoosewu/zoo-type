@@ -14,7 +14,7 @@ pub const SYSTEM_PROMPT: &str = "你是繁體中文注音輸入法的同音字�
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
-    /// 例如 `http://localhost:11434/v1`（Ollama）、`https://api.openai.com/v1`
+    /// 例如 `http://localhost:1234/v1`（LM Studio）、`https://api.openai.com/v1`
     pub base_url: String,
     pub model: String,
     /// 沒有金鑰的本機服務可以留空

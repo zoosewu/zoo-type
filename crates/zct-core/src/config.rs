@@ -210,7 +210,7 @@ impl Default for DetectConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct AiConfig {
     pub enabled: bool,
-    /// 例如 Ollama `http://localhost:11434/v1`、LM Studio `http://localhost:1234/v1`
+    /// 例如 LM Studio `http://localhost:1234/v1`、Ollama `http://localhost:11434/v1`
     pub endpoint: String,
     pub model: String,
     pub timeout_seconds: u64,
@@ -220,7 +220,7 @@ impl Default for AiConfig {
     fn default() -> Self {
         AiConfig {
             enabled: false,
-            endpoint: "http://localhost:11434/v1".into(),
+            endpoint: "http://localhost:1234/v1".into(),
             model: String::new(),
             timeout_seconds: 15,
         }

@@ -5,7 +5,7 @@
 //! cargo run -p zct-eval --release                      # 預設設定
 //! cargo run -p zct-eval --release -- --no-sort         # 關閉依頻率排序比較
 //! cargo run -p zct-eval --release -- --show 20         # 列出錯誤的片段
-//! cargo run -p zct-eval --release -- --ai http://localhost:11434/v1 qwen3:4b   # AI 修正評測
+//! cargo run -p zct-eval --release -- --ai http://localhost:1234/v1 qwen3.5-9b   # AI 修正評測
 //! ```
 
 use std::path::PathBuf;
