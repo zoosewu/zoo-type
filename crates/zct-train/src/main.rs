@@ -113,10 +113,10 @@ fn extract(out_dir: &Path, dumps: &[PathBuf]) -> std::io::Result<()> {
         let reader = BufReader::with_capacity(1 << 20, bzip2::read::MultiBzDecoder::new(file));
         wiki::articles(reader, |text| {
             n += 1;
-            if n % 10_000 == 0 {
+            if n.is_multiple_of(10_000) {
                 eprintln!("  {n} 篇");
             }
-            let _ = job_tx.send((n % HELDOUT_EVERY == 0, text.to_owned()));
+            let _ = job_tx.send((n.is_multiple_of(HELDOUT_EVERY), text.to_owned()));
         })?;
     }
     drop(job_tx);
@@ -166,7 +166,7 @@ fn train(args: &[String]) -> std::io::Result<()> {
             });
         }
         lines += 1;
-        if lines % 1_000_000 == 0 {
+        if lines.is_multiple_of(1_000_000) {
             let sizes: Vec<usize> = maps.iter().map(HashMap::len).collect();
             eprintln!("  {lines} 句，各階筆數 {sizes:?}");
         }
