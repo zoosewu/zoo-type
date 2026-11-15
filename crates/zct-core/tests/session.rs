@@ -1607,6 +1607,23 @@ fn ai_same_as_original_is_not_shown() {
 }
 
 #[test]
+fn ai_only_changes_chars_with_the_typed_reading() {
+    let mut h = Harness::with_config(ai_on());
+    let original = type_zai(&mut h); // 可以在：ㄎㄜˇ ㄧˇ ㄗㄞˋ
+    h.press(Key::Char(b'\''), ctrl_shift());
+    // 「已」讀音是 ㄧˇ（同音，接受）；「才」是 ㄘㄞˊ（不是使用者打的音，還原）
+    assert!(h.s.set_ai_suggestion(&original, "可已才".into()));
+    assert_eq!(
+        h.s.candidates().unwrap().items,
+        vec![format!("可已{}", original.chars().nth(2).unwrap())]
+    );
+    // 全部不符：丟掉
+    h.press(Key::Esc, Mods::NONE);
+    h.press(Key::Char(b'\''), ctrl_shift());
+    assert!(!h.s.set_ai_suggestion(&original, "我們才".into()));
+}
+
+#[test]
 fn ai_disabled_shows_notice() {
     let mut h = Harness::new();
     type_zai(&mut h);

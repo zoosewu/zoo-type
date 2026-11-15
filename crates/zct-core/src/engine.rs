@@ -351,6 +351,34 @@ impl Engine {
             .unwrap_or(0)
     }
 
+    /// AI 修正只接受讀音和使用者打的注音相同的字：讀音不符（或不是中文音節）的位置還原成原字
+    ///
+    /// `syllables`：原文每個字的讀音（英文、符號是 None）。判斷用詞庫裡這個字有沒有這個讀音，
+    /// 查不到的罕用字也還原（寧可不修）
+    pub fn keep_same_reading(
+        &self,
+        original: &str,
+        syllables: &[Option<String>],
+        suggestion: &str,
+    ) -> String {
+        if original.chars().count() != suggestion.chars().count() {
+            return original.to_owned();
+        }
+        original
+            .chars()
+            .zip(suggestion.chars())
+            .enumerate()
+            .map(|(i, (o, s))| {
+                let ok = o == s
+                    || syllables
+                        .get(i)
+                        .and_then(Option::as_deref)
+                        .is_some_and(|r| self.char_usage(s, r) > 0);
+                if ok { s } else { o }
+            })
+            .collect()
+    }
+
     fn usage(&self) -> &CharUsage {
         self.char_usage
             .get_or_init(|| load_char_usage(&self.sys_dir.join("tsi.csv")))

@@ -109,9 +109,17 @@ fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> 
 type AiMailbox = Arc<Mutex<Option<(String, Result<String, String>)>>>;
 
 /// 在背景呼叫 AI；結果放進信箱，並直接更新候選窗（不必等下一次按鍵）
-fn spawn_ai(id: u64, original: String, shared: &Shared, mailbox: AiMailbox) {
+/// `syllables`：組字區每個字的讀音；AI 結果只接受讀音相同的字，顯示的就是按 Enter 會採用的
+fn spawn_ai(
+    id: u64,
+    original: String,
+    syllables: Vec<Option<String>>,
+    shared: &Shared,
+    mailbox: AiMailbox,
+) {
     let cfg = shared.settings.current().0.ai;
     let ui = shared.ui.clone();
+    let engine = shared.engine.clone();
     let endpoint = zct_ai::Endpoint {
         base_url: cfg.endpoint.clone(),
         model: cfg.model.clone(),
@@ -119,7 +127,9 @@ fn spawn_ai(id: u64, original: String, shared: &Shared, mailbox: AiMailbox) {
         timeout: Duration::from_secs(cfg.timeout_seconds.max(1)),
     };
     std::thread::spawn(move || {
-        let result = zct_ai::correct(&endpoint, &original).map_err(|e| e.to_string());
+        let result = zct_ai::correct(&endpoint, &original)
+            .map(|fixed| engine.keep_same_reading(&original, &syllables, &fixed))
+            .map_err(|e| e.to_string());
         match &result {
             Ok(fixed) if *fixed != original => ui.send(UiCmd::Show {
                 owner: id,
@@ -290,7 +300,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                         }
                     }
                     if let Some(text) = &r.ai_request {
-                        spawn_ai(id, text.clone(), shared, mailbox.clone());
+                        spawn_ai(id, text.clone(), s.syllables(), shared, mailbox.clone());
                     }
                     let game = r.toggle_game.then(|| {
                         let on = !shared.game.fetch_xor(true, Ordering::Relaxed);

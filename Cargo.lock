@@ -6424,6 +6424,7 @@ name = "zct-eval"
 version = "0.1.2"
 dependencies = [
  "tempfile",
+ "zct-ai",
  "zct-core",
 ]
 

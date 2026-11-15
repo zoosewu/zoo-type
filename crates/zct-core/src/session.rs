@@ -884,9 +884,23 @@ impl Session {
         "AI 修正中…".into()
     }
 
+    /// 組字區每個字的讀音（英文、符號是 None）
+    pub fn syllables(&self) -> Vec<Option<String>> {
+        self.editor
+            .symbols()
+            .iter()
+            .map(|s| s.to_syllable().map(|s| s.to_string()))
+            .collect()
+    }
+
     /// 服務程序交回 AI 結果；組字內容已經改變（使用者繼續打字）時忽略。回傳是否採用為候選
+    ///
+    /// 只接受讀音和組字區相同的字（不是使用者打的音就不算同音錯字）；全部不符就丟掉
     pub fn set_ai_suggestion(&mut self, original: &str, suggestion: String) -> bool {
         let current = self.editor.display();
+        let suggestion = self
+            .engine
+            .keep_same_reading(original, &self.syllables(), &suggestion);
         let valid = self.ai.as_ref().is_some_and(|a| {
             a.original == original && current == original && suggestion != original
         });
@@ -1149,15 +1163,8 @@ impl Session {
     pub fn process_key(&mut self, ev: &KeyEvent) -> KeyResult {
         let mut r = KeyResult::default();
         let mut commit = String::new();
-        self.last_shape = (!self.editor.is_empty()).then(|| {
-            let syllables = self
-                .editor
-                .symbols()
-                .iter()
-                .map(|s| s.to_syllable().map(|s| s.to_string()))
-                .collect();
-            (self.editor.display(), syllables)
-        });
+        self.last_shape =
+            (!self.editor.is_empty()).then(|| (self.editor.display(), self.syllables()));
 
         // 重新選字中按 Esc（沒有在選字、打注音）：放棄修改，原文送回去（不做繁簡轉換）
         if ev.key == Key::Esc

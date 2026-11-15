@@ -44,6 +44,96 @@ impl Report {
     }
 }
 
+/// AI 修正評測：輸入法首選送去修正（只接受讀音相同的字）後，和原文比
+#[derive(Debug, Default, Clone)]
+pub struct AiReport {
+    pub runs: usize,
+    pub chars: usize,
+    /// 修正前 / 後的正確字數
+    pub correct_before: usize,
+    pub correct_after: usize,
+    /// 原本錯、AI 修好的片段
+    pub fixed: usize,
+    /// 原本對、AI 改壞的片段（最重要：寧可漏修）
+    pub broken: usize,
+    /// AI 呼叫失敗（逾時、改寫字數…）
+    pub failed: usize,
+    pub total_ms: u128,
+    /// （原文, 輸入法首選, AI 修正後）有變化的片段
+    pub changes: Vec<(String, String, String)>,
+}
+
+/// 每個片段：照讀音打字取得首選，再交給 `correct`（呼叫 AI），用 [`Engine::keep_same_reading`] 過濾
+pub fn evaluate_ai(
+    engine: Arc<Engine>,
+    config: Config,
+    readings: &Readings,
+    corpus: &str,
+    correct: impl Fn(&str) -> Result<String, String>,
+) -> AiReport {
+    let mut session = Session::new(&SessionOptions {
+        engine: engine.clone(),
+        config,
+        rule: None,
+    })
+    .expect("建立 session");
+    let mut report = AiReport::default();
+    let mut t = 0u64;
+    for line in corpus
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+    {
+        for run in runs(line) {
+            let Some(syllables) = readings.read(&run) else {
+                continue;
+            };
+            let Some(keys) = syllables
+                .iter()
+                .map(|s| keys_for(s))
+                .collect::<Option<String>>()
+            else {
+                continue;
+            };
+            session.reset();
+            for b in keys.bytes() {
+                let key = if b == b' ' { Key::Space } else { Key::Char(b) };
+                t += 20;
+                session.process_key(&KeyEvent::down(key, Mods::NONE, t));
+                t += 20;
+                session.process_key(&KeyEvent::up(key, Mods::NONE, t));
+            }
+            let got = session.preedit().text;
+            let start = std::time::Instant::now();
+            let reply = correct(&got);
+            report.total_ms += start.elapsed().as_millis();
+            let syl: Vec<Option<String>> = syllables.into_iter().map(Some).collect();
+            let after = match reply {
+                Ok(s) => engine.keep_same_reading(&got, &syl, &s),
+                Err(_) => {
+                    report.failed += 1;
+                    got.clone()
+                }
+            };
+            let score = |s: &str| run.chars().zip(s.chars()).filter(|(a, b)| a == b).count();
+            report.runs += 1;
+            report.chars += run.chars().count();
+            report.correct_before += score(&got);
+            report.correct_after += score(&after);
+            if got != run && after == run {
+                report.fixed += 1;
+            }
+            if got == run && after != run {
+                report.broken += 1;
+            }
+            if after != got {
+                report.changes.push((run, got, after));
+            }
+        }
+    }
+    session.reset();
+    report
+}
+
 /// 逐片段模擬打字，比對首選（不送出，所以不會產生學習紀錄影響後面的片段）
 pub fn evaluate(engine: Arc<Engine>, config: Config, readings: &Readings, corpus: &str) -> Report {
     let mut session = Session::new(&SessionOptions {
