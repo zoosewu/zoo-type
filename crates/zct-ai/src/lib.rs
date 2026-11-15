@@ -113,9 +113,21 @@ pub fn validate(original: &str, reply: &str) -> Result<String, AiError> {
 }
 
 fn chat(ep: &Endpoint, system: &str, user: &str) -> Result<String, AiError> {
-    match chat_with(ep, system, user, Some("none")) {
+    generate(ep, system, user, 0.0)
+}
+
+/// 一般的對話生成（`temperature` 越高越多樣）；回應原樣傳回（含推理模型的 `<think>`，用 [`clean`] 去掉）
+pub fn generate(
+    ep: &Endpoint,
+    system: &str,
+    user: &str,
+    temperature: f32,
+) -> Result<String, AiError> {
+    match chat_with(ep, system, user, temperature, Some("none")) {
         // 不認得 reasoning_effort 的服務（例如非推理模型）回 400：拿掉再試一次
-        Err(AiError::Request(e)) if e.contains("400") => chat_with(ep, system, user, None),
+        Err(AiError::Request(e)) if e.contains("400") => {
+            chat_with(ep, system, user, temperature, None)
+        }
         r => r,
     }
 }
@@ -124,6 +136,7 @@ fn chat_with(
     ep: &Endpoint,
     system: &str,
     user: &str,
+    temperature: f32,
     reasoning_effort: Option<&'static str>,
 ) -> Result<String, AiError> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -143,7 +156,7 @@ fn chat_with(
                 content: user,
             },
         ],
-        temperature: 0.0,
+        temperature,
         stream: false,
         reasoning_effort,
     };

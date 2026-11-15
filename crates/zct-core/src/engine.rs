@@ -6,8 +6,8 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chewing::dictionary::{LookupStrategy, StringTable};
@@ -133,6 +133,8 @@ pub struct Engine {
     abbrevs: std::sync::RwLock<crate::abbrev::Abbrevs>,
     /// 最近送出的中文與當時的讀音（新的在後）：重新選字時最準的讀音來源
     recent: Mutex<std::collections::VecDeque<(String, Vec<String>)>>,
+    /// T0：字 n-gram 模型與權重（系統詞庫資料夾有 ngram.bin 時才啟用）
+    t0: Option<(Arc<crate::ngram::NgramModel>, f64)>,
 }
 
 /// 記住最近幾段送出的文字
@@ -141,6 +143,30 @@ const RECENT_COMMITS: usize = 50;
 /// 人稱代名詞：你／妳、他／她／它／牠／祂要看說話的對象，AI 看不出來，一律不讓 AI 改
 fn is_pronoun(c: char) -> bool {
     matches!(c, '你' | '妳' | '他' | '她' | '它' | '牠' | '祂')
+}
+
+/// T0 模型：系統詞庫資料夾的 `ngram.bin`；開發時可用環境變數 `ZCT_T0_MODEL`（`off` 停用）、
+/// `ZCT_T0_WEIGHT` 指定模型與權重（評測比較用）
+fn load_t0(sys_dir: &Path) -> Option<(Arc<crate::ngram::NgramModel>, f64)> {
+    let path = match std::env::var_os("ZCT_T0_MODEL") {
+        Some(v) if v == "off" => return None,
+        Some(v) => PathBuf::from(v),
+        None => sys_dir.join("ngram.bin"),
+    };
+    if !path.exists() {
+        return None;
+    }
+    let weight = std::env::var("ZCT_T0_WEIGHT")
+        .ok()
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(crate::t0::DEFAULT_WEIGHT);
+    match crate::ngram::NgramModel::load(&path) {
+        Ok(m) => Some((Arc::new(m), weight)),
+        Err(e) => {
+            log::warn!("T0 模型讀取失敗，不使用：{e}");
+            None
+        }
+    }
 }
 
 /// UTC 日期，避免為此引入時間函式庫
@@ -309,6 +335,7 @@ impl Engine {
                 &std::fs::read_to_string(dir.join(ABBREVS)).unwrap_or_default(),
             )),
             recent: Mutex::default(),
+            t0: load_t0(sys_dir),
         };
         engine.migrate_normal_boost();
         Ok(engine)
@@ -540,7 +567,7 @@ impl Engine {
 
     /// 建立共用詞庫的 Editor（不會自己寫檔）
     pub(crate) fn editor(&self) -> Editor {
-        EditorBuilder::new()
+        let mut editor = EditorBuilder::new()
             .string_table(self.string_table.clone())
             .static_dict(self.static_dict.clone())
             .rare_dict(self.rare_dict.clone())
@@ -548,7 +575,23 @@ impl Engine {
             .history_dict(self.history.clone())
             .static_lm(self.lm.clone())
             .symbol_selector(self.symbols.clone())
-            .build()
+            .build();
+        if let Some((model, weight)) = &self.t0 {
+            let parts = crate::t0::Parts {
+                string_table: self.string_table.clone(),
+                static_dict: self.static_dict.clone(),
+                rare_dict: self.rare_dict.clone(),
+                history_dict: self.history.clone(),
+                user_dict: self.user_dict.clone(),
+                lm: self.lm.clone(),
+            };
+            editor.set_conversion_engine(Box::new(crate::t0::T0Engine::new(
+                parts,
+                model.clone(),
+                *weight,
+            )));
+        }
+        editor
     }
 
     pub(crate) fn emoji(&self) -> &crate::emoji::EmojiIndex {

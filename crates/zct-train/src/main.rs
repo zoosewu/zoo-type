@@ -5,8 +5,11 @@
 //! cargo run -p zct-train --release -- extract .corpus/text .corpus/wiki/*.bz2
 //! # 統計字 n-gram、修剪、寫出模型
 //! cargo run -p zct-train --release -- train .corpus/text/train.txt .corpus/ngram.bin --order 4 --min 1,2,3,3
+//! # 用本機 LLM 生成口語句子補強（LM Studio：lms server start）
+//! cargo run -p zct-train --release -- generate .corpus/text/llm.txt http://localhost:1234/v1 qwen/qwen3.5-4b
 //! ```
 
+mod generate;
 mod wiki;
 
 use std::collections::HashMap;
@@ -32,9 +35,12 @@ fn main() {
             &args[2..].iter().map(PathBuf::from).collect::<Vec<_>>(),
         ),
         Some("train") if args.len() >= 3 => train(&args[1..]),
+        Some("generate") if args.len() >= 4 => {
+            generate::run(Path::new(&args[1]), &args[2], &args[3])
+        }
         _ => {
             eprintln!(
-                "用法：\n  zct-train extract <輸出資料夾> <dump.bz2>…\n  zct-train train <語料.txt> <模型.bin> [--order 4] [--min 1,2,3,3]"
+                "用法：\n  zct-train extract <輸出資料夾> <dump.bz2>…\n  zct-train train <語料.txt> <模型.bin> [--order 4] [--min 1,2,3,3]\n  zct-train generate <輸出.txt> <端點> <模型>"
             );
             std::process::exit(2);
         }

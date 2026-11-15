@@ -6489,6 +6489,7 @@ version = "0.1.2"
 dependencies = [
  "bzip2",
  "ferrous-opencc",
+ "zct-ai",
  "zct-core",
 ]
 
