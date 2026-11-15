@@ -136,7 +136,14 @@ fn set_selection(ctx: &ITfContext, ec: u32, range: &ITfRange) -> Result<()> {
     r
 }
 
-/// App 中選取的文字（最多讀 64 個 UTF-16 單位，夠判斷是否超過重新選字的上限）；讀不到時是空字串
+/// 一次最多讀幾個 UTF-16 單位：夠判斷是否超過重新選字的上限
+const SELECTION_READ: usize = 64;
+
+/// App 中選取的文字；讀不到時是空字串
+///
+/// 完整支援 TSF 的 App（Windows 11 記事本、Chromium、Office…）從 TSF 讀。傳統 Win32 編輯框在 TSF 裡是
+/// 暫時性 context，只看得到組字、看不到原有的文字，這時直接問焦點所在的 Edit / RichEdit 控制項
+/// （輸入法 DLL 就在 App 的程序裡）
 fn selected_text(client_id: u32, ctx: &ITfContext) -> String {
     let out = std::rc::Rc::new(RefCell::new(String::new()));
     let sink = out.clone();
@@ -148,7 +155,7 @@ fn selected_text(client_id: u32, ctx: &ITfContext) -> String {
             ctx2.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
             let range = ManuallyDrop::into_inner(std::mem::take(&mut sel[0].range));
             if let Some(range) = range.filter(|_| fetched == 1) {
-                let mut buf = [0u16; 64];
+                let mut buf = [0u16; SELECTION_READ];
                 let mut n = 0u32;
                 range.GetText(ec, 0, &mut buf, &mut n)?;
                 *sink.borrow_mut() = String::from_utf16_lossy(&buf[..n as usize]);
@@ -159,9 +166,73 @@ fn selected_text(client_id: u32, ctx: &ITfContext) -> String {
     unsafe {
         let _ = ctx.RequestEditSession(client_id, &session, TF_ES_SYNC | TF_ES_READ);
     }
-    out.take()
+    let text = out.take();
+    if text.is_empty() {
+        control_selected_text().unwrap_or_default()
+    } else {
+        text
+    }
 }
 
+/// 焦點所在的標準 Edit / RichEdit 控制項中選取的文字
+fn control_selected_text() -> Option<String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, SendMessageW, WM_GETTEXT, WM_GETTEXTLENGTH,
+    };
+    const EM_GETSEL: u32 = 0x00B0;
+    // RichEdit 的 EM_GETSELTEXT（WM_USER + 62）：直接取選取的文字，不必處理換行算法的差異
+    const EM_GETSELTEXT: u32 = 0x0400 + 62;
+    unsafe {
+        let hwnd = GetFocus();
+        if hwnd.is_invalid() {
+            return None;
+        }
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(hwnd, &mut class) as usize;
+        let class = String::from_utf16_lossy(&class[..n]).to_ascii_lowercase();
+        let mut start = 0u32;
+        let mut end = 0u32;
+        SendMessageW(
+            hwnd,
+            EM_GETSEL,
+            Some(WPARAM(&mut start as *mut u32 as usize)),
+            Some(LPARAM(&mut end as *mut u32 as isize)),
+        );
+        let len = end.checked_sub(start)? as usize;
+        if len == 0 || len > SELECTION_READ {
+            return None;
+        }
+        if class.starts_with("richedit") {
+            let mut buf = vec![0u16; len + 1];
+            let n = SendMessageW(
+                hwnd,
+                EM_GETSELTEXT,
+                None,
+                Some(LPARAM(buf.as_mut_ptr() as isize)),
+            )
+            .0 as usize;
+            Some(String::from_utf16_lossy(&buf[..n.min(len)]))
+        } else if class == "edit" {
+            let total = SendMessageW(hwnd, WM_GETTEXTLENGTH, None, None).0 as usize;
+            // 很大的文件不讀（只是為了取選取的幾個字）
+            if total > 1 << 20 || end as usize > total {
+                return None;
+            }
+            let mut buf = vec![0u16; total + 1];
+            let n = SendMessageW(
+                hwnd,
+                WM_GETTEXT,
+                Some(WPARAM(buf.len())),
+                Some(LPARAM(buf.as_mut_ptr() as isize)),
+            )
+            .0 as usize;
+            buf.get(start as usize..(end as usize).min(n))
+                .map(String::from_utf16_lossy)
+        } else {
+            None
+        }
+    }
+}
 /// 目前游標（選取範圍）的螢幕矩形；App 沒排版好時回傳 None
 fn caret_rect(ctx: &ITfContext, ec: u32) -> Option<Rect> {
     unsafe {

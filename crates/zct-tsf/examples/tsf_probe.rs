@@ -47,17 +47,35 @@ fn pump(ms: u64) {
 }
 
 fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+    // 方向鍵、Home / End 等要標成延伸鍵：不然掃描碼和數字鍵盤相同，NumLock 開著時 Shift + Home 選不到文字
+    let extended = matches!(
+        vk,
+        VK_LEFT
+            | VK_RIGHT
+            | VK_UP
+            | VK_DOWN
+            | VK_HOME
+            | VK_END
+            | VK_PRIOR
+            | VK_NEXT
+            | VK_INSERT
+            | VK_DELETE
+    );
+    let mut flags = if up {
+        KEYEVENTF_KEYUP
+    } else {
+        KEYBD_EVENT_FLAGS(0)
+    };
+    if extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: vk,
                 wScan: unsafe { MapVirtualKeyW(vk.0 as u32, MAPVK_VK_TO_VSC) } as u16,
-                dwFlags: if up {
-                    KEYEVENTF_KEYUP
-                } else {
-                    KEYBD_EVENT_FLAGS(0)
-                },
+                dwFlags: flags,
                 ..Default::default()
             },
         },
@@ -222,6 +240,18 @@ fn main() {
             None,
         )
         .unwrap();
+        if rich {
+            // RichEdit 預設走 IMM（TSF 裡是暫時性 context，讀不到文件原有的文字）；
+            // SES_USECTF 讓它完整支援 TSF，和 Windows 11 記事本一樣（重新選字要讀選取的文字）
+            const EM_SETEDITSTYLE: u32 = 0x0400 + 204;
+            const SES_USECTF: usize = 0x0001_0000;
+            SendMessageW(
+                edit,
+                EM_SETEDITSTYLE,
+                Some(WPARAM(SES_USECTF)),
+                Some(LPARAM(SES_USECTF as isize)),
+            );
+        }
 
         let profiles: ITfInputProcessorProfileMgr =
             CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER).unwrap();
