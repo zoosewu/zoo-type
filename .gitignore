@@ -1,2 +1,5 @@
 /target
 /assets/dict/
+
+# T0 訓練語料（維基 dump 等，不進 repo）
+/.corpus

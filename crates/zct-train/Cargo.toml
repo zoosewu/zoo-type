@@ -1,0 +1,13 @@
+[package]
+name = "zct-train"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "T0 語言模型訓練工具（開發用，不隨安裝程式發布）"
+
+[dependencies]
+zct-core.workspace = true
+bzip2 = "0.6.1"
+ferrous-opencc = { version = "0.4.0", default-features = false, features = ["s2t-conversion"] }
