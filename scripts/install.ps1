@@ -213,6 +213,19 @@ function Install-User {
         $zh.InputMethodTips.Add($tip)
         Set-WinUserLanguageList $list -Force
     }
+
+    # 正式版設為中文（台灣）的預設輸入法（Alt+Shift 切回中文時用的是這個，不是清單順序）。
+    # 註冊時 DLL 已經設過，但 Set-WinUserLanguageList 會把它改回一般鍵盤配置，所以在這之後再寫一次；
+    # 這裡是 ITfInputProcessorProfiles::SetDefaultLanguageProfile 寫入的同一個位置
+    if ($official) {
+        $clsid, $profileId = [regex]::Matches($tip, '\{[^}]+\}') | ForEach-Object Value
+        $key = 'HKCU:\Software\Microsoft\CTF\Assemblies\0x00000404\{34745C63-B2F0-4784-8B67-5E12C8701A31}'
+        # New-Item -Force 會把已存在的機碼清空重建，只在不存在時建立
+        if (-not (Test-Path $key)) { $null = New-Item -Path $key -Force }
+        Set-ItemProperty $key -Name Default -Value $clsid
+        Set-ItemProperty $key -Name Profile -Value $profileId
+        Set-ItemProperty $key -Name KeyboardLayout -Value 0 -Type DWord
+    }
 }
 
 if ($Part -in 'All', 'System') { Install-System }
