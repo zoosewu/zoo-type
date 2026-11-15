@@ -87,7 +87,7 @@
 - [x] DLL：edit session 讀取選取文字（上限 20 字，只取中文）；在選取範圍上開始組字，組字文字取代選取內容
 - [x] 暫時性 context（傳統 Win32 編輯框，TSF 讀不到原有文字）：直接問焦點的 Edit / RichEdit 控制項；其他讀不到的 App 提示「先選取」。剪貼簿退路之後再評估
 - [x] 文件、設定程式快捷鍵頁、tsf_probe 實機驗證（完整 TSF 的 RichEdit 與傳統編輯框：取代、Esc、只選中間、讀音選單）
-- [ ] 使用者在記事本、VS Code、Chrome 實測
+- [x] 使用者實測：一般 App 正常；VS Code 終端機（herdr、Claude Code）不行：終端機的選取只是畫面上的標示，不是可以取代的文字，App 也不提供給輸入法
 
 ## 之後
 - M6 macOS 前端（使用者決定延後）
