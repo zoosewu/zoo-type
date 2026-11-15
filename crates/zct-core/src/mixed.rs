@@ -68,6 +68,7 @@ const USER_WORDS_HEADER: &str = "\
 # 在組字區用 Shift 打的英文，送出後會自動加進來
 # 「-單字」代表不要當英文（例如內建字典有、但你常打成注音的字）
 # 組字區中游標停在英文單字上按 Shift + Delete，也會把它移除
+# 設定程式的詞庫頁也能管理（讀音留空的那些）
 ";
 
 /// 使用者的英文單字：自動學到或手動加入的（added），以及排除的（removed，檔案中以 `-` 開頭）
@@ -154,8 +155,22 @@ impl UserWords {
         }
     }
 
+    /// 加入與排除的紀錄都拿掉，回到字典的判斷；回傳原本有沒有紀錄
+    pub fn clear(&mut self, w: &str) -> bool {
+        let w = w.to_ascii_lowercase();
+        let changed = self.added.remove(&w) | self.removed.remove(&w);
+        if changed {
+            self.save();
+        }
+        changed
+    }
+
     pub fn added(&self) -> impl Iterator<Item = &str> {
         self.added.iter().map(String::as_str)
+    }
+
+    pub fn removed(&self) -> impl Iterator<Item = &str> {
+        self.removed.iter().map(String::as_str)
     }
 }
 

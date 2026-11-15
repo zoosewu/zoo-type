@@ -62,7 +62,7 @@ pub enum Request {
     Focus,
 
     // ---- 管理用（設定程式）：服務程序是學習資料唯一的擁有者 ----
-    /// 列出使用者詞庫 → `Phrases`
+    /// 列出使用者詞庫（含英文單字：讀音是空的）→ `Phrases`
     ListPhrases,
     /// 加入自訂詞 → `Ok` / `Error`
     AddPhrase { word: String, bopomofo: String },

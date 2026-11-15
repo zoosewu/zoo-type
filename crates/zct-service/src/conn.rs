@@ -347,7 +347,11 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 Response::Ok
             }
-            Request::ListPhrases => Response::Phrases(shared.engine.phrases()),
+            Request::ListPhrases => {
+                let mut list = shared.engine.phrases();
+                list.extend(shared.engine.english_entries());
+                Response::Phrases(list)
+            }
             Request::AddPhrase { word, bopomofo } => {
                 match shared.engine.add_phrase(&word, &bopomofo) {
                     Ok(()) => Response::Ok,

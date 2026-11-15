@@ -422,9 +422,41 @@ impl Engine {
         was
     }
 
-    /// 使用者加入的英文單字（設定程式顯示用）
-    pub fn user_english(&self) -> Vec<String> {
-        self.user_words().added().map(str::to_owned).collect()
+    /// 使用者的英文單字（設定程式的詞庫頁）：讀音留空；加入的是一般、排除的是封鎖。
+    /// 不在 [`Engine::phrases`] 裡：英文單字檔自己隨 git 同步，不經過詞庫的同步匯出
+    pub fn english_entries(&self) -> Vec<PhraseEntry> {
+        let words = self.user_words();
+        let entry = |w: &str, boost| PhraseEntry {
+            word: w.to_owned(),
+            bopomofo: String::new(),
+            boost,
+        };
+        words
+            .added()
+            .map(|w| entry(w, PhraseEntry::NORMAL))
+            .chain(words.removed().map(|w| entry(w, PhraseEntry::BANNED)))
+            .collect()
+    }
+
+    fn user_words_mut(&self) -> std::sync::RwLockWriteGuard<'_, crate::mixed::UserWords> {
+        self.user_words.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 詞庫頁對英文單字（讀音留空）的操作：一般 = 當英文、封鎖 = 不當英文、移除 = 照字典
+    fn english_action(&self, word: &str, action: PhraseAction) -> Result<(), String> {
+        let w = word.trim();
+        if !crate::abbrev::is_abbrev(w) {
+            return Err(format!("讀音留空時，詞要是英文單字：{w}"));
+        }
+        match action {
+            PhraseAction::Unban => self.user_words_mut().add(w),
+            PhraseAction::Ban => self.user_words_mut().remove(w, true),
+            PhraseAction::Remove => {
+                self.user_words_mut().clear(w);
+            }
+            PhraseAction::Pin | PhraseAction::Unpin => return Err("英文單字沒有優先".into()),
+        }
+        Ok(())
     }
 
     /// 建立共用詞庫的 Editor（不會自己寫檔）
@@ -646,6 +678,12 @@ impl Engine {
     /// 讀音是英文字母時加入的是縮寫（`tw` → 台灣）
     pub fn add_phrase(&self, word: &str, bopomofo: &str) -> Result<(), String> {
         let word = word.trim();
+        if bopomofo.trim().is_empty() {
+            if self.user_words().verdict(&word.to_ascii_lowercase()) == Some(true) {
+                return Err(format!("詞庫已有：{word}"));
+            }
+            return self.english_action(word, PhraseAction::Unban);
+        }
         if crate::abbrev::is_abbrev(bopomofo.trim()) {
             return match self.abbrevs_write().add(bopomofo, word)? {
                 true => {
@@ -669,6 +707,9 @@ impl Engine {
         bopomofo: &str,
         action: PhraseAction,
     ) -> Result<(), String> {
+        if bopomofo.trim().is_empty() {
+            return self.english_action(word, action);
+        }
         if crate::abbrev::is_abbrev(bopomofo) {
             if action != PhraseAction::Remove {
                 return Err("縮寫只能移除".into());

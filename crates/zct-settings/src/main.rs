@@ -344,6 +344,7 @@ fn to_phrase(p: &PhraseEntry) -> Phrase {
         word: p.word.clone().into(),
         bopomofo: p.bopomofo.clone().into(),
         abbrev: zct_core::abbrev::is_abbrev(&p.bopomofo),
+        english: p.bopomofo.is_empty(),
         state: if p.is_banned() {
             2
         } else if p.is_pinned() {
@@ -505,6 +506,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(slint::Color::from_argb_u8(0, 0, 0, 0))
     });
     ui.on_hotkey_valid(|s| parse_binding(&s).is_ok());
+    ui.on_is_english_word(|s| zct_core::abbrev::is_abbrev(s.trim()));
     {
         // 第一次用到時才載入（約 5MB）
         let readings: RefCell<Option<Option<zct_core::readings::Readings>>> = RefCell::new(None);
@@ -1097,6 +1099,50 @@ mod ui_tests {
     }
 
     #[test]
+    fn dictionary_adds_english_word_with_empty_reading() {
+        let ui = dictionary_page();
+        ui.on_is_english_word(|s| zct_core::abbrev::is_abbrev(s.trim()));
+        let added = Rc::new(RefCell::new(None));
+        ui.on_add_phrase({
+            let added = added.clone();
+            move |w, r| *added.borrow_mut() = Some((w.to_string(), r.to_string()))
+        });
+        field(&ui, "詞").mock_single_click(slint::platform::PointerEventButton::Left);
+        type_text(&ui, "github");
+        key(&ui, Key::Return);
+        key(&ui, Key::Return);
+        assert_eq!(*added.borrow(), Some(("github".into(), "".into())));
+
+        // 清單裡的英文單字：讀音欄寫「英文單字」，狀態只有一般 / 封鎖
+        ui.set_phrases(ModelRc::new(VecModel::from(vec![to_phrase(
+            &PhraseEntry {
+                word: "github".into(),
+                bopomofo: String::new(),
+                boost: PhraseEntry::BANNED,
+            },
+        )])));
+        let found = |text: &str| {
+            i_slint_backend_testing::ElementQuery::from_root(&ui)
+                .match_descendants()
+                .match_predicate({
+                    let t = text.to_owned();
+                    move |e| e.accessible_label().as_deref() == Some(t.as_str())
+                })
+                .find_first()
+                .is_some()
+        };
+        assert!(found("英文單字"));
+        let state = i_slint_backend_testing::ElementQuery::from_root(&ui)
+            .match_descendants()
+            .match_predicate(|e| {
+                e.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Combobox)
+            })
+            .find_first()
+            .expect("狀態選單");
+        assert_eq!(state.accessible_value().as_deref(), Some("封鎖"));
+    }
+
+    #[test]
     fn dictionary_edit_updates_the_entry() {
         let ui = dictionary_page();
         ui.set_phrases(ModelRc::new(VecModel::from(vec![Phrase {
@@ -1104,6 +1150,7 @@ mod ui_tests {
             bopomofo: "ㄉㄨㄥˋ ㄨˋ".into(),
             state: 0,
             abbrev: false,
+            english: false,
         }])));
         let updated = Rc::new(RefCell::new(None));
         ui.on_update_phrase({
@@ -1134,6 +1181,16 @@ mod ui_tests {
                 .unwrap_or_else(|| panic!("找不到內容是 {v} 的輸入框"))
         };
         let (word, reading) = (value("動物"), value("ㄉㄨㄥˋ ㄨˋ"));
+        // 狀態選單留在原位（編輯中不能改），切換時版面不跳動
+        let state = i_slint_backend_testing::ElementQuery::from_root(&ui)
+            .match_descendants()
+            .match_predicate(|e| {
+                e.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Combobox)
+            })
+            .find_first()
+            .expect("編輯中仍顯示狀態選單");
+        assert_eq!(state.accessible_value().as_deref(), Some("一般"));
+        assert_eq!(state.accessible_enabled(), Some(false));
         word.set_accessible_value("動物園");
         reading.set_accessible_value("ㄉㄨㄥˋ ㄨˋ ㄩㄢˊ");
         reading.mock_single_click(slint::platform::PointerEventButton::Left);

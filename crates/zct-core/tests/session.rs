@@ -1730,6 +1730,45 @@ fn user_english_words_file() {
     assert_eq!(h.s.preedit().text, "zctx ");
 }
 
+#[test]
+fn dictionary_page_manages_english_words() {
+    use zct_core::{PhraseAction, PhraseEntry};
+    let dir = tempfile::tempdir().unwrap();
+    let words = dir.path().join("dict").join("english.txt");
+    let mut engine = open_engine(&dir.path().join("learning"));
+    engine.load_user_words(&words);
+    let state = |e: &zct_core::Engine, w: &str| {
+        e.english_entries()
+            .into_iter()
+            .find(|p| p.word == w)
+            .map(|p| p.boost)
+    };
+    // 讀音留空 = 英文單字
+    engine.add_phrase("Zctw", "").unwrap();
+    assert_eq!(state(&engine, "zctw"), Some(PhraseEntry::NORMAL));
+    assert!(engine.is_english("zctw"));
+    assert!(engine.add_phrase("zctw", "").is_err(), "已經有了");
+    assert!(
+        engine.add_phrase("台灣", "").is_err(),
+        "讀音留空時詞要是英文"
+    );
+    // 封鎖 = 不當英文
+    engine.phrase_action("zctw", "", PhraseAction::Ban).unwrap();
+    assert_eq!(state(&engine, "zctw"), Some(PhraseEntry::BANNED));
+    assert!(!engine.is_english("zctw"));
+    assert!(engine.phrase_action("zctw", "", PhraseAction::Pin).is_err());
+    // 移除 = 回到字典的判斷
+    engine
+        .phrase_action("zctw", "", PhraseAction::Remove)
+        .unwrap();
+    assert_eq!(state(&engine, "zctw"), None);
+    // 存進檔案
+    engine.add_phrase("zcty", "").unwrap();
+    assert!(std::fs::read_to_string(&words).unwrap().contains("zcty"));
+    // 不混進詞庫的同步匯出
+    assert!(engine.phrases().iter().all(|p| !p.bopomofo.is_empty()));
+}
+
 /// 共用同一個 Engine 的第二個 Harness（模擬下一次打字）
 fn again(h: &Harness) -> Harness {
     Harness::with_engine(

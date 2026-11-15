@@ -73,6 +73,7 @@ export struct Phrase {
     bopomofo: string,
     state: int,             // 0 一般 / 1 優先 / 2 封鎖
     abbrev: bool,           // 縮寫（讀音是英文字母）：沒有狀態，只能移除
+    english: bool,          // 英文單字（讀音留空）：一般 = 當英文、封鎖 = 不當英文，沒有優先
 }
 
 export struct Day {
@@ -108,29 +109,76 @@ component Note inherits HorizontalLayout {
     Help { text: root.text; horizontal-stretch: 1; }
 }
 
-/// 詞庫的一列在編輯中：詞與讀音變成輸入框
-component PhraseEditor inherits HorizontalLayout {
-    in property <string> word;
-    in property <string> reading;
+/// 詞庫的一列。編輯中詞與讀音變成輸入框，其他欄位留在原位（狀態暫時不能改），切換時版面不跳動
+component PhraseRow inherits HorizontalLayout {
+    in property <Phrase> phrase;
+    in property <bool> editing;
+    in property <bool> online;
+    // 編輯中的內容
+    property <string> word;
+    property <string> reading;
+    property <bool> ready: root.word != "" && (root.reading != "" || root.is-english(root.word));
+    pure callback is-english(string) -> bool;
     pure callback suggest(string) -> string;
+    callback edit();
     callback submit(string, string);
     callback cancel();
+    callback set-state(int);
+    callback remove();
     spacing: 12px;
     alignment: start;
-    init => { w.focus(); }
-    w := LineEdit {
-        width: 120px;
-        text: root.word;
-        edited(t) => { r.text = root.suggest(t); }
-        accepted => { r.focus(); }
+    if root.editing: HorizontalLayout {
+        spacing: 12px;
+        w := LineEdit {
+            width: 120px;
+            text <=> root.word;
+            init => {
+                root.word = root.phrase.word;
+                root.reading = root.phrase.bopomofo;
+                self.focus();
+            }
+            edited(t) => { root.reading = root.suggest(t); }
+            accepted => { r.focus(); }
+        }
+        r := LineEdit {
+            width: 200px;
+            text <=> root.reading;
+            accepted => { if root.ready { root.submit(root.word, root.reading); } }
+        }
     }
-    r := LineEdit {
-        width: 200px;
-        text: root.reading;
-        accepted => { if w.text != "" && r.text != "" { root.submit(w.text, r.text); } }
+    // 點詞或讀音也能編輯
+    if !root.editing: HorizontalLayout {
+        spacing: 12px;
+        Text {
+            width: 120px; text: root.phrase.word; vertical-alignment: center;
+            color: root.phrase.state == 2 ? Palette.foreground.with-alpha(0.4) : Palette.foreground;
+            TouchArea { enabled: root.online; clicked => { root.edit(); } }
+        }
+        Text {
+            width: 200px; text: root.phrase.english ? "英文單字" : root.phrase.bopomofo; vertical-alignment: center;
+            color: Palette.foreground.with-alpha(root.phrase.english ? 0.45 : 0.7);
+            TouchArea { enabled: root.online; clicked => { root.edit(); } }
+        }
     }
-    Button { text: "更新"; enabled: w.text != "" && r.text != ""; clicked => { root.submit(w.text, r.text); } }
-    Button { text: "取消"; clicked => { root.cancel(); } }
+    if root.phrase.abbrev: Text { width: 110px; text: "縮寫"; vertical-alignment: center; color: Palette.foreground.with-alpha(0.7); }
+    if root.phrase.english: ComboBox {
+        width: 110px;
+        enabled: !root.editing;
+        model: ["一般", "封鎖"];
+        current-index: root.phrase.state == 2 ? 1 : 0;
+        selected => { root.set-state(self.current-index == 1 ? 2 : 0); }
+    }
+    if !root.phrase.abbrev && !root.phrase.english: ComboBox {
+        width: 110px;
+        enabled: !root.editing;
+        model: ["一般", "優先", "封鎖"];
+        current-index: root.phrase.state;
+        selected => { root.set-state(self.current-index); }
+    }
+    if root.editing: Button { text: "更新"; enabled: root.ready; clicked => { root.submit(root.word, root.reading); } }
+    if root.editing: Button { text: "取消"; clicked => { root.cancel(); } }
+    if !root.editing: Button { text: "編輯"; enabled: root.online; clicked => { root.edit(); } }
+    if !root.editing: Button { text: "移除"; enabled: root.online; clicked => { root.remove(); } }
 }
 
 component Section inherits Text {
@@ -274,6 +322,8 @@ export component SettingsWindow inherits Window {
     callback remove-phrase(Phrase);
     callback update-phrase(Phrase, string, string);
     pure callback suggest-reading(string) -> string;
+    // 讀音留空時可以加入的英文單字（兩個以上英文字母）
+    pure callback is-english-word(string) -> bool;
     callback restore(string);
     callback refresh();
     callback sync-now();
@@ -468,10 +518,10 @@ export component SettingsWindow inherits Window {
             if root.page == 4: VerticalLayout {
                 vertical-stretch: 1;
                 spacing: 10px;
-                Help { text: "讀音填注音是自訂詞，填英文字母是縮寫：打縮寫再按空白就換成詞。優先：一律排第一；封鎖：不出現在候選；移除：恢復預設。在組字區按 Shift + ← / → 選範圍再按 Enter 也能加詞。"; }
+                Help { text: "讀音填注音是自訂詞；填英文字母是縮寫，打縮寫再按空白就換成詞；讀音留空、詞填英文是英文單字，組字時當成英文。優先：一律排第一；封鎖：不出現在候選，英文單字則不當成英文；移除：恢復預設。在組字區按 Shift + ← / → 選範圍再按 Enter 也能加詞。"; }
                 form := HorizontalLayout {
                     spacing: 8px;
-                    property <bool> ready: root.online && word.text != "" && reading.text != "";
+                    property <bool> ready: root.online && word.text != "" && (reading.text != "" || root.is-english-word(word.text));
                     function submit() {
                         if !self.ready { return; }
                         root.add-phrase(word.text, reading.text);
@@ -500,44 +550,22 @@ export component SettingsWindow inherits Window {
                     LineEdit { width: 180px; placeholder-text: "搜尋"; edited(t) => { root.filter-phrases(t); } }
                 }
                 ListView {
-                    for p[i] in root.phrases: HorizontalLayout {
+                    for p[i] in root.phrases: PhraseRow {
                         height: 38px;
                         padding-left: 4px;
-                        alignment: start;
-                        if root.phrase-edit-row == i: PhraseEditor {
-                            word: p.word;
-                            reading: p.bopomofo;
-                            suggest(t) => { return root.suggest-reading(t); }
-                            submit(w, r) => {
-                                root.phrase-edit-row = -1;
-                                root.update-phrase(p, w, r);
-                            }
-                            cancel => { root.phrase-edit-row = -1; }
+                        phrase: p;
+                        editing: root.phrase-edit-row == i;
+                        online: root.online;
+                        suggest(t) => { return root.suggest-reading(t); }
+                        is-english(t) => { return root.is-english-word(t); }
+                        edit => { root.phrase-edit-row = i; }
+                        submit(w, r) => {
+                            root.phrase-edit-row = -1;
+                            root.update-phrase(p, w, r);
                         }
-                        if root.phrase-edit-row != i: HorizontalLayout {
-                            spacing: 12px;
-                            alignment: start;
-                            // 點詞或讀音也能編輯
-                            Text {
-                                width: 120px; text: p.word; vertical-alignment: center;
-                                color: p.state == 2 ? Palette.foreground.with-alpha(0.4) : Palette.foreground;
-                                TouchArea { enabled: root.online; clicked => { root.phrase-edit-row = i; } }
-                            }
-                            Text {
-                                width: 200px; text: p.bopomofo; vertical-alignment: center;
-                                color: Palette.foreground.with-alpha(0.7);
-                                TouchArea { enabled: root.online; clicked => { root.phrase-edit-row = i; } }
-                            }
-                            if p.abbrev: Text { width: 110px; text: "縮寫"; vertical-alignment: center; color: Palette.foreground.with-alpha(0.7); }
-                            if !p.abbrev: ComboBox {
-                                width: 110px;
-                                model: ["一般", "優先", "封鎖"];
-                                current-index: p.state;
-                                selected => { root.phrase-state(p, self.current-index); }
-                            }
-                            Button { text: "編輯"; enabled: root.online; clicked => { root.phrase-edit-row = i; } }
-                            Button { text: "移除"; enabled: root.online; clicked => { root.remove-phrase(p); } }
-                        }
+                        cancel => { root.phrase-edit-row = -1; }
+                        set-state(s) => { root.phrase-state(p, s); }
+                        remove => { root.remove-phrase(p); }
                     }
                 }
             }
