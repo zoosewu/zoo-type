@@ -47,8 +47,13 @@ fn main() {
             api_key: std::env::var("ZCT_AI_KEY").ok(),
             timeout: std::time::Duration::from_secs(30),
         };
+        // 比較 prompt：環境變數 ZCT_AI_PROMPT_FILE 指向系統提示檔
+        let prompt = std::env::var("ZCT_AI_PROMPT_FILE")
+            .ok()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .unwrap_or_else(|| zct_ai::SYSTEM_PROMPT.to_owned());
         let r = evaluate_ai(engine, config, &readings, &corpus, |text| {
-            zct_ai::correct(&ep, text).map_err(|e| e.to_string())
+            zct_ai::correct_with(&ep, &prompt, text).map_err(|e| e.to_string())
         });
         let pct = |n: usize| n as f64 * 100.0 / r.chars.max(1) as f64;
         println!(

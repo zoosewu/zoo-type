@@ -154,7 +154,12 @@ fn chat_with(
 
 /// 修正同音錯字；回傳修正後的句子（可能與原文相同）
 pub fn correct(ep: &Endpoint, text: &str) -> Result<String, AiError> {
-    validate(text, &chat(ep, SYSTEM_PROMPT, text)?)
+    correct_with(ep, SYSTEM_PROMPT, text)
+}
+
+/// 用指定的系統提示修正（評測比較 prompt 用）
+pub fn correct_with(ep: &Endpoint, system: &str, text: &str) -> Result<String, AiError> {
+    validate(text, &chat(ep, system, text)?)
 }
 
 /// 設定程式的「測試」：能連上並取得回應即可
