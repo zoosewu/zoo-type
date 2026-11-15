@@ -34,6 +34,9 @@ struct ChatRequest<'a> {
     messages: Vec<Message<'a>>,
     temperature: f32,
     stream: bool,
+    /// 關掉推理模型的思考（Ollama：`"none"`）；同音字修正不需要，開著會慢好幾倍
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +101,19 @@ pub fn validate(original: &str, reply: &str) -> Result<String, AiError> {
 }
 
 fn chat(ep: &Endpoint, system: &str, user: &str) -> Result<String, AiError> {
+    match chat_with(ep, system, user, Some("none")) {
+        // 不認得 reasoning_effort 的服務（例如非推理模型）回 400：拿掉再試一次
+        Err(AiError::Request(e)) if e.contains("400") => chat_with(ep, system, user, None),
+        r => r,
+    }
+}
+
+fn chat_with(
+    ep: &Endpoint,
+    system: &str,
+    user: &str,
+    reasoning_effort: Option<&'static str>,
+) -> Result<String, AiError> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(ep.timeout))
         .build()
@@ -117,6 +133,7 @@ fn chat(ep: &Endpoint, system: &str, user: &str) -> Result<String, AiError> {
         ],
         temperature: 0.0,
         stream: false,
+        reasoning_effort,
     };
     let mut req = agent.post(&url);
     if let Some(key) = ep.api_key.as_deref().filter(|k| !k.is_empty()) {

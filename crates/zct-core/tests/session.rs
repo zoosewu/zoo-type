@@ -296,9 +296,16 @@ fn passthrough_keys_seen_by_test_key_down_cancel_shift_tap() {
     assert_eq!(r.mode_changed, None);
 }
 
+fn ctrl() -> Mods {
+    Mods {
+        ctrl: true,
+        ..Mods::NONE
+    }
+}
+
 fn open_candidates_for_qi(h: &mut Harness) -> zct_core::CandidatePage {
     h.type_str("wu0 fu4"); // 天氣
-    h.press(Key::Left, Mods::NONE); // 游標移到「氣」前
+    h.press(Key::Left, ctrl()); // 游標移到「氣」前（← 會跳過整個詞）
     h.press(Key::Down, Mods::NONE).candidates.expect("候選窗")
 }
 
@@ -685,7 +692,7 @@ fn simplified_output_shows_traditional_and_converts_on_commit() {
     h.type_str("wu0 fu4");
     assert_eq!(h.s.preedit().text, "天氣");
     let page = {
-        h.press(Key::Left, Mods::NONE);
+        h.press(Key::Left, ctrl());
         h.press(Key::Down, Mods::NONE).candidates.unwrap()
     };
     assert!(page.items.contains(&"氣".to_string()), "{:?}", page.items);
@@ -1273,7 +1280,7 @@ fn preedit_target_marks_char_after_cursor_but_not_at_end() {
     h.type_str("wu0 fu4"); // 天氣
     assert_eq!(h.s.preedit().target, None, "游標在最後不標示");
     assert_eq!(h.s.preedit().len, 2);
-    h.press(Key::Left, Mods::NONE);
+    h.press(Key::Left, ctrl());
     assert_eq!(h.s.preedit().target, Some((1, 1)));
 }
 
@@ -2284,4 +2291,26 @@ fn committed_text_remembers_its_reading() {
     h.press(Key::Enter, Mods::NONE);
     let choices = h.s.engine().reading_choices("天氣");
     assert_eq!(choices[0], vec!["ㄊㄧㄢ".to_string(), "ㄑㄧˋ".to_string()]);
+}
+
+#[test]
+fn arrows_jump_whole_chinese_words_but_delete_one_char() {
+    let mut h = Harness::new();
+    h.type_str("wu0 fu4"); // 天氣
+    assert_eq!(h.s.preedit().cursor, 2);
+    // ← 跳過整個詞，選字目標標示整個詞
+    let p = h.press(Key::Left, Mods::NONE).preedit;
+    assert_eq!((p.cursor, p.target), (0, Some((0, 2))));
+    assert_eq!(h.press(Key::Right, Mods::NONE).preedit.cursor, 2);
+    // Ctrl + ← / → 逐字移動
+    let ctrl = Mods {
+        ctrl: true,
+        ..Mods::NONE
+    };
+    let r = h.press(Key::Left, ctrl);
+    assert!(r.eaten, "組字中的 Ctrl + ← 不交給 App");
+    assert_eq!(r.preedit.cursor, 1);
+    h.press(Key::Right, ctrl);
+    // Backspace 一次刪一個字
+    assert_eq!(h.press(Key::Backspace, Mods::NONE).preedit.text, "天");
 }

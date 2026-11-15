@@ -538,6 +538,15 @@ impl Session {
         {
             return true;
         }
+        // 組字中 Ctrl + ← / →：在組字區逐字移動（← → 一次跳一個詞）
+        if self.is_composing()
+            && ev.mods.ctrl
+            && !ev.mods.alt
+            && !ev.mods.meta
+            && matches!(ev.key, Key::Left | Key::Right)
+        {
+            return true;
+        }
         // P3：沒有綁定的 Ctrl / Alt / Meta 組合鍵一律交給 App
         if ev.mods.has_command_modifier() {
             return false;
@@ -803,7 +812,26 @@ impl Session {
             .count()
     }
 
-    /// 組字區中英文單字當成一個單位：← → 跳過整個單字；Backspace / Delete 刪整個完整單字
+    /// 游標左邊、同一個中文詞裡的字數（游標在詞中間時是前半段）；不在多字詞裡是 0
+    fn phrase_before(&self, c: usize) -> usize {
+        self.editor
+            .intervals()
+            .find(|it| it.start < c && c <= it.end && it.end - it.start > 1)
+            .filter(|it| it.text.chars().all(crate::mixed::is_cjk))
+            .map_or(0, |it| c - it.start)
+    }
+
+    /// 游標右邊、同一個中文詞裡的字數；不在多字詞裡是 0
+    fn phrase_after(&self, c: usize) -> usize {
+        self.editor
+            .intervals()
+            .find(|it| it.start <= c && c < it.end && it.end - it.start > 1)
+            .filter(|it| it.text.chars().all(crate::mixed::is_cjk))
+            .map_or(0, |it| it.end - c)
+    }
+
+    /// 組字區中英文單字、中文詞都當成一個單位：← → 跳過整個單字 / 詞（Ctrl + ← / → 逐字移動）；
+    /// Backspace / Delete 刪整個完整英文單字，中文仍然一次刪一個字
     fn word_key(&mut self, ev: &KeyEvent) -> bool {
         let backspace_armed = std::mem::take(&mut self.word_backspace);
         if ev.mods.shift
@@ -813,10 +841,16 @@ impl Session {
         {
             return false;
         }
+        if ev.mods.ctrl && matches!(ev.key, Key::Left | Key::Right) {
+            self.chewing_key(ev.key);
+            return true;
+        }
         let c = self.editor.cursor();
         let (key, times) = match ev.key {
             Key::Left if c > 0 && self.sym_letter(c - 1) => (Key::Left, self.letters_before(c)),
             Key::Right if self.sym_letter(c) => (Key::Right, self.letters_after(c)),
+            Key::Left if self.phrase_before(c) > 1 => (Key::Left, self.phrase_before(c)),
+            Key::Right if self.phrase_after(c) > 1 => (Key::Right, self.phrase_after(c)),
             // 完整單字（後面有空白）：第一次刪空白，並記下來
             Key::Backspace if c >= 2 && self.sym_space(c - 1) && self.sym_letter(c - 2) => {
                 self.word_backspace = true;
@@ -1945,7 +1979,11 @@ impl Session {
                 .map_or(1, |i| i.word.chars().count());
             Some((cursor, n))
         } else if syllable.is_empty() && cursor < converted.len() {
-            let n = self.letters_after(cursor).max(1);
+            // 英文單字、中文詞整個標示（← → 也是整個跳過）
+            let n = self
+                .letters_after(cursor)
+                .max(self.phrase_after(cursor))
+                .max(1);
             Some((shift, n))
         } else {
             None
