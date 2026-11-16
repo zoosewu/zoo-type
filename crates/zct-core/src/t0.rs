@@ -23,6 +23,8 @@ pub const DEFAULT_MARGIN: f64 = 0.5;
 #[derive(Debug)]
 pub struct T0Engine {
     inner: ChewingEngine,
+    /// 使用者學過、設為優先的詞（加權高於一般）一定保留
+    user_dict: UserDict,
     model: Arc<NgramModel>,
     weight: f64,
     margin: f64,
@@ -46,9 +48,10 @@ impl T0Engine {
             parts.rare_dict,
             parts.history_dict.clone(),
             session,
-            parts.user_dict,
+            parts.user_dict.clone(),
         );
         T0Engine {
+            user_dict: parts.user_dict,
             inner: ChewingEngine {
                 word_lattice_builder: LatticeBuilder {
                     dict,
@@ -72,6 +75,44 @@ fn text_of(o: &Outcome) -> String {
     o.intervals.iter().map(|i| &*i.text).collect()
 }
 
+impl T0Engine {
+    /// 候選句裡使用者學過或設為優先的詞：（輸出位置起點, 終點, 詞）
+    fn user_words(&self, comp: &Composition, o: &Outcome) -> Vec<(usize, usize, Box<str>)> {
+        o.intervals
+            .iter()
+            .filter(|it| it.is_phrase)
+            .filter(|it| {
+                let span = it.src_span.start as usize..it.src_span.end as usize;
+                let Some(syl) = comp.symbols().get(span).and_then(|s| {
+                    s.iter()
+                        .map(|s| s.to_syllable())
+                        .collect::<Option<Vec<_>>>()
+                }) else {
+                    return false;
+                };
+                self.user_dict
+                    .lookup(&syl, LookupStrategy::Standard)
+                    .into_iter()
+                    .any(|(wid, boost)| {
+                        boost > crate::engine::PhraseEntry::NORMAL
+                            && self.user_dict.get_text(wid).as_deref() == Some(&*it.text)
+                    })
+            })
+            .map(|it| (it.start, it.end, it.text.clone()))
+            .collect()
+    }
+}
+
+/// 候選句在那些位置是不是同樣的詞
+fn keeps(o: &Outcome, words: &[(usize, usize, Box<str>)]) -> bool {
+    let chars: Vec<char> = text_of(o).chars().collect();
+    words.iter().all(|(s, e, w)| {
+        chars
+            .get(*s..*e)
+            .is_some_and(|c| c.iter().copied().eq(w.chars()))
+    })
+}
+
 impl ConversionEngine for T0Engine {
     fn convert<'a>(&'a self, comp: &'a Composition) -> Vec<Outcome> {
         let mut outcomes = ConversionEngine::convert(&self.inner, comp);
@@ -82,6 +123,15 @@ impl ConversionEngine for T0Engine {
             .drain(..)
             .map(|o| (o.cost - self.weight * self.model.score(&text_of(&o)), o))
             .collect();
+        // 使用者學過、設為優先的詞一定保留：沒保留它們的候選句排到最後
+        let protected = self.user_words(comp, &scored[0].1);
+        if !protected.is_empty() {
+            for (score, o) in scored.iter_mut().skip(1) {
+                if !keeps(o, &protected) {
+                    *score = f64::INFINITY;
+                }
+            }
+        }
         // chewing 的首選只有在別的候選句明顯更好時才換掉：T0 只是略微偏好時常常是錯的
         // （繳 → 角、花 → 華），寧可維持 chewing 原本的判斷
         let first = scored[0].0 - self.margin;

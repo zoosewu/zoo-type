@@ -31,7 +31,30 @@ impl Harness {
         Harness::with_engine(engine, config, rule, dir)
     }
 
+    /// 一般的測試都關掉智慧選字（T0）：測的是 chewing 與輸入法本身的行為，不受模型版本影響。
+    /// T0 的測試用 [`Harness::t0`]
     fn with_engine(
+        engine: std::sync::Arc<zct_core::Engine>,
+        mut config: Config,
+        rule: Option<zct_core::AppRule>,
+        dir: tempfile::TempDir,
+    ) -> Harness {
+        config.candidates.language_model = false;
+        Harness::build(engine, config, rule, dir)
+    }
+
+    /// 開啟智慧選字；系統詞庫沒有 ngram.bin（例如 CI）時回傳 None，測試略過
+    fn t0() -> Option<Harness> {
+        if !std::path::Path::new(DICT).join("ngram.bin").exists() {
+            eprintln!("沒有 ngram.bin，略過 T0 測試");
+            return None;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let engine = std::sync::Arc::new(open_engine(&dir.path().join("learning")));
+        Some(Harness::build(engine, Config::default(), None, dir))
+    }
+
+    fn build(
         engine: std::sync::Arc<zct_core::Engine>,
         config: Config,
         rule: Option<zct_core::AppRule>,
@@ -2328,4 +2351,24 @@ fn ai_never_changes_pronouns() {
         e.keep_same_reading("她在", &syl(&["ㄊㄚ", "ㄗㄞˋ"]), "他再"),
         "她再"
     );
+}
+
+// ---- T0 智慧選字（需要 assets/dict/ngram.bin；沒有時略過）----
+
+#[test]
+fn t0_picks_the_natural_sentence() {
+    let Some(mut h) = Harness::t0() else { return };
+    // chewing 預設是「蟲開機」
+    h.type_str("tj/6d9 ru ");
+    assert_eq!(h.s.preedit().text, "重開機");
+}
+
+#[test]
+fn t0_keeps_what_the_user_picked_and_pinned() {
+    let Some(mut h) = Harness::t0() else { return };
+    // 和 pin_moves_word_to_top 相同，但開著 T0：選了、設為優先的字不能被重新排序改掉
+    let r = highlight_and(&mut h, "汽", Key::Enter, Mods::shift());
+    assert_eq!(r.notice.as_deref(), Some("已設為優先：汽"));
+    assert!(h.s.preedit().text.ends_with('汽'));
+    assert_eq!(candidates_for_qi(&mut h)[0], "汽");
 }
