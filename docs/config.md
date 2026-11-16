@@ -79,6 +79,7 @@ composition_bar = false    # 組字提示列的全域預設（游標上方另開
 [candidates]
 per_page = 9               # 每頁候選字數（1–10）
 sort_by_frequency = true   # 候選字依常用程度與個人學習排序
+language_model = true      # 智慧選字：用內建的字 n-gram 語言模型挑最通順的首選（離線執行）
 
 [punctuation]
 primary = "backtick"       # 主要符號（，。；＇…）："backtick" ` + 鍵 | "right_alt" 右 Alt + 鍵 | "both"

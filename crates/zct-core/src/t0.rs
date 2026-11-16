@@ -15,10 +15,10 @@ use chewing::user::{HistoryDict, SessionHistoryDict, UserDict};
 
 use crate::ngram::NgramModel;
 
-/// 字 n-gram 分數的權重（評測調出來的）
-pub const DEFAULT_WEIGHT: f64 = 0.5;
+/// 字 n-gram 分數的權重；與門檻一起用評測調出來（2026-11-16：自寫口語不變差、維基保留集錯字少約 45%）
+pub const DEFAULT_WEIGHT: f64 = 1.0;
 /// 換掉 chewing 首選需要的差距（log10）
-pub const DEFAULT_MARGIN: f64 = 0.0;
+pub const DEFAULT_MARGIN: f64 = 0.5;
 
 #[derive(Debug)]
 pub struct T0Engine {

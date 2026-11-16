@@ -9,6 +9,7 @@ export struct General {
     tap-ms: int,
     per-page: int,
     sort-freq: bool,
+    language-model: bool,
     detect-legacy: bool,
     detect-fullscreen: bool,
     auto-english: bool,
@@ -384,6 +385,8 @@ export component SettingsWindow inherits Window {
                     Row { label: "每頁字數"; SpinBox { width: 160px; minimum: 1; maximum: 10; value <=> root.general.per-page; } }
                     Row { label: "依常用程度排序"; Switch { checked <=> root.general.sort-freq; } }
                     Note { text: "常用字在前，並參考你的選字紀錄。"; }
+                    Row { label: "智慧選字"; Switch { checked <=> root.general.language-model; } }
+                    Note { text: "用內建的語言模型判斷整句哪個同音字最通順（例如「下次再說」「在家」），在電腦上執行，不連網路。"; }
                     Section { text: "不在打字時不處理按鍵"; }
                     Help { text: "偵測到不是在打字（遊戲、全螢幕影片）時，按鍵直接交給 App，Shift 也不切換中英。下面兩項判斷誤判時可以關掉。"; }
                     Row { label: "舊式程式全螢幕"; Switch { checked <=> root.general.detect-legacy; } }

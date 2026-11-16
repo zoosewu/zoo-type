@@ -290,6 +290,8 @@ pub struct CandidateConfig {
     pub per_page: usize,
     /// 候選字依常用程度與個人學習排序（P2：常用字排前面）
     pub sort_by_frequency: bool,
+    /// 智慧選字（T0）：用內建的字 n-gram 語言模型挑最通順的首選（系統詞庫有 ngram.bin 時才有作用）
+    pub language_model: bool,
 }
 
 impl Default for CandidateConfig {
@@ -297,6 +299,7 @@ impl Default for CandidateConfig {
         CandidateConfig {
             per_page: 9,
             sort_by_frequency: true,
+            language_model: true,
         }
     }
 }

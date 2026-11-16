@@ -278,7 +278,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(opts: &SessionOptions) -> Result<Session, SessionError> {
-        let mut editor: Editor = opts.engine.editor();
+        let mut editor: Editor = opts.engine.editor(opts.config.candidates.language_model);
         let sort = opts.config.candidates.sort_by_frequency;
 
         let per_page = opts.config.candidates.per_page.clamp(1, 10);

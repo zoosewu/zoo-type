@@ -570,7 +570,8 @@ impl Engine {
     }
 
     /// 建立共用詞庫的 Editor（不會自己寫檔）
-    pub(crate) fn editor(&self) -> Editor {
+    /// `language_model`：使用 T0（設定 `candidates.language_model`，有模型時才有作用）
+    pub(crate) fn editor(&self, language_model: bool) -> Editor {
         let mut editor = EditorBuilder::new()
             .string_table(self.string_table.clone())
             .static_dict(self.static_dict.clone())
@@ -580,7 +581,7 @@ impl Engine {
             .static_lm(self.lm.clone())
             .symbol_selector(self.symbols.clone())
             .build();
-        if let Some((model, weight, margin)) = &self.t0 {
+        if let Some((model, weight, margin)) = self.t0.as_ref().filter(|_| language_model) {
             let parts = crate::t0::Parts {
                 string_table: self.string_table.clone(),
                 static_dict: self.static_dict.clone(),

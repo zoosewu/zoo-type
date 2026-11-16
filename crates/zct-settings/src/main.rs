@@ -37,6 +37,7 @@ fn general_from(c: &Config) -> General {
         tap_ms: c.toggle.shift_tap_max_ms as i32,
         per_page: c.candidates.per_page as i32,
         sort_freq: c.candidates.sort_by_frequency,
+        language_model: c.candidates.language_model,
         detect_legacy: c.detect.legacy_fullscreen,
         detect_fullscreen: c.detect.exclusive_fullscreen,
         auto_english: c.mixed.auto_english,
@@ -82,6 +83,7 @@ fn apply_general(c: &mut Config, g: &General) {
     c.toggle.shift_tap_max_ms = g.tap_ms.max(0) as u64;
     c.candidates.per_page = g.per_page.clamp(1, 10) as usize;
     c.candidates.sort_by_frequency = g.sort_freq;
+    c.candidates.language_model = g.language_model;
     c.detect.legacy_fullscreen = g.detect_legacy;
     c.detect.exclusive_fullscreen = g.detect_fullscreen;
     c.mixed.auto_english = g.auto_english;
