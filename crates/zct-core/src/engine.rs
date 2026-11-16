@@ -134,7 +134,7 @@ pub struct Engine {
     /// 最近送出的中文與當時的讀音（新的在後）：重新選字時最準的讀音來源
     recent: Mutex<std::collections::VecDeque<(String, Vec<String>)>>,
     /// T0：字 n-gram 模型與權重（系統詞庫資料夾有 ngram.bin 時才啟用）
-    t0: Option<(Arc<crate::ngram::NgramModel>, f64)>,
+    t0: Option<(Arc<crate::ngram::NgramModel>, f64, f64)>,
 }
 
 /// 記住最近幾段送出的文字
@@ -146,8 +146,8 @@ fn is_pronoun(c: char) -> bool {
 }
 
 /// T0 模型：系統詞庫資料夾的 `ngram.bin`；開發時可用環境變數 `ZCT_T0_MODEL`（`off` 停用）、
-/// `ZCT_T0_WEIGHT` 指定模型與權重（評測比較用）
-fn load_t0(sys_dir: &Path) -> Option<(Arc<crate::ngram::NgramModel>, f64)> {
+/// `ZCT_T0_WEIGHT`、`ZCT_T0_MARGIN` 指定模型、權重與門檻（評測比較用）
+fn load_t0(sys_dir: &Path) -> Option<(Arc<crate::ngram::NgramModel>, f64, f64)> {
     let path = match std::env::var_os("ZCT_T0_MODEL") {
         Some(v) if v == "off" => return None,
         Some(v) => PathBuf::from(v),
@@ -160,8 +160,12 @@ fn load_t0(sys_dir: &Path) -> Option<(Arc<crate::ngram::NgramModel>, f64)> {
         .ok()
         .and_then(|w| w.parse().ok())
         .unwrap_or(crate::t0::DEFAULT_WEIGHT);
+    let margin = std::env::var("ZCT_T0_MARGIN")
+        .ok()
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(crate::t0::DEFAULT_MARGIN);
     match crate::ngram::NgramModel::load(&path) {
-        Ok(m) => Some((Arc::new(m), weight)),
+        Ok(m) => Some((Arc::new(m), weight, margin)),
         Err(e) => {
             log::warn!("T0 模型讀取失敗，不使用：{e}");
             None
@@ -576,7 +580,7 @@ impl Engine {
             .static_lm(self.lm.clone())
             .symbol_selector(self.symbols.clone())
             .build();
-        if let Some((model, weight)) = &self.t0 {
+        if let Some((model, weight, margin)) = &self.t0 {
             let parts = crate::t0::Parts {
                 string_table: self.string_table.clone(),
                 static_dict: self.static_dict.clone(),
@@ -589,6 +593,7 @@ impl Engine {
                 parts,
                 model.clone(),
                 *weight,
+                *margin,
             )));
         }
         editor

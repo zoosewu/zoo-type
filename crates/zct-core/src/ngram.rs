@@ -1,21 +1,25 @@
 //! T0：字 n-gram 語言模型（需求 4.13），用來替 chewing 的候選句重新打分
 //!
-//! - 每個 n-gram 以 64 位元雜湊當鍵，各階一張排序好的表，查詢用二分搜尋；整個模型一次讀進記憶體
 //! - 打分用 stupid backoff（Brants 2007）：只比較同一組候選句誰比較通順，不需要正規化的機率
 //! - 句子前後加上邊界記號，所以「句首、句尾常見的字」也算在內
+//! - 為了讓模型小到能隨安裝程式發布：每個 n-gram 只存 32 位元指紋與量化後的分數（共 5 bytes）。
+//!   指紋撞到的機率約為「筆數 / 2³²」，查不到的 n-gram 偶爾被當成有，對排序的影響可以忽略
 //!
-//! 檔案格式（little-endian）：`ZCTNG001`、階數 u32、總字數 u64，接著每一階：筆數 u64、
-//! 鍵 u64 × 筆數、次數 u32 × 筆數（鍵由小到大）。
+//! 檔案格式（little-endian）：`ZCTNG002`、階數 u32、沒見過的字的分數 f32（log10），接著每一階：
+//! 筆數 u64、指紋 u32 × 筆數（由小到大）、分數 u8 × 筆數（`-q / 32` = log10 條件機率）。
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"ZCTNG001";
+const MAGIC: &[u8; 8] = b"ZCTNG002";
 /// 句首、句尾記號（不會出現在中文文字裡的控制字元）
 pub const BOS: char = '\u{2}';
 pub const EOS: char = '\u{3}';
-/// 退一階時乘上的權重（論文建議 0.4）
-const BACKOFF: f64 = 0.4;
+/// 退一階時乘上的權重（論文建議 0.4），log10
+const BACKOFF_LOG: f64 = -0.397_940_008_672_037_6;
+/// 分數量化：log10 每 1/32 一格，最低 -7.97
+const QUANT: f64 = 32.0;
 
 /// 異體字當成同一個字：寫法（臺／台、賬／帳）交給 chewing 決定，T0 只判斷是哪個字
 ///
@@ -54,26 +58,28 @@ pub fn key(chars: &[char]) -> u64 {
     h
 }
 
+/// 存在模型裡的指紋：雜湊的高 32 位元
+fn fingerprint(chars: &[char]) -> u32 {
+    (key(chars) >> 32) as u32
+}
+
 #[derive(Debug, Default)]
 struct Table {
-    keys: Vec<u64>,
-    counts: Vec<u32>,
+    fps: Vec<u32>,
+    scores: Vec<u8>,
 }
 
 impl Table {
-    fn get(&self, k: u64) -> u32 {
-        self.keys
-            .binary_search(&k)
-            .map(|i| self.counts[i])
-            .unwrap_or(0)
+    fn get(&self, fp: u32) -> Option<u8> {
+        self.fps.binary_search(&fp).ok().map(|i| self.scores[i])
     }
 }
 
 #[derive(Debug, Default)]
 pub struct NgramModel {
     tables: Vec<Table>,
-    /// 訓練語料的總字數（含邊界記號），一階的分母
-    total: u64,
+    /// 語料裡沒出現過的字（log10）
+    floor: f64,
 }
 
 impl NgramModel {
@@ -94,81 +100,40 @@ impl NgramModel {
             *b = rest;
             Some(head)
         }
-        let u32_ = |b: &mut &[u8]| take(b, 4).map(|s| u32::from_le_bytes(s.try_into().unwrap()));
-        let u64_ = |b: &mut &[u8]| take(b, 8).map(|s| u64::from_le_bytes(s.try_into().unwrap()));
         if take(&mut b, 8)? != MAGIC {
             return None;
         }
-        let order = u32_(&mut b)? as usize;
-        let total = u64_(&mut b)?;
-        let mut tables = Vec::with_capacity(order);
+        let order = u32::from_le_bytes(take(&mut b, 4)?.try_into().ok()?) as usize;
+        let floor = f32::from_le_bytes(take(&mut b, 4)?.try_into().ok()?) as f64;
+        let mut tables = Vec::with_capacity(order.min(16));
         for _ in 0..order {
-            let n = usize::try_from(u64_(&mut b)?).ok()?;
-            let keys = take(&mut b, n.checked_mul(8)?)?
-                .as_chunks::<8>()
-                .0
-                .iter()
-                .map(|c| u64::from_le_bytes(*c))
-                .collect();
-            let counts = take(&mut b, n.checked_mul(4)?)?
+            let n = usize::try_from(u64::from_le_bytes(take(&mut b, 8)?.try_into().ok()?)).ok()?;
+            let fps = take(&mut b, n.checked_mul(4)?)?
                 .as_chunks::<4>()
                 .0
                 .iter()
                 .map(|c| u32::from_le_bytes(*c))
                 .collect();
-            tables.push(Table { keys, counts });
+            let scores = take(&mut b, n)?.to_vec();
+            tables.push(Table { fps, scores });
         }
-        b.is_empty().then_some(NgramModel { tables, total })
+        b.is_empty().then_some(NgramModel { tables, floor })
     }
 
-    /// 寫出模型；`tables[n - 1]` 是 n 階的（鍵, 次數），不必先排序
-    pub fn write(path: &Path, total: u64, tables: Vec<Vec<(u64, u32)>>) -> std::io::Result<()> {
-        let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-        out.write_all(MAGIC)?;
-        out.write_all(&(tables.len() as u32).to_le_bytes())?;
-        out.write_all(&total.to_le_bytes())?;
-        for mut t in tables {
-            t.sort_unstable_by_key(|&(k, _)| k);
-            t.dedup_by_key(|&mut (k, _)| k);
-            out.write_all(&(t.len() as u64).to_le_bytes())?;
-            for &(k, _) in &t {
-                out.write_all(&k.to_le_bytes())?;
-            }
-            for &(_, c) in &t {
-                out.write_all(&c.to_le_bytes())?;
-            }
-        }
-        out.flush()
-    }
-
-    fn count(&self, gram: &[char]) -> u32 {
-        self.tables
-            .get(gram.len().wrapping_sub(1))
-            .map_or(0, |t| t.get(key(gram)))
-    }
-
-    /// `w` 接在 `ctx` 後面的分數（stupid backoff，0～1）
-    fn prob(&self, ctx: &[char], w: char) -> f64 {
-        let mut mult = 1.0;
+    /// `w` 接在 `ctx` 後面的分數（log10，stupid backoff）
+    fn prob_log(&self, ctx: &[char], w: char) -> f64 {
+        let mut penalty = 0.0;
+        let mut gram: Vec<char> = Vec::with_capacity(ctx.len() + 1);
         for k in (0..=ctx.len()).rev() {
-            let c = &ctx[ctx.len() - k..];
-            let mut gram = c.to_vec();
+            gram.clear();
+            gram.extend_from_slice(&ctx[ctx.len() - k..]);
             gram.push(w);
-            let hit = self.count(&gram);
-            if hit > 0 {
-                let denom = if k == 0 {
-                    self.total
-                } else {
-                    self.count(c) as u64
-                };
-                if denom > 0 {
-                    return mult * hit as f64 / denom as f64;
-                }
+            if let Some(q) = self.tables.get(k).and_then(|t| t.get(fingerprint(&gram))) {
+                return penalty - q as f64 / QUANT;
             }
-            mult *= BACKOFF;
+            penalty += BACKOFF_LOG;
         }
-        // 語料裡沒出現過的字
-        mult * 0.5 / self.total.max(1) as f64
+        penalty + self.floor
     }
 
     /// 一段文字的分數（log10，越大越通順）；非中文的字當成句子邊界
@@ -185,23 +150,85 @@ impl NgramModel {
                 .collect();
             for i in 1..seq.len() {
                 let ctx = &seq[i.saturating_sub(order - 1)..i];
-                total += self.prob(ctx, seq[i]).log10();
+                total += self.prob_log(ctx, seq[i]);
             }
         }
         total
     }
 }
 
-/// 訓練用：一句（只含中文字）加上邊界記號後的所有 1～`order` 階 n-gram 鍵
-pub fn sentence_keys(sentence: &[char], order: usize, mut f: impl FnMut(usize, u64)) {
-    let seq: Vec<char> = std::iter::once(BOS)
-        .chain(sentence.iter().copied())
-        .chain(std::iter::once(EOS))
-        .collect();
-    for n in 1..=order {
-        for w in seq.windows(n) {
-            f(n, key(w));
+/// 訓練：累計每個 n-gram 的次數與它的前文（算條件機率用）
+pub struct Counter {
+    /// `maps[n - 1]`：n 階的鍵 → （次數, 前 n-1 個字的鍵）
+    maps: Vec<HashMap<u64, (u32, u64)>>,
+    /// 總字數（含邊界記號），一階的分母
+    total: u64,
+}
+
+impl Counter {
+    pub fn new(order: usize) -> Counter {
+        Counter {
+            maps: vec![HashMap::new(); order.max(1)],
+            total: 0,
         }
+    }
+
+    /// 各階目前的筆數（顯示進度用）
+    pub fn sizes(&self) -> Vec<usize> {
+        self.maps.iter().map(HashMap::len).collect()
+    }
+
+    /// 加入一句（只含中文字）；`weight` 是這句算幾次（少量的口語語料要加重）
+    pub fn add(&mut self, sentence: &[char], weight: u32) {
+        let seq: Vec<char> = std::iter::once(BOS)
+            .chain(sentence.iter().copied())
+            .chain(std::iter::once(EOS))
+            .collect();
+        for (i, map) in self.maps.iter_mut().enumerate() {
+            let n = i + 1;
+            for w in seq.windows(n) {
+                let ctx = if n == 1 { 0 } else { key(&w[..n - 1]) };
+                let e = map.entry(key(w)).or_insert((0, ctx));
+                e.0 = e.0.saturating_add(weight);
+            }
+        }
+        self.total += seq.len() as u64 * weight as u64;
+    }
+
+    /// 修剪（`min[n - 1]`：n 階至少要出現幾次）後寫出模型；回傳各階留下的筆數
+    pub fn write(&self, path: &Path, min: &[u32]) -> std::io::Result<Vec<usize>> {
+        let total = self.total.max(1) as f64;
+        let quant = |p: f64| (-p.log10() * QUANT).round().clamp(0.0, 255.0) as u8;
+        let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+        out.write_all(MAGIC)?;
+        out.write_all(&(self.maps.len() as u32).to_le_bytes())?;
+        out.write_all(&((0.5 / total).log10() as f32).to_le_bytes())?;
+        let mut sizes = Vec::new();
+        for (i, map) in self.maps.iter().enumerate() {
+            let floor = min.get(i).copied().unwrap_or(1);
+            let lower = i.checked_sub(1).map(|j| &self.maps[j]);
+            let mut rows: Vec<(u32, u8)> = map
+                .iter()
+                .filter(|(_, (c, _))| *c >= floor)
+                .map(|(&k, &(c, ctx))| {
+                    let denom = match lower {
+                        None => total,
+                        Some(m) => m.get(&ctx).map_or(c, |&(d, _)| d.max(c)) as f64,
+                    };
+                    ((k >> 32) as u32, quant(c as f64 / denom))
+                })
+                .collect();
+            rows.sort_unstable_by_key(|&(fp, _)| fp);
+            rows.dedup_by_key(|&mut (fp, _)| fp);
+            out.write_all(&(rows.len() as u64).to_le_bytes())?;
+            for &(fp, _) in &rows {
+                out.write_all(&fp.to_le_bytes())?;
+            }
+            out.write_all(&rows.iter().map(|&(_, q)| q).collect::<Vec<_>>())?;
+            sizes.push(rows.len());
+        }
+        out.flush()?;
+        Ok(sizes)
     }
 }
 
@@ -210,25 +237,13 @@ mod tests {
     use super::*;
 
     fn train(sentences: &[&str], order: usize) -> NgramModel {
-        let mut maps = vec![std::collections::HashMap::<u64, u32>::new(); order];
-        let mut total = 0;
+        let mut c = Counter::new(order);
         for s in sentences {
-            let chars: Vec<char> = s.chars().collect();
-            sentence_keys(&chars, order, |n, k| {
-                *maps[n - 1].entry(k).or_default() += 1;
-                if n == 1 {
-                    total += 1;
-                }
-            });
+            c.add(&s.chars().collect::<Vec<_>>(), 1);
         }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("m.bin");
-        NgramModel::write(
-            &path,
-            total,
-            maps.into_iter().map(|m| m.into_iter().collect()).collect(),
-        )
-        .unwrap();
+        c.write(&path, &[1, 1, 1]).unwrap();
         NgramModel::load(&path).unwrap()
     }
 
@@ -244,11 +259,17 @@ mod tests {
     }
 
     #[test]
+    fn variants_score_the_same() {
+        let m = train(&["臺灣很好", "臺北下雨"], 3);
+        assert_eq!(m.score("台灣很好"), m.score("臺灣很好"));
+    }
+
+    #[test]
     fn rejects_corrupt_files() {
         assert!(NgramModel::from_bytes(b"nope").is_none());
         let mut ok = MAGIC.to_vec();
         ok.extend(0u32.to_le_bytes());
-        ok.extend(0u64.to_le_bytes());
+        ok.extend(0f32.to_le_bytes());
         assert!(NgramModel::from_bytes(&ok).is_some());
         ok.push(0);
         assert!(NgramModel::from_bytes(&ok).is_none(), "多出來的位元組");

@@ -4,7 +4,7 @@
 //! # 維基 dump → 台灣正體、一行一句；每 50 篇留一篇做評測（不參與訓練）
 //! cargo run -p zct-train --release -- extract .corpus/text .corpus/wiki/*.bz2
 //! # 統計字 n-gram、修剪、寫出模型
-//! cargo run -p zct-train --release -- train .corpus/text/train.txt .corpus/ngram.bin --order 4 --min 1,2,3,3
+//! cargo run -p zct-train --release -- train .corpus/ngram.bin .corpus/text/train.txt .corpus/text/llm.txt:10
 //! # 用本機 LLM 生成口語句子補強（LM Studio：lms server start）
 //! cargo run -p zct-train --release -- generate .corpus/text/llm.txt http://localhost:1234/v1 qwen/qwen3.5-4b
 //! ```
@@ -12,7 +12,6 @@
 mod generate;
 mod wiki;
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
@@ -20,7 +19,7 @@ use std::sync::{Arc, mpsc};
 use ferrous_opencc::OpenCC;
 use ferrous_opencc::config::BuiltinConfig;
 use zct_core::mixed::is_cjk;
-use zct_core::ngram::{NgramModel, sentence_keys};
+use zct_core::ngram::Counter;
 
 /// 每幾篇條目留一篇當評測語料
 const HELDOUT_EVERY: usize = 50;
@@ -40,7 +39,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "用法：\n  zct-train extract <輸出資料夾> <dump.bz2>…\n  zct-train train <語料.txt> <模型.bin> [--order 4] [--min 1,2,3,3]\n  zct-train generate <輸出.txt> <端點> <模型>"
+                "用法：\n  zct-train extract <輸出資料夾> <dump.bz2>…\n  zct-train train <模型.bin> <語料.txt[:權重]>… [--order 4] [--min 1,2,3,3]\n  zct-train generate <輸出.txt> <端點> <模型>"
             );
             std::process::exit(2);
         }
@@ -131,12 +130,15 @@ fn extract(out_dir: &Path, dumps: &[PathBuf]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// `train <模型.bin> <語料.txt[:權重]>… [--order 4] [--min 1,2,3,3]`
+///
+/// 權重：每句算幾次（少量的口語語料加重，例如 `llm.txt:10`）；`#` 開頭的行略過
 fn train(args: &[String]) -> std::io::Result<()> {
-    let corpus = Path::new(&args[0]);
-    let out = Path::new(&args[1]);
+    let out = Path::new(&args[0]);
     let mut order = 4usize;
     let mut min: Vec<u32> = vec![1, 2, 3, 3];
-    let mut it = args[2..].iter();
+    let mut corpora: Vec<(PathBuf, u32)> = Vec::new();
+    let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--order" => order = it.next().and_then(|v| v.parse().ok()).unwrap_or(order),
@@ -146,44 +148,39 @@ fn train(args: &[String]) -> std::io::Result<()> {
                     .map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect())
                     .unwrap_or(min)
             }
-            other => eprintln!("略過不認得的參數 {other}"),
+            path => {
+                // Windows 路徑的磁碟機代號也有冒號，只看最後一段是不是數字
+                let (p, w) = match path.rsplit_once(':') {
+                    Some((p, w)) if w.parse::<u32>().is_ok() => (p, w.parse().unwrap()),
+                    _ => (path, 1),
+                };
+                corpora.push((PathBuf::from(p), w));
+            }
         }
     }
-    let mut maps: Vec<HashMap<u64, u32>> = vec![HashMap::new(); order];
-    let mut total = 0u64;
+    let mut counter = Counter::new(order);
     let mut lines = 0usize;
-    let reader = BufReader::with_capacity(1 << 20, std::fs::File::open(corpus)?);
-    for line in reader.lines() {
-        let line = line?;
-        for run in line.split(|c: char| !is_cjk(c)).filter(|r| !r.is_empty()) {
-            let chars: Vec<char> = run.chars().collect();
-            sentence_keys(&chars, order, |n, k| {
-                let c = maps[n - 1].entry(k).or_default();
-                *c = c.saturating_add(1);
-                if n == 1 {
-                    total += 1;
-                }
-            });
-        }
-        lines += 1;
-        if lines.is_multiple_of(1_000_000) {
-            let sizes: Vec<usize> = maps.iter().map(HashMap::len).collect();
-            eprintln!("  {lines} 句，各階筆數 {sizes:?}");
+    for (path, weight) in &corpora {
+        eprintln!("讀取 {}（權重 {weight}）", path.display());
+        let reader = BufReader::with_capacity(1 << 20, std::fs::File::open(path)?);
+        for line in reader.lines() {
+            let line = line?;
+            if line.starts_with('#') {
+                continue;
+            }
+            for run in line.split(|c: char| !is_cjk(c)).filter(|r| !r.is_empty()) {
+                counter.add(&run.chars().collect::<Vec<_>>(), *weight);
+            }
+            lines += 1;
+            if lines.is_multiple_of(1_000_000) {
+                eprintln!("  {lines} 句，各階筆數 {:?}", counter.sizes());
+            }
         }
     }
-    let tables: Vec<Vec<(u64, u32)>> = maps
-        .into_iter()
-        .enumerate()
-        .map(|(i, m)| {
-            let floor = min.get(i).copied().unwrap_or(1);
-            m.into_iter().filter(|&(_, c)| c >= floor).collect()
-        })
-        .collect();
-    let sizes: Vec<usize> = tables.iter().map(Vec::len).collect();
-    NgramModel::write(out, total, tables)?;
+    let sizes = counter.write(out, &min)?;
     let bytes = std::fs::metadata(out)?.len();
     eprintln!(
-        "完成：{lines} 句、{total} 字，修剪後各階 {sizes:?}，模型 {:.1} MB → {}",
+        "完成：{lines} 句，修剪後各階 {sizes:?}，模型 {:.1} MB → {}",
         bytes as f64 / 1e6,
         out.display()
     );
