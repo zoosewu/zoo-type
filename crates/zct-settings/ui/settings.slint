@@ -274,6 +274,21 @@ component ColorField inherits HorizontalLayout {
     }
 }
 
+// Generated from zct-preferences' complete field catalog, including advanced
+// fields that are not represented by the compact platform-specific pages.
+export struct SharedField {
+    path: string,
+    label: string,
+    section: string,
+    kind: int, // 0 bool, 1 choice, 2 other scalar / JSON
+    value: string,
+    checked: bool,
+    options: [string],
+    selected: int,
+    enabled: bool,
+    help: string,
+}
+
 export component SettingsWindow inherits Window {
     // 正式版與開發版不同（zct_core::channel）
     in property <string> window-title: "動物園輸入法 設定";
@@ -314,6 +329,9 @@ export component SettingsWindow inherits Window {
     pure callback parse-color(string) -> color;
     pure callback hotkey-valid(string) -> bool;
     callback save();
+    callback open-shared();
+    callback leave-shared() -> bool;
+    in-out property <[SharedField]> shared-fields;
     callback select-app(int);
     callback apply-app();
     callback add-app();
@@ -342,15 +360,16 @@ export component SettingsWindow inherits Window {
                 padding: 10px;
                 spacing: 4px;
                 alignment: start;
-                NavItem { text: "一般"; active: root.page == 0; clicked => { root.page = 0; } }
-                NavItem { text: "快捷鍵"; active: root.page == 1; clicked => { root.page = 1; } }
-                NavItem { text: "外觀"; active: root.page == 2; clicked => { root.page = 2; } }
-                NavItem { text: "App 規則"; active: root.page == 3; clicked => { root.page = 3; } }
-                NavItem { text: "詞庫"; active: root.page == 4; clicked => { root.page = 4; root.refresh(); } }
-                NavItem { text: "學習"; active: root.page == 5; clicked => { root.page = 5; root.refresh(); } }
-                NavItem { text: "同步"; active: root.page == 6; clicked => { root.page = 6; root.refresh(); } }
-                NavItem { text: "AI"; active: root.page == 7; clicked => { root.page = 7; } }
-                NavItem { text: "關於"; active: root.page == 8; clicked => { root.page = 8; } }
+                NavItem { text: "一般"; active: root.page == 0; clicked => { if root.leave-shared() { root.page = 0; } } }
+                NavItem { text: "快捷鍵"; active: root.page == 1; clicked => { if root.leave-shared() { root.page = 1; } } }
+                NavItem { text: "外觀"; active: root.page == 2; clicked => { if root.leave-shared() { root.page = 2; } } }
+                NavItem { text: "App 規則"; active: root.page == 3; clicked => { if root.leave-shared() { root.page = 3; } } }
+                NavItem { text: "詞庫"; active: root.page == 4; clicked => { if root.leave-shared() { root.page = 4; } root.refresh(); } }
+                NavItem { text: "學習"; active: root.page == 5; clicked => { if root.leave-shared() { root.page = 5; } root.refresh(); } }
+                NavItem { text: "同步"; active: root.page == 6; clicked => { if root.leave-shared() { root.page = 6; } root.refresh(); } }
+                NavItem { text: "AI"; active: root.page == 7; clicked => { if root.leave-shared() { root.page = 7; } } }
+                NavItem { text: "全部設定"; active: root.page == 9; clicked => { root.open-shared(); } }
+                NavItem { text: "關於"; active: root.page == 8; clicked => { if root.leave-shared() { root.page = 8; } } }
             }
         }
 
@@ -707,6 +726,26 @@ export component SettingsWindow inherits Window {
                 // Slint 授權（Royalty-free 2.0）要求在「關於」畫面顯示；限制大小，不要佔滿畫面
                 HorizontalLayout { alignment: start; AboutSlint { max-width: 260px; max-height: 140px; } }
               }
+            }
+
+            if root.page == 9: ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    alignment: start;
+                    spacing: 10px;
+                    Section { text: "全部設定"; }
+                    Help { text: "與 macOS 共用完整欄位定義；自訂標點使用 JSON 物件。修改後按儲存設定。"; }
+                    for field[i] in root.shared-fields: VerticalLayout {
+                        spacing: 3px;
+                        Row {
+                            label: field.section + " · " + field.label;
+                            if field.kind == 0: Switch { checked <=> field.checked; enabled: field.enabled; }
+                            if field.kind == 1: ComboBox { width: 300px; model: field.options; current-index <=> field.selected; enabled: field.enabled; }
+                            if field.kind == 2: LineEdit { width: 360px; text <=> field.value; enabled: field.enabled; }
+                        }
+                        Help { text: field.path + (field.help == "" ? "" : " — " + field.help); }
+                    }
+                }
             }
 
             // 底部狀態列

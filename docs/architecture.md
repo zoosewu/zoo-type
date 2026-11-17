@@ -74,7 +74,7 @@ impl Session {
 ```
 指標檔（位置固定）：
   Windows  %APPDATA%\ZooType\location.toml
-  macOS    ~/Library/Application Support/zct/location.toml
+  macOS    ~/Library/Application Support/ZooType/location.toml
   內容：data_root = "D:/MyData/zct"
 覆寫：環境變數 ZCT_HOME
 未設定：指標檔所在資料夾即為資料根目錄
@@ -96,3 +96,19 @@ impl Session {
 - 候選窗更新送到 UI 執行緒，不等待繪製完成就回應 DLL
 - AI、git、檔案監看、SQLite 寫入：背景執行緒，透過 channel 回傳，不碰熱路徑
 - 量測點：`process_key` 耗時（criterion 基準）、pipe 往返耗時（log 取樣）
+
+
+## 7. 跨平台設定介面
+
+`zct-preferences` 是 Windows 與 macOS 設定的共用入口。`catalog` 定義所有全域設定與應用程式規則的標題、分頁、型別、預設值、選項及平台能力。完整性測試會比對 `Config` 和 `AppRule` 的序列化欄位，新增欄位時必須同步提供目錄描述。
+
+`SettingsStore` 統一載入、舊格式轉換、驗證與儲存 `Document { config, apps }`。儲存使用檔案鎖與內容版本，拒絕過期視窗覆寫；兩份檔案先完成暫存，再逐一原子替換。這不是兩份檔案跨斷電的原子交易。
+
+`Backend` 以 `Action` / `Reply` 抽象詞庫、讀音、統計、備份、還原、同步與 AI 憑證操作。Windows 設定程式透過 named pipe 轉送引擎操作，Windows 服務與 macOS FFI 共用 `EngineBackend`；憑證與網路工作留在平台實作。macOS Swift `PreferencesClient` 透過 C ABI 的 JSON 請求呼叫共用 `Manager`。UI 不自行解析或寫入 TOML。
+
+macOS 使用 AppKit 九個設定頁；Windows 保留原生 Slint 分頁，增加由同一份目錄產生的「全部設定」。兩邊使用相同設定值、預設值與驗證。macOS 尚無 AI 執行器、遊戲偵測、自動更新及組字提示列快捷鍵；相關欄位停用，但儲存時保留其值，避免跨平台使用資料時遺失設定。一般組字提示列與個別應用程式的提示列選項仍可設定。
+
+還原會凍結舊引擎；主機須重新開啟引擎，現有輸入 session 須重新啟用，避免舊學習資料覆寫還原結果。
+
+
+Git 執行流程在 `zct-preferences::git`，供 Windows 背景服務與 macOS `SyncWorker` 共用。macOS 透過共用管理介面的 `SyncNow` 排入背景工作，`SyncStatus` 回報執行中／結果；30 秒儲存排程依設定間隔觸發自動同步。背景工作持有 `Arc<Engine>`，不共享 Swift 或 C ABI handle；每個主機只允許一個同步，另以資料目錄中的檔案鎖避免多程序同時同步。還原與資料搬移必須等待同步完成，避免舊引擎寫回。

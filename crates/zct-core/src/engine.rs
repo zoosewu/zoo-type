@@ -412,7 +412,12 @@ impl Engine {
 
     /// 使用者的英文單字檔（資料資料夾 `dict/english.txt`，隨 git 同步）
     pub fn load_user_words(&mut self, path: &Path) {
-        *self.user_words.get_mut().unwrap_or_else(|e| e.into_inner()) =
+        self.reload_user_words(path);
+    }
+
+    /// Reload synchronized English entries without replacing active sessions.
+    pub fn reload_user_words(&self, path: &Path) {
+        *self.user_words.write().unwrap_or_else(|e| e.into_inner()) =
             crate::mixed::UserWords::load(path);
     }
 
@@ -478,6 +483,10 @@ impl Engine {
     }
 
     /// 重新選字：一段文字可能的讀音，最可能的在前。最近送出過的用當時的讀音，其次查系統詞庫的 tsi.csv
+    pub fn system_dictionary(&self) -> &Path {
+        &self.sys_dir
+    }
+
     pub fn reading_choices(&self, text: &str) -> Vec<Vec<String>> {
         const MAX: usize = 9;
         let mut out: Vec<Vec<String>> = Vec::new();
@@ -782,6 +791,31 @@ impl Engine {
     /// 加入自訂詞：使用者明確加入的詞要能打得出來，所以和固頂一樣優先
     ///
     /// 讀音是英文字母時加入的是縮寫（`tw` → 台灣）
+    /// Canonical identity shared by settings editors on both platforms.
+    pub fn normalize_phrase(word: &str, reading: &str) -> Result<(String, String), String> {
+        let word = word.trim();
+        let reading = reading.trim();
+        if word.is_empty() {
+            return Err("詞語不能是空白".into());
+        }
+        if reading.is_empty() {
+            return Ok((word.to_ascii_lowercase(), String::new()));
+        }
+        if crate::abbrev::is_abbrev(reading) {
+            return Ok((word.to_owned(), reading.to_ascii_lowercase()));
+        }
+        let syllables = Self::parse(word, reading)?;
+        Ok((
+            word.to_owned(),
+            syllables
+                .as_ref()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+        ))
+    }
+
     pub fn add_phrase(&self, word: &str, bopomofo: &str) -> Result<(), String> {
         let word = word.trim();
         if bopomofo.trim().is_empty() {

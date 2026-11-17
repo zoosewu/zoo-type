@@ -18,6 +18,38 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target/macos'
+
+      - name: 詞庫快取
+        id: dict
+        uses: actions/cache@v4
+        with:
+          path: assets/dict
+          key: dict-${{ hashFiles('scripts/fetch-dict.sh') }}
+
+      - name: 下載詞庫
+        if: steps.dict.outputs.cache-hit != 'true'
+        run: sh scripts/fetch-dict.sh
+
+      - name: macOS 檢查、測試與 Release 建置
+        run: sh scripts/build-macos.sh --check
+
+      - name: macOS 開發版檢查、測試與 Release 建置
+        run: sh scripts/build-macos.sh --check --dev
+
   windows:
     runs-on: windows-latest
     timeout-minutes: 60

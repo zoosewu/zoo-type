@@ -496,15 +496,18 @@ mod tests {
     #[test]
     fn pointer_with_bom() {
         let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("My Data").join("學習資料");
+        // 使用本機的絕對路徑；D:\\ 在 macOS 上是相對路徑，不能拿來驗證 BOM。
+        let pointer = toml::to_string(&Pointer {
+            data_root: target.clone(),
+        })
+        .unwrap();
         std::fs::write(
             dir.path().join(POINTER_FILE),
-            "\u{feff}data_root = \"D:\\\\My Data\\\\學習資料\"\r\n",
+            format!("\u{feff}{}", pointer.replace('\n', "\r\n")),
         )
         .unwrap();
-        assert_eq!(
-            resolve(None, dir.path()),
-            PathBuf::from("D:\\My Data\\學習資料")
-        );
+        assert_eq!(resolve(None, dir.path()), target);
     }
 
     #[test]

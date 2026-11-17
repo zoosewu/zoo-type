@@ -46,9 +46,14 @@
 - [x] 用 gh CLI 建立 GitHub Release，附上安裝檔與 SHA256，自動產生變更說明
 - [x] 未做程式碼簽章：下載時 SmartScreen 會警告（README 說明；之後可考慮簽章）
 
-### 4. macOS（需要先完成 M6）
-- [ ] M6：InputMethodKit 前端（Swift）+ cbindgen C ABI 接 zct-core
-- [ ] release.yml 加 macos job：.app 打包成 .pkg（安裝到 ~/Library/Input Methods）
+### 4. macOS（目前開發重點；安裝發佈需要先完成 M6）
+- [x] 共用引擎建置入口：`scripts/build-macos.sh`（正式版 / 開發版；建置範圍與限制見 `docs/macos.md`）
+- [x] macOS CI：共用引擎、AI 用戶端、模擬器與評測工具的 Clippy、測試與 release 建置
+- [x] Release workflow：macOS arm64 / x64 命令列工具與詞庫打包、SHA256；Windows 與 macOS 全部成功後統一發布
+- [x] M6 初版：InputMethodKit 前端（Swift）+ cbindgen C ABI 接 zct-core；組字、候選、送字、學習、App 規則與 .app 安裝
+- [ ] macOS 桌面驗收：TextEdit / Safari / VS Code / Terminal、候選窗定位、多螢幕與安全輸入
+- [ ] macOS 後續功能：多欄／滑鼠選字、設定 GUI、AI、git 同步
+- [x] release.yml macOS job：.app 與 install.sh 打包為 .zip，安裝到 ~/Library/Input Methods
 - [ ] 簽章 / 公證需要 Apple Developer 帳號（未公證的 pkg 會被 Gatekeeper 擋，需手動允許）
 
 ### 5. 自動更新

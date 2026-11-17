@@ -1,12 +1,15 @@
 # 動物園輸入法（zoo-type）
 
-大千排列的繁體注音輸入法，Rust 核心。目前支援 Windows 10 / 11（64 位元），macOS 開發中。
+大千排列的繁體注音輸入法，Rust 核心。支援 Windows 10 / 11（64 位元）；macOS 15 以上已有初版 InputMethodKit 前端。
 
 ## 安裝
 
 到 [Releases](https://github.com/zoosewu/zoo-type/releases) 下載 `zoo-type-<版本>-windows-x64-setup.exe` 執行（需要系統管理員權限）。
 
 安裝檔沒有程式碼簽章，Windows 可能顯示「Windows 已保護您的電腦」：按「其他資訊」→「仍要執行」。可以用同一頁的 `.sha256` 檔核對下載的檔案。
+
+同一個 Release 也提供 macOS 15 以上 Apple Silicon / Intel 的輸入法 `.zip` 與 SHA256。
+解壓後執行 `sh install.sh`，再到系統設定的鍵盤輸入方式加入「動物園輸入法」。尚未做 Apple 公證，安裝步驟與初版限制見 [macOS 說明](docs/macos.md)。
 
 - 需求：[docs/requirements.md](docs/requirements.md)
 - 架構：[docs/architecture.md](docs/architecture.md)
@@ -66,6 +69,9 @@
 - 細節見 [docs/config.md](docs/config.md#符號鍵)
 
 ## 開發
+
+macOS 請使用 [macOS 建置說明](docs/macos.md) 與 `sh scripts/build-macos.sh --check`。
+會建置 InputMethodKit `.app`、共用引擎與工具，並執行 Swift / Rust 橋接自我測試。
 
 ```sh
 sh scripts/fetch-dict.sh          # 下載 libchewing 詞庫到 assets/dict

@@ -1,0 +1,29 @@
+動物園輸入法 macOS 第三方元件與資料
+
+程式碼採 MIT 或 Apache-2.0（擇一），見 LICENSE-MIT 與 LICENSE-APACHE。
+完整原始碼、Cargo.lock 與重新建置方式：https://github.com/zoosewu/zoo-type
+可替換為修改過的 libchewing，依 docs/macos.md 重新建置完整 .app。
+
+libchewing（chewing crate，靜態連結的注音引擎）
+  LGPL-2.1-or-later
+  https://codeberg.org/chewing/libchewing
+
+ferrous-opencc / OpenCC（繁簡轉換與字表）
+  Apache-2.0
+  https://github.com/apoint123/ferrous-opencc
+  https://github.com/BYVoid/OpenCC
+
+libchewing-data（內建詞庫與語言模型）
+  詞庫 LGPL-2.1-or-later；語言模型 CC-BY-4.0
+  https://codeberg.org/chewing/libchewing-data
+
+Unicode CLDR 繁體中文 Emoji 關鍵字
+  Unicode-3.0
+  https://github.com/unicode-org/cldr-json
+
+英文單字表
+  Unlicense
+  https://github.com/dwyl/english-words
+
+其他 Rust 相依套件與精確版本見 Cargo.lock。
+Swift 前端使用 macOS 隨附的 AppKit、InputMethodKit 與 Carbon 系統框架。
