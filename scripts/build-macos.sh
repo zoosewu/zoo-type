@@ -71,6 +71,10 @@ xcrun swiftc -swift-version 5 -O -module-name ZooType \
     -framework AppKit -framework InputMethodKit -framework Carbon -liconv \
     -o "$APP/Contents/MacOS/zoo-type"
 python3 scripts/macos-plist.py "$APP" "$APP_NAME" "$BUNDLE_ID" "$VERSION" "$MACOSX_DEPLOYMENT_TARGET"
+if [ ! -f assets/dict/ngram.bin ]; then
+    echo "缺少智慧選字模型 assets/dict/ngram.bin，請先執行 sh scripts/fetch-dict.sh。" >&2
+    exit 1
+fi
 ditto assets/dict "$APP/Contents/Resources/dict"
 cp LICENSE-MIT LICENSE-APACHE Cargo.lock macos/THIRD-PARTY-NOTICES.txt "$APP/Contents/Resources/"
 xcrun swift -module-cache-path "$ROOT/$OUTPUT/swift-module-cache" scripts/macos-icons.swift "$APP/Contents/Resources"

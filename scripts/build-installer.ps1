@@ -32,7 +32,7 @@ if (-not $Iscc) {
 }
 if (-not $Iscc) { throw '找不到 ISCC.exe（Inno Setup 6）' }
 
-foreach ($f in @("$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe", "$release\zoo-type-updater.exe", "$dict\static_dict.bin", "$dict\tsi.csv")) {
+foreach ($f in @("$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe", "$release\zoo-type-updater.exe", "$dict\static_dict.bin", "$dict\tsi.csv", "$dict\ngram.bin")) {
     if (-not (Test-Path $f)) { throw "找不到 $f；請先 cargo build --release --workspace 並執行 scripts/fetch-dict.sh" }
 }
 

@@ -112,3 +112,17 @@ macOS 使用 AppKit 九個設定頁；Windows 保留原生 Slint 分頁，增加
 
 
 Git 執行流程在 `zct-preferences::git`，供 Windows 背景服務與 macOS `SyncWorker` 共用。macOS 透過共用管理介面的 `SyncNow` 排入背景工作，`SyncStatus` 回報執行中／結果；30 秒儲存排程依設定間隔觸發自動同步。背景工作持有 `Arc<Engine>`，不共享 Swift 或 C ABI handle；每個主機只允許一個同步，另以資料目錄中的檔案鎖避免多程序同時同步。還原與資料搬移必須等待同步完成，避免舊引擎寫回。
+
+
+## 8. 智慧選字模型的發布
+
+`ngram.bin`（T0 的字 n-gram 模型）只能在有維基百科 dump 與本機 LLM 的電腦上用 `zct-train` 訓練，不放進 repo。
+模型放在 GitHub 的 pre-release `model-<訓練日期>`，資產名稱 `ngram.bin`；`scripts/fetch-dict.sh` 下載並比對寫死的 SHA256，
+CI 與 Release workflow 因此拿得到模型，Windows 安裝檔與 macOS .app 都打包整個 `assets/dict`。
+用 pre-release 是因為自動更新查的是 `/releases/latest`（不含 pre-release），模型的 Release 不會被當成新版本。
+
+換模型：
+1. `zct-train` 訓練並評測（`zct-eval`），放到 `assets/dict/ngram.bin`
+2. 建立 pre-release `model-<日期>`、上傳 `ngram.bin`
+3. 改 `fetch-dict.sh` 的 `MODEL` 與 `MODEL_SHA256`（CI 的詞庫快取鍵是這個檔案的雜湊，會自動更新）
+4. 模型授權 CC-BY-SA-4.0，來源與變更說明在 `installer/THIRD-PARTY-NOTICES.txt` 與 `macos/THIRD-PARTY-NOTICES.txt`

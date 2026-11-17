@@ -17,6 +17,14 @@ libchewing-data（內建詞庫與語言模型）
   詞庫 LGPL-2.1-or-later；語言模型 CC-BY-4.0
   https://codeberg.org/chewing/libchewing-data
 
+智慧選字模型（dict/ngram.bin）
+  CC-BY-SA-4.0
+  https://creativecommons.org/licenses/by-sa/4.0/
+  由中文維基百科（https://zh.wikipedia.org，CC-BY-SA-4.0，各條目作者見其編輯歷史）的文章
+  統計字的 n-gram 次數而成，另加入以 Qwen3.5 4B 生成的台灣口語句子。
+  條目文字經 OpenCC 轉為台灣正體、去除標記語法後只保留統計次數，不含原文；
+  訓練工具在原始碼的 crates/zct-train。
+
 Unicode CLDR 繁體中文 Emoji 關鍵字
   Unicode-3.0
   https://github.com/unicode-org/cldr-json

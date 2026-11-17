@@ -101,3 +101,4 @@ scripts/uninstall-dev.ps1         # 移除開發版（資料保留）
 第三方元件：
 - [libchewing](https://codeberg.org/chewing/libchewing)：LGPL-2.1-or-later
 - libchewing 詞庫：LGPL-2.1-or-later；語言模型：CC-BY-4.0
+- 智慧選字模型（`ngram.bin`）：CC-BY-SA-4.0，由[中文維基百科](https://zh.wikipedia.org)的字頻統計而成，詳見安裝資料夾的 THIRD-PARTY-NOTICES.txt
