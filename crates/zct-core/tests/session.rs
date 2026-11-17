@@ -2363,6 +2363,28 @@ fn t0_picks_the_natural_sentence() {
     assert_eq!(h.s.preedit().text, "重開機");
 }
 
+/// 聲調決定是「哪」還是「那」：「那些」大多讀 ㄋㄚˋ，打 ㄋㄚˇ 時是「哪些」
+fn tone_picks_na(h: &mut Harness) {
+    // 背景載入的詞庫統計載完才有讀音資訊
+    h.s.engine().char_usage('一', "ㄧ");
+    h.type_str("s83vu, ");
+    assert_eq!(h.s.preedit().text, "哪些");
+    h.press(Key::Enter, Mods::NONE);
+    h.type_str("s84vu, ");
+    assert_eq!(h.s.preedit().text, "那些");
+}
+
+#[test]
+fn tone_decides_between_rare_and_common_readings() {
+    tone_picks_na(&mut Harness::new());
+}
+
+#[test]
+fn t0_respects_the_typed_tone() {
+    let Some(mut h) = Harness::t0() else { return };
+    tone_picks_na(&mut h);
+}
+
 #[test]
 fn t0_keeps_what_the_user_picked_and_pinned() {
     let Some(mut h) = Harness::t0() else { return };

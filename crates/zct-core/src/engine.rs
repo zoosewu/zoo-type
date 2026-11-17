@@ -121,8 +121,8 @@ pub struct Engine {
     dir: PathBuf,
     /// 系統詞庫資料夾（`tsi.csv` 在這裡，用來估計單字的常用程度）
     sys_dir: PathBuf,
-    /// 單字的常用程度；第一次用到才載入
-    char_usage: std::sync::OnceLock<CharUsage>,
+    /// tsi.csv 的使用量統計；開啟時在背景載入
+    usage: Arc<std::sync::OnceLock<crate::usage::Usage>>,
     dirty: AtomicBool,
     /// 還原備份後停止存檔，避免記憶體中的舊資料蓋掉剛還原的檔案
     frozen: AtomicBool,
@@ -134,7 +134,7 @@ pub struct Engine {
     /// 最近送出的中文與當時的讀音（新的在後）：重新選字時最準的讀音來源
     recent: Mutex<std::collections::VecDeque<(String, Vec<String>)>>,
     /// T0：字 n-gram 模型與權重（系統詞庫資料夾有 ngram.bin 時才啟用）
-    t0: Option<(Arc<crate::ngram::NgramModel>, f64, f64)>,
+    t0: Option<crate::rank::T0>,
 }
 
 /// 記住最近幾段送出的文字
@@ -147,7 +147,7 @@ fn is_pronoun(c: char) -> bool {
 
 /// T0 模型：系統詞庫資料夾的 `ngram.bin`；開發時可用環境變數 `ZCT_T0_MODEL`（`off` 停用）、
 /// `ZCT_T0_WEIGHT`、`ZCT_T0_MARGIN` 指定模型、權重與門檻（評測比較用）
-fn load_t0(sys_dir: &Path) -> Option<(Arc<crate::ngram::NgramModel>, f64, f64)> {
+fn load_t0(sys_dir: &Path) -> Option<crate::rank::T0> {
     let path = match std::env::var_os("ZCT_T0_MODEL") {
         Some(v) if v == "off" => return None,
         Some(v) => PathBuf::from(v),
@@ -156,21 +156,25 @@ fn load_t0(sys_dir: &Path) -> Option<(Arc<crate::ngram::NgramModel>, f64, f64)> 
     if !path.exists() {
         return None;
     }
-    let weight = std::env::var("ZCT_T0_WEIGHT")
-        .ok()
-        .and_then(|w| w.parse().ok())
-        .unwrap_or(crate::t0::DEFAULT_WEIGHT);
-    let margin = std::env::var("ZCT_T0_MARGIN")
-        .ok()
-        .and_then(|w| w.parse().ok())
-        .unwrap_or(crate::t0::DEFAULT_MARGIN);
     match crate::ngram::NgramModel::load(&path) {
-        Ok(m) => Some((Arc::new(m), weight, margin)),
+        Ok(m) => Some(crate::rank::T0 {
+            model: Arc::new(m),
+            weight: env_f64("ZCT_T0_WEIGHT", crate::rank::DEFAULT_WEIGHT),
+            margin: env_f64("ZCT_T0_MARGIN", crate::rank::DEFAULT_MARGIN),
+        }),
         Err(e) => {
             log::warn!("T0 模型讀取失敗，不使用：{e}");
             None
         }
     }
+}
+
+/// 評測比較用的參數（環境變數），沒設定時用預設值
+fn env_f64(name: &str, default: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(default)
 }
 
 /// UTC 日期，避免為此引入時間函式庫
@@ -205,42 +209,6 @@ fn write_atomic(
         w.get_ref().sync_all()?;
     }
     std::fs::rename(&tmp, path)
-}
-
-/// 單字使用量（由 tsi.csv 的詞頻加總）
-#[derive(Debug, Default)]
-struct CharUsage {
-    /// （字, 讀音）→ 含有這個字這個讀音的詞的頻率加總
-    by_reading: std::collections::HashMap<(char, String), u64>,
-    /// 字 → 所有讀音合計
-    total: std::collections::HashMap<char, u64>,
-}
-
-/// 讀 libchewing-data 的 tsi.csv（`詞,頻率,注音`），把詞頻加到詞中每個字
-fn load_char_usage(path: &Path) -> CharUsage {
-    let mut usage = CharUsage::default();
-    let Ok(text) = std::fs::read_to_string(path) else {
-        log::warn!("沒有 tsi.csv，單字候選維持 chewing 的順序");
-        return usage;
-    };
-    for line in text.lines().filter(|l| !l.starts_with('#')) {
-        let mut it = line.split(',');
-        let (Some(word), Some(freq), Some(bopomofo)) = (it.next(), it.next(), it.next()) else {
-            continue;
-        };
-        let Ok(freq) = freq.trim().parse::<u64>() else {
-            continue;
-        };
-        let readings: Vec<&str> = bopomofo.split(' ').collect();
-        if readings.len() != word.chars().count() {
-            continue;
-        }
-        for (c, r) in word.chars().zip(readings) {
-            *usage.by_reading.entry((c, r.to_owned())).or_insert(0) += freq;
-            *usage.total.entry(c).or_insert(0) += freq;
-        }
-    }
-    usage
 }
 
 fn load_corrections(path: &Path) -> std::collections::BTreeMap<String, u32> {
@@ -330,7 +298,7 @@ impl Engine {
             history,
             dir: dir.to_path_buf(),
             sys_dir: sys_dir.to_path_buf(),
-            char_usage: std::sync::OnceLock::new(),
+            usage: Arc::default(),
             dirty: AtomicBool::new(false),
             frozen: AtomicBool::new(false),
             stats: Mutex::new(load_stats(&dir.join(STATS))),
@@ -341,6 +309,12 @@ impl Engine {
             recent: Mutex::default(),
             t0: load_t0(sys_dir),
         };
+        // 第一次排候選字、轉換時就要用到；臨時讀檔會讓那個按鍵超過 TSF 等待的時限
+        let usage = engine.usage.clone();
+        let path = sys_dir.join("tsi.csv");
+        std::thread::spawn(move || {
+            usage.get_or_init(|| crate::usage::Usage::load(&path));
+        });
         engine.migrate_normal_boost();
         Ok(engine)
     }
@@ -380,11 +354,7 @@ impl Engine {
     /// 因為使用量都記在詞裡（重新、重複…）；改用「含有這個字這個讀音的詞的頻率加總」排序單字候選。
     /// 沒有 tsi.csv 時全部是 0（維持 chewing 原本的順序）。
     pub fn char_usage(&self, c: char, reading: &str) -> u64 {
-        self.usage()
-            .by_reading
-            .get(&(c, reading.to_owned()))
-            .copied()
-            .unwrap_or(0)
+        self.usage().char_usage(c, reading)
     }
 
     /// AI 修正只接受讀音和使用者打的注音相同的字：讀音不符（或不是中文音節）的位置還原成原字
@@ -417,9 +387,10 @@ impl Engine {
             .collect()
     }
 
-    fn usage(&self) -> &CharUsage {
-        self.char_usage
-            .get_or_init(|| load_char_usage(&self.sys_dir.join("tsi.csv")))
+    /// 還在背景載入時等它載完
+    fn usage(&self) -> &crate::usage::Usage {
+        self.usage
+            .get_or_init(|| crate::usage::Usage::load(&self.sys_dir.join("tsi.csv")))
     }
 
     /// 只屬於簡體的字 → 對應的繁體字（繁體模式要隱藏或換掉的字）
@@ -428,7 +399,7 @@ impl Engine {
     /// 不到對應繁體字的 1/10。「秘 / 祕」「群 / 羣」這類台灣也常用的寫法因此保留。
     pub fn simplified_only(&self, c: char) -> Option<char> {
         let t = crate::hanzi::traditional_of(c)?;
-        let total = |c: char| self.usage().total.get(&c).copied().unwrap_or(0);
+        let total = |c: char| self.usage().total(c);
         (total(c) * 10 < total(t)).then_some(t)
     }
 
@@ -572,6 +543,23 @@ impl Engine {
     /// 建立共用詞庫的 Editor（不會自己寫檔）
     /// `language_model`：使用 T0（設定 `candidates.language_model`，有模型時才有作用）
     pub(crate) fn editor(&self, language_model: bool) -> Editor {
+        let parts = crate::rank::Parts {
+            string_table: self.string_table.clone(),
+            static_dict: self.static_dict.clone(),
+            rare_dict: self.rare_dict.clone(),
+            history_dict: self.history.clone(),
+            user_dict: self.user_dict.clone(),
+            lm: self.lm.clone(),
+        };
+        let t0 = self.t0.clone().filter(|_| language_model);
+        let reading_weight = env_f64(
+            "ZCT_READING_WEIGHT",
+            if t0.is_some() {
+                crate::rank::READING_WEIGHT_T0
+            } else {
+                crate::rank::READING_WEIGHT
+            },
+        );
         let mut editor = EditorBuilder::new()
             .string_table(self.string_table.clone())
             .static_dict(self.static_dict.clone())
@@ -581,22 +569,12 @@ impl Engine {
             .static_lm(self.lm.clone())
             .symbol_selector(self.symbols.clone())
             .build();
-        if let Some((model, weight, margin)) = self.t0.as_ref().filter(|_| language_model) {
-            let parts = crate::t0::Parts {
-                string_table: self.string_table.clone(),
-                static_dict: self.static_dict.clone(),
-                rare_dict: self.rare_dict.clone(),
-                history_dict: self.history.clone(),
-                user_dict: self.user_dict.clone(),
-                lm: self.lm.clone(),
-            };
-            editor.set_conversion_engine(Box::new(crate::t0::T0Engine::new(
-                parts,
-                model.clone(),
-                *weight,
-                *margin,
-            )));
-        }
+        editor.set_conversion_engine(Box::new(crate::rank::RankEngine::new(
+            parts,
+            self.usage.clone(),
+            reading_weight,
+            t0,
+        )));
         editor
     }
 

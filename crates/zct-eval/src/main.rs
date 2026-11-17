@@ -39,6 +39,8 @@ fn main() {
         Engine::open(&root.join("assets/dict"), &learning)
             .expect("需要先執行 scripts/fetch-dict.sh"),
     );
+    // 等背景載入的詞庫統計載完，結果才不會因為時間差而不同
+    engine.char_usage('一', "ㄧ");
 
     if let Some((base_url, model)) = ai {
         let ep = zct_ai::Endpoint {
