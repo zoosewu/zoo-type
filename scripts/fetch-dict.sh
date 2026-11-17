@@ -31,22 +31,7 @@ TSI="https://codeberg.org/chewing/libchewing-data/raw/branch/main/dict/chewing/t
 echo "下載 $TSI"
 curl -fsSL -A "zct-dev" -o "$DEST/tsi.csv" "$TSI"
 
-# 智慧選字（T0）的字 n-gram 模型：本專案用 zct-train 從中文維基百科與生成的口語句子訓練，CC-BY-SA-4.0
-# 放在 pre-release「model-<日期>」（不會被自動更新當成新版）；換模型時同時改日期與 SHA256，見 docs/architecture.md
-MODEL="model-20261116"
-MODEL_SHA256="8f68b5ef5fcaa137f72c1f837780bcedf65c079854375360582b892ccd900bd5"
-NGRAM="https://github.com/zoosewu/zoo-type/releases/download/$MODEL/ngram.bin"
-echo "下載 $NGRAM"
-curl -fsSL -A "zct-dev" -o "$TMP/ngram.bin" "$NGRAM"
-if command -v sha256sum >/dev/null 2>&1; then
-    GOT=$(sha256sum "$TMP/ngram.bin" | cut -d' ' -f1)
-else
-    GOT=$(shasum -a 256 "$TMP/ngram.bin" | cut -d' ' -f1)
-fi
-if [ "$GOT" != "$MODEL_SHA256" ]; then
-    echo "ngram.bin 的 SHA256 不符：$GOT" >&2
-    exit 1
-fi
-mv "$TMP/ngram.bin" "$DEST/ngram.bin"
+# 智慧選字（T0）的字 n-gram 模型：最新正式版 Release 附的 ngram.bin（見 scripts/fetch-model.sh）
+sh "$ROOT/scripts/fetch-model.sh"
 echo "完成：$DEST"
 ls -la "$DEST"

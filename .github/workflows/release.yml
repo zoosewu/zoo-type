@@ -71,6 +71,10 @@ jobs:
       - name: 下載詞庫
         if: steps.dict.outputs.cache-hit != 'true'
         run: sh scripts/fetch-dict.sh
+
+      # 模型換新時下載腳本不變，不能只靠快取
+      - name: 智慧選字模型（最新正式版附的）
+        run: sh scripts/fetch-model.sh
       - name: 檢查、測試與 Release 建置
         run: sh scripts/build-macos.sh --check
       - name: 打包與 SHA256
@@ -120,6 +124,11 @@ jobs:
         shell: bash
         run: bash scripts/fetch-dict.sh
 
+      # 模型換新時下載腳本不變，不能只靠快取
+      - name: 智慧選字模型（最新正式版附的）
+        shell: bash
+        run: bash scripts/fetch-model.sh
+
       - name: 測試
         run: cargo test --workspace --locked
 
@@ -144,6 +153,14 @@ jobs:
           ZOO_TYPE_SIGNING_KEY: ${{ secrets.ZOO_TYPE_SIGNING_KEY }}
         run: cargo run -p zct-update --bin zct-release --release --locked -- sign "target/installer/zoo-type-$env:VERSION-windows-x64-setup.exe" $env:VERSION
 
+      # 這次打包的模型附到新版 Release 上，下一版建置時從這裡取得
+      - name: 智慧選字模型
+        shell: bash
+        run: |
+          cp assets/dict/ngram.bin target/installer/
+          # 固定寫成「雜湊、兩個空白、檔名」：Git Bash 會在檔名前加 *
+          echo "$(sha256sum assets/dict/ngram.bin | cut -d' ' -f1)  ngram.bin" > target/installer/ngram.bin.sha256
+
       - name: 保存 Windows 發布檔案
         uses: actions/upload-artifact@v4
         with:
@@ -152,6 +169,8 @@ jobs:
             target/installer/*.exe
             target/installer/*.exe.sha256
             target/installer/*.exe.sig
+            target/installer/ngram.bin
+            target/installer/ngram.bin.sha256
           if-no-files-found: error
 
   publish:
@@ -175,6 +194,7 @@ jobs:
         working-directory: release-assets
         run: |
           test -s "zoo-type-$VERSION-windows-x64-setup.exe.sig"
+          sha256sum --check ngram.bin.sha256
           for name in "zoo-type-$VERSION-windows-x64-setup.exe" \
             "zoo-type-$VERSION-macos-arm64.zip" \
             "zoo-type-$VERSION-macos-x64.zip" \
@@ -197,6 +217,8 @@ jobs:
           尚未做 Developer ID 簽章或公證，macOS 可能要求在「隱私權與安全性」允許開啟。
           初版支援注音、組字、鍵盤選字、標點、中英切換與學習；包含原生設定視窗（上方「動」圖示 →「設定…」）；AI、git 同步與詞庫管理 GUI 尚未移植。
           另附 -tools.tar.gz 命令列工具包，供模擬打字與評測使用。
+
+          ngram.bin 是安裝檔內含的智慧選字模型（CC BY-SA 4.0，由中文維基百科字頻統計而成），供建置與評測使用，一般使用者不需下載。
 
           所有下載均附 SHA256 校驗檔。
           EOF

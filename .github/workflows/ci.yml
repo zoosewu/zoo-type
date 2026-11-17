@@ -44,6 +44,10 @@ jobs:
         if: steps.dict.outputs.cache-hit != 'true'
         run: sh scripts/fetch-dict.sh
 
+      # 模型換新時下載腳本不變，不能只靠快取
+      - name: 智慧選字模型（最新正式版附的）
+        run: sh scripts/fetch-model.sh
+
       - name: macOS 檢查、測試與 Release 建置
         run: sh scripts/build-macos.sh --check
 
@@ -75,6 +79,11 @@ jobs:
         if: steps.dict.outputs.cache-hit != 'true'
         shell: bash
         run: bash scripts/fetch-dict.sh
+
+      # 模型換新時下載腳本不變，不能只靠快取
+      - name: 智慧選字模型（最新正式版附的）
+        shell: bash
+        run: bash scripts/fetch-model.sh
 
       - name: 格式檢查
         run: cargo fmt --all --check

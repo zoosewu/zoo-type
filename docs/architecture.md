@@ -117,12 +117,15 @@ Git 執行流程在 `zct-preferences::git`，供 Windows 背景服務與 macOS `
 ## 8. 智慧選字模型的發布
 
 `ngram.bin`（T0 的字 n-gram 模型）只能在有維基百科 dump 與本機 LLM 的電腦上用 `zct-train` 訓練，不放進 repo。
-模型放在 GitHub 的 pre-release `model-<訓練日期>`，資產名稱 `ngram.bin`；`scripts/fetch-dict.sh` 下載並比對寫死的 SHA256，
-CI 與 Release workflow 因此拿得到模型，Windows 安裝檔與 macOS .app 都打包整個 `assets/dict`。
-用 pre-release 是因為自動更新查的是 `/releases/latest`（不含 pre-release），模型的 Release 不會被當成新版本。
+
+每個正式版 Release 都附上 `ngram.bin` 與 `ngram.bin.sha256`。`scripts/fetch-model.sh` 從最新正式版
+（`releases/latest/download/`）下載並比對雜湊；CI 與 Release workflow 每次都執行它（不靠詞庫快取），
+Windows 安裝檔與 macOS .app 打包整個 `assets/dict`，Release workflow 再把同一份模型附到新版上，模型就一版一版傳下去。
+建置時缺少模型會失敗，不會發布沒有智慧選字的版本。
 
 換模型：
-1. `zct-train` 訓練並評測（`zct-eval`），放到 `assets/dict/ngram.bin`
-2. 建立 pre-release `model-<日期>`、上傳 `ngram.bin`
-3. 改 `fetch-dict.sh` 的 `MODEL` 與 `MODEL_SHA256`（CI 的詞庫快取鍵是這個檔案的雜湊，會自動更新）
-4. 模型授權 CC-BY-SA-4.0，來源與變更說明在 `installer/THIRD-PARTY-NOTICES.txt` 與 `macos/THIRD-PARTY-NOTICES.txt`
+1. `zct-train` 訓練並評測（`zct-eval`）
+2. 把新的 `ngram.bin` 與 `ngram.bin.sha256`（`雜湊␠␠ngram.bin`）換到目前最新的正式版 Release 上
+3. 之後的 CI 與新版建置就會用新模型
+
+模型授權 CC-BY-SA-4.0，來源與變更說明在 `installer/THIRD-PARTY-NOTICES.txt` 與 `macos/THIRD-PARTY-NOTICES.txt`。
