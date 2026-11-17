@@ -158,6 +158,13 @@ pub fn catalog(platform: Platform) -> Catalog {
         &[],
     );
     add(
+        "candidates.language_model",
+        "智慧選字",
+        "general",
+        Bool,
+        &[],
+    );
+    add(
         "mixed.auto_english",
         "自動辨識英文單字",
         "general",

@@ -85,6 +85,9 @@ pub fn run_once(root: &Path, cfg: &SyncConfig, engine: &Engine) -> Result<String
     if !root.join(".git").exists() {
         git.ok(&["init", "-b", BRANCH])?;
     }
+    // 檔案原樣保存：Git for Windows 預設 autocrlf=true，會把換行改成 CRLF，
+    // 和 macOS 同步時每次都變成整檔修改
+    git.ok(&["config", "--local", "core.autocrlf", "false"])?;
     write_if_missing(&root.join(".gitignore"), GITIGNORE).map_err(|e| e.to_string())?;
     write_if_missing(&root.join(".gitattributes"), GITATTRIBUTES).map_err(|e| e.to_string())?;
 
