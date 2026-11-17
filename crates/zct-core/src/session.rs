@@ -784,6 +784,25 @@ impl Session {
         }
     }
 
+    /// 沒有正在打的音節時按下的聲調鍵（大千：3 ˇ、4 ˋ、6 ˊ、7 ˙）
+    fn lone_tone(&self, ev: &KeyEvent) -> Option<&'static str> {
+        let Key::Char(c) = ev.key else { return None };
+        if ev.mods.shift
+            || ev.mods.has_command_modifier()
+            || self.editor.entering_syllable()
+            || self.editor.is_selecting()
+        {
+            return None;
+        }
+        Some(match c {
+            b'3' => "ˇ",
+            b'4' => "ˋ",
+            b'6' => "ˊ",
+            b'7' => "˙",
+            _ => return None,
+        })
+    }
+
     /// 組字區第 i 個符號是不是英文字母 / 空白
     fn sym_letter(&self, i: usize) -> bool {
         self.editor
@@ -1364,6 +1383,11 @@ impl Session {
                     self.join(&mut commit, &composed);
                     self.join(&mut commit, &text);
                 }
+            } else if let Some(tone) = self.lone_tone(ev) {
+                // 注音區是空的時候按聲調鍵：直接當符號放進組字區。
+                // chewing 會把它留在注音區等下一個鍵，要再按一次才變成字
+                self.insert_latin(tone);
+                r.eaten = true;
             } else if let Some(notice) = self.learning_key(ev) {
                 r.notice = Some(notice);
             } else if !self.navigate_candidates(ev) {

@@ -115,6 +115,32 @@ fn types_sentence_and_commits_on_enter() {
 }
 
 #[test]
+fn tone_key_alone_types_the_tone_mark() {
+    // 注音區是空的：聲調鍵直接變成符號，一次就好
+    let mut h = Harness::new();
+    assert!(h.type_str("3")[0].eaten);
+    assert_eq!(h.s.preedit().text, "ˇ");
+    let r = h.press(Key::Enter, Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some("ˇ"));
+
+    // 句子中間也一樣；正在打的音節照常收聲調
+    let mut h = Harness::new();
+    h.type_str("s834");
+    assert_eq!(h.s.preedit().text, "哪ˋ");
+    h.type_str("s84");
+    assert_eq!(h.s.preedit().text, "哪ˋ那");
+}
+
+#[test]
+fn tone_key_in_english_mode_types_the_digit() {
+    let mut h = Harness::new();
+    h.tap_shift();
+    let r = h.type_str("3");
+    assert!(!r[0].eaten);
+    assert!(!h.s.is_composing());
+}
+
+#[test]
 fn preedit_shows_partial_bopomofo() {
     let mut h = Harness::new();
     h.type_str("wu");
