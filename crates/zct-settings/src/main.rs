@@ -17,6 +17,7 @@ use zct_core::symbols::{PrimarySymbols, SecondarySymbols};
 use zct_core::{AppRule, AppRules, Config, PhraseAction, PhraseEntry};
 use zct_ipc::pipe::Client;
 use zct_ipc::{Command, PROTOCOL_VERSION, Request, Response};
+use zct_preferences::{Action, Backend, Document, Reply, SettingsStore};
 
 slint::include_modules!();
 
@@ -196,7 +197,9 @@ fn apply_theme(c: &mut Config, t: &Theme) -> Result<(), String> {
         Layout::Vertical
     };
     c.theme.font = t.font.trim().to_string();
-    c.theme.font_size = t.size.clamp(8, 48) as f32;
+    if t.size != c.theme.font_size.round() as i32 {
+        c.theme.font_size = t.size.clamp(8, 48) as f32;
+    }
     c.theme.background = color(&t.background)?;
     c.theme.text = color(&t.text)?;
     c.theme.number = color(&t.number)?;
@@ -280,6 +283,7 @@ fn table_rows(rows: &VecModel<AppRuleRow>) -> ModelRc<ModelRc<StandardListViewIt
 
 struct Service {
     client: Option<Client>,
+    readings: Option<Option<zct_core::readings::Readings>>,
 }
 
 impl Service {
@@ -299,7 +303,10 @@ impl Service {
     /// 連不上時嘗試啟動執行檔旁的服務程序
     fn start() -> Service {
         if let Some(c) = Self::connect() {
-            return Service { client: Some(c) };
+            return Service {
+                client: Some(c),
+                readings: None,
+            };
         }
         if let Some(exe) = std::env::current_exe()
             .ok()
@@ -310,14 +317,20 @@ impl Service {
             for _ in 0..10 {
                 std::thread::sleep(Duration::from_millis(200));
                 if let Some(c) = Self::connect() {
-                    return Service { client: Some(c) };
+                    return Service {
+                        client: Some(c),
+                        readings: None,
+                    };
                 }
             }
         }
-        Service { client: None }
+        Service {
+            client: None,
+            readings: None,
+        }
     }
 
-    fn call(&mut self, req: Request) -> Result<Response, String> {
+    fn transport(&mut self, req: Request) -> Result<Response, String> {
         if self.client.is_none() {
             self.client = Self::connect();
         }
@@ -333,27 +346,151 @@ impl Service {
     }
 }
 
+impl Backend for Service {
+    fn execute(&mut self, action: Action) -> Result<Reply, String> {
+        let request = match action {
+            Action::SuggestReading { word } => {
+                let readings = self.readings.get_or_insert_with(load_readings);
+                return Ok(Reply::Reading {
+                    value: readings
+                        .as_ref()
+                        .and_then(|r| r.reading_of(&word))
+                        .unwrap_or_default(),
+                });
+            }
+            Action::EditPhrase {
+                original,
+                word,
+                bopomofo,
+            } => return zct_preferences::edit_phrase(self, original, word, bopomofo),
+            Action::ApiKeyStatus => {
+                return Ok(Reply::ApiKeyStatus {
+                    present: zct_ipc::secret::read_ai_key().is_some(),
+                });
+            }
+            Action::WriteApiKey { key } => {
+                let target = zct_ipc::secret::ai_api_key();
+                if key.trim().is_empty() {
+                    zct_ipc::secret::delete(&target);
+                } else {
+                    zct_ipc::secret::write(&target, key.trim()).map_err(|e| e.to_string())?;
+                }
+                return Ok(Reply::done());
+            }
+            Action::TestAi { config } => {
+                let endpoint = zct_ai::Endpoint {
+                    base_url: config.endpoint,
+                    model: config.model,
+                    api_key: zct_ipc::secret::read_ai_key(),
+                    timeout: Duration::from_secs(config.timeout_seconds.max(1)),
+                };
+                return zct_ai::ping(&endpoint)
+                    .map(|message| Reply::AiTest { message })
+                    .map_err(|e| e.to_string());
+            }
+            Action::ListPhrases => Request::ListPhrases,
+            Action::AddPhrase { word, bopomofo } => Request::AddPhrase { word, bopomofo },
+            Action::Phrase {
+                word,
+                bopomofo,
+                action,
+            } => Request::Phrase {
+                word,
+                bopomofo,
+                action,
+            },
+            Action::Stats => Request::Stats,
+            Action::Backups => Request::Backups,
+            Action::Restore { day } => Request::Restore { day },
+            Action::SyncStatus => {
+                let message = DataRoot::discover()
+                    .and_then(|d| std::fs::read_to_string(d.local().join("sync-status.txt")).ok())
+                    .unwrap_or_else(|| "尚未同步".into());
+                return Ok(Reply::SyncStatus {
+                    running: false,
+                    message,
+                });
+            }
+            Action::SyncNow => Request::SyncNow,
+            Action::BackupNow => return Err("Windows 服務會定期備份，尚未提供立即備份命令".into()),
+        };
+        match self.transport(request)? {
+            Response::Ok => Ok(Reply::done()),
+            Response::Phrases(items) => Ok(Reply::Phrases {
+                items: items
+                    .into_iter()
+                    .map(zct_preferences::PhraseView::from)
+                    .collect(),
+            }),
+            Response::Stats(items) => Ok(Reply::Stats {
+                items: items
+                    .into_iter()
+                    .map(zct_preferences::DayView::from)
+                    .collect(),
+            }),
+            Response::Backups(items) => Ok(Reply::Backups { items }),
+            other => Err(format!("非預期的設定管理回應：{other:?}")),
+        }
+    }
+}
+impl Service {
+    // Existing Slint callbacks keep their view models; all administrative actions
+    // go through the same platform-neutral Backend contract as the IMK frontend.
+    fn call(&mut self, request: Request) -> Result<Response, String> {
+        let action = match request {
+            Request::ListPhrases => Action::ListPhrases,
+            Request::AddPhrase { word, bopomofo } => Action::AddPhrase { word, bopomofo },
+            Request::Phrase {
+                word,
+                bopomofo,
+                action,
+            } => Action::Phrase {
+                word,
+                bopomofo,
+                action,
+            },
+            Request::Stats => Action::Stats,
+            Request::Backups => Action::Backups,
+            Request::Restore { day } => Action::Restore { day },
+            Request::SyncNow => Action::SyncNow,
+            other => return self.transport(other),
+        };
+        self.execute(action).map(|reply| match reply {
+            Reply::Done { .. } => Response::Ok,
+            Reply::Phrases { items } => {
+                Response::Phrases(items.into_iter().map(|row| row.entry).collect())
+            }
+            Reply::Stats { items } => {
+                Response::Stats(items.into_iter().map(|row| row.entry).collect())
+            }
+            Reply::Backups { items } => Response::Backups(items),
+            Reply::ApiKeyStatus { .. }
+            | Reply::AiTest { .. }
+            | Reply::Reading { .. }
+            | Reply::SyncStatus { .. } => {
+                unreachable!("credential replies are never IPC messages")
+            }
+        })
+    }
+}
+
 struct State {
     data: DataRoot,
     config: Config,
+    revision: String,
     service: Service,
     phrases: Vec<PhraseEntry>,
     filter: String,
 }
 
 fn to_phrase(p: &PhraseEntry) -> Phrase {
+    let row = zct_preferences::PhraseView::from(p.clone());
     Phrase {
         word: p.word.clone().into(),
         bopomofo: p.bopomofo.clone().into(),
-        abbrev: zct_core::abbrev::is_abbrev(&p.bopomofo),
-        english: p.bopomofo.is_empty(),
-        state: if p.is_banned() {
-            2
-        } else if p.is_pinned() {
-            1
-        } else {
-            0
-        },
+        abbrev: row.kind == "abbrev",
+        english: row.kind == "english",
+        state: row.state,
     }
 }
 
@@ -432,6 +569,108 @@ fn single_instance(_wait_for_old: bool) -> bool {
     true
 }
 
+fn shared_fields(config: &Config) -> Vec<SharedField> {
+    let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
+    let values = serde_json::to_value(config).expect("serializable Config");
+    let capabilities =
+        serde_json::to_value(&catalog.capabilities).expect("serializable capabilities");
+    catalog
+        .fields
+        .iter()
+        .map(|field| {
+            let mut value = &values;
+            for key in field.path.split('.') {
+                value = &value[key];
+            }
+            let section = catalog
+                .pages
+                .iter()
+                .find(|p| p.id == field.page)
+                .map(|p| p.title.clone())
+                .unwrap_or_default();
+            SharedField {
+                path: field.path.clone().into(),
+                label: field.label.clone().into(),
+                section: section.into(),
+                kind: match field.kind {
+                    zct_preferences::FieldKind::Bool => 0,
+                    zct_preferences::FieldKind::Choice => 1,
+                    _ => 2,
+                },
+                value: value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string())
+                    .into(),
+                checked: value.as_bool().unwrap_or(false),
+                options: ModelRc::new(VecModel::from(
+                    field
+                        .choices
+                        .iter()
+                        .map(|c| SharedString::from(&c.label))
+                        .collect::<Vec<_>>(),
+                )),
+                selected: field
+                    .choices
+                    .iter()
+                    .position(|c| &c.value == value)
+                    .unwrap_or(0) as i32,
+                enabled: field
+                    .feature
+                    .as_ref()
+                    .is_none_or(|f| capabilities[f].as_bool().unwrap_or(false)),
+                help: field.help.clone().into(),
+            }
+        })
+        .collect()
+}
+fn read_shared_config(config: &Config, rows: &ModelRc<SharedField>) -> Result<Config, String> {
+    use zct_preferences::FieldKind;
+    let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
+    if rows.row_count() != catalog.fields.len() {
+        return Err("設定欄位資料不完整".into());
+    }
+    let mut json = serde_json::to_value(config).map_err(|e| e.to_string())?;
+    for (i, field) in catalog.fields.iter().enumerate() {
+        let row = rows.row_data(i).ok_or("設定欄位不存在")?;
+        if row.path.as_str() != field.path {
+            return Err("設定欄位定義不一致".into());
+        }
+        let value = match field.kind {
+            FieldKind::Bool => serde_json::Value::Bool(row.checked),
+            FieldKind::Choice => field
+                .choices
+                .get(row.selected as usize)
+                .ok_or("選項不存在")?
+                .value
+                .clone(),
+            FieldKind::Number | FieldKind::Json => serde_json::from_str(row.value.as_str())
+                .map_err(|e| format!("{}：{e}", field.label))?,
+            _ => serde_json::Value::String(row.value.to_string()),
+        };
+        let keys: Vec<_> = field.path.split('.').collect();
+        json[keys[0]][keys[1]] = value;
+    }
+    let config: Config = serde_json::from_value(json).map_err(|e| e.to_string())?;
+    zct_preferences::validate(&config)
+}
+fn show_primary_settings(ui: &SettingsWindow, config: &Config) {
+    ui.set_general(general_from(config));
+    ui.set_hotkeys(hotkeys_from(config));
+    ui.set_theme(theme_from(config));
+    ui.set_sync(sync_from(config));
+    ui.set_ai(ai_from(config));
+}
+fn collect_primary_settings(ui: &SettingsWindow, original: &Config) -> Result<Config, String> {
+    let mut config = original.clone();
+    apply_general(&mut config, &ui.get_general());
+    apply_sync(&mut config, &ui.get_sync());
+    apply_ai(&mut config, &ui.get_ai());
+    apply_hotkeys(&mut config, &ui.get_hotkeys())?;
+    apply_theme(&mut config, &ui.get_theme())?;
+    Ok(config)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !single_instance(std::env::args().any(|a| a == "--notice")) {
         return Ok(());
@@ -457,14 +696,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (config, config_error) = match Config::load(&data.config()) {
+    let store = SettingsStore::new(data.clone());
+    let (config, config_error) = match store.config() {
         Ok(c) => (c, None),
         Err(e) => (Config::default(), Some(e.to_string())),
     };
-    let (rules, apps_error) = match AppRules::load(&data.root().join("apps.toml")) {
+    let (rules, apps_error) = match store.apps() {
         Ok(a) => (a, None),
         Err(e) => (AppRules::default(), Some(e.to_string())),
     };
+    ui.set_shared_fields(ModelRc::new(VecModel::from(shared_fields(&config))));
     ui.set_general(general_from(&config));
     ui.set_hotkeys(hotkeys_from(&config));
     ui.set_theme(theme_from(&config));
@@ -491,7 +732,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into(),
     );
 
+    let revision = store.revision()?;
     let state = Rc::new(RefCell::new(State {
+        revision,
         data,
         config,
         service,
@@ -510,15 +753,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_hotkey_valid(|s| parse_binding(&s).is_ok());
     ui.on_is_english_word(|s| zct_core::abbrev::is_abbrev(s.trim()));
     {
-        // 第一次用到時才載入（約 5MB）
-        let readings: RefCell<Option<Option<zct_core::readings::Readings>>> = RefCell::new(None);
+        let state = state.clone();
         ui.on_suggest_reading(move |word| {
-            let mut cache = readings.borrow_mut();
-            let r = cache.get_or_insert_with(load_readings);
-            r.as_ref()
-                .and_then(|r| r.reading_of(&word))
-                .unwrap_or_default()
-                .into()
+            match state.borrow_mut().service.execute(Action::SuggestReading {
+                word: word.to_string(),
+            }) {
+                Ok(Reply::Reading { value }) => value.into(),
+                _ => SharedString::default(),
+            }
+        });
+    }
+
+    // A catalog-generated page exposes every Config field, including future additions.
+    {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        ui.on_open_shared(move || {
+            let ui = ui_weak.unwrap();
+            if ui.get_page() == 9 {
+                return;
+            }
+            let st = state.borrow();
+            match collect_primary_settings(&ui, &st.config) {
+                Ok(config) => {
+                    ui.set_shared_fields(ModelRc::new(VecModel::from(shared_fields(&config))));
+                    ui.set_page(9);
+                }
+                Err(e) => ui.set_status(e.into()),
+            }
+        });
+    }
+    {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        ui.on_leave_shared(move || {
+            let ui = ui_weak.unwrap();
+            if ui.get_page() != 9 {
+                return true;
+            }
+            let mut st = state.borrow_mut();
+            match read_shared_config(&st.config, &ui.get_shared_fields()) {
+                Ok(config) => {
+                    show_primary_settings(&ui, &config);
+                    st.config = config;
+                    true
+                }
+                Err(e) => {
+                    ui.set_status(e.into());
+                    false
+                }
+            }
         });
     }
 
@@ -528,24 +810,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.on_save(move || {
             let ui = ui_weak.unwrap();
             let mut st = state.borrow_mut();
-            let mut config = st.config.clone();
-            apply_general(&mut config, &ui.get_general());
-            apply_sync(&mut config, &ui.get_sync());
-            apply_ai(&mut config, &ui.get_ai());
-            let result = apply_hotkeys(&mut config, &ui.get_hotkeys())
-                .and_then(|_| apply_theme(&mut config, &ui.get_theme()))
-                .and_then(|_| {
-                    config.save(&st.data.config()).map_err(|e| e.to_string())?;
-                    let rules = AppRules {
+            let result = (|| {
+                let config = if ui.get_page() == 9 {
+                    read_shared_config(&st.config, &ui.get_shared_fields())?
+                } else {
+                    collect_primary_settings(&ui, &st.config)?
+                };
+                let document = Document {
+                    config,
+                    apps: AppRules {
                         apps: apps.iter().map(|r| rule_from(&r)).collect(),
-                    };
-                    rules
-                        .save(&st.data.root().join("apps.toml"))
-                        .map_err(|e| e.to_string())
-                });
+                    },
+                };
+                SettingsStore::new(st.data.clone()).save(&document, Some(&st.revision))
+            })();
             match result {
-                Ok(()) => {
-                    st.config = config;
+                Ok(snapshot) => {
+                    st.config = snapshot.document.config;
+                    st.revision = snapshot.revision;
+                    show_primary_settings(&ui, &st.config);
                     ui.set_status("已儲存。外觀立即生效，其他設定在切換 App 後生效".into());
                 }
                 Err(e) => ui.set_status(format!("無法儲存：{e}").into()),
@@ -675,39 +958,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     ui.on_refresh(refresh.clone());
     {
-        let ui_weak = ui.as_weak();
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
         ui.on_save_api_key(move |key| {
             let ui = ui_weak.unwrap();
-            let target = zct_ipc::secret::ai_api_key();
-            let msg = if key.is_empty() {
-                zct_ipc::secret::delete(&target);
-                "已清除 API Key".to_string()
-            } else {
-                match zct_ipc::secret::write(&target, key.trim()) {
-                    Ok(()) => "API Key 已存入 Windows 認證管理員".to_string(),
-                    Err(e) => format!("無法儲存 API Key：{e}"),
+            let mut st = state.borrow_mut();
+            let message = match st.service.execute(Action::WriteApiKey {
+                key: key.to_string(),
+            }) {
+                Ok(_) => {
+                    if key.is_empty() {
+                        "已清除 API Key".into()
+                    } else {
+                        "API Key 已存入平台憑證庫".into()
+                    }
                 }
+                Err(e) => format!("無法儲存 API Key：{e}"),
             };
-            ui.set_has_api_key(zct_ipc::secret::read_ai_key().is_some());
-            ui.set_ai_status(msg.into());
+            if let Ok(Reply::ApiKeyStatus { present }) = st.service.execute(Action::ApiKeyStatus) {
+                ui.set_has_api_key(present);
+            }
+            ui.set_ai_status(message.into());
         });
     }
     {
-        let ui_weak = ui.as_weak();
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
         ui.on_test_ai(move || {
             let ui = ui_weak.unwrap();
-            let a = ui.get_ai();
-            let ep = zct_ai::Endpoint {
-                base_url: a.endpoint.to_string(),
-                model: a.model.to_string(),
-                api_key: zct_ipc::secret::read_ai_key(),
-                timeout: Duration::from_secs(a.timeout.max(1) as u64),
+            let mut config = Config::default();
+            apply_ai(&mut config, &ui.get_ai());
+            let message = match state
+                .borrow_mut()
+                .service
+                .execute(Action::TestAi { config: config.ai })
+            {
+                Ok(Reply::AiTest { message }) => format!("連線成功，模型回應：{message}"),
+                Ok(_) => "管理回應種類錯誤".into(),
+                Err(e) => e,
             };
-            let msg = match zct_ai::ping(&ep) {
-                Ok(reply) => format!("連線成功，模型回應：{reply}"),
-                Err(e) => e.to_string(),
-            };
-            ui.set_ai_status(msg.into());
+            ui.set_ai_status(message.into());
         });
     }
     {
@@ -786,25 +1074,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if old.word == word.as_str() && old.bopomofo == reading.as_str() {
                 return;
             }
-            let r = (|| {
-                let mut st = state.borrow_mut();
-                st.service.call(Request::AddPhrase {
-                    word: word.clone(),
-                    bopomofo: reading.clone(),
-                })?;
-                if old.state == 2 && !zct_core::abbrev::is_abbrev(&reading) {
-                    st.service.call(Request::Phrase {
-                        word: word.clone(),
-                        bopomofo: reading.clone(),
-                        action: PhraseAction::Ban,
-                    })?;
-                }
-                st.service.call(Request::Phrase {
-                    word: old.word.to_string(),
-                    bopomofo: old.bopomofo.to_string(),
-                    action: PhraseAction::Remove,
-                })
-            })();
+            let original = PhraseEntry {
+                word: old.word.to_string(),
+                bopomofo: old.bopomofo.to_string(),
+                boost: if old.state == 2 {
+                    PhraseEntry::BANNED
+                } else if old.state == 1 {
+                    PhraseEntry::PINNED
+                } else {
+                    PhraseEntry::NORMAL
+                },
+            };
+            let r = state.borrow_mut().service.execute(Action::EditPhrase {
+                original,
+                word: word.clone(),
+                bopomofo: reading,
+            });
             refresh();
             ui_weak.unwrap().set_status(match r {
                 Ok(_) => format!("已更新：{word}").into(),
@@ -850,7 +1135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .service
                 .call(Request::Command(Command::PrepareMove))
                 .is_ok();
-            let result = zct_core::paths::change_data_root(&pointer, &current, &new);
+            let result = zct_preferences::relocate_directory(&pointer, &current, &new);
             // 不論成功與否都重新啟動服務程序（成功：讀新位置；失敗：解除停止寫入）
             if online {
                 let _ = state
@@ -932,14 +1217,29 @@ fn pick_folder(_start: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// 首選正確率：沒有修正的字數比例
 fn accuracy(chars: u64, corrections: u64) -> f32 {
-    if chars == 0 {
-        return 1.0;
-    }
-    (1.0 - corrections as f32 / chars as f32).clamp(0.0, 1.0)
+    zct_preferences::accuracy(chars, corrections) as f32
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn generated_catalog_form_preserves_all_config_fields() {
+        let mut config = Config::default();
+        config.theme.font_size = 16.5;
+        config
+            .punctuation
+            .full
+            .insert("shift+,".into(), "，".into());
+        config.ai.model = "shared-model".into();
+        config.sync.remote = "git@example.com:private/input.git".into();
+        let rows = ModelRc::new(VecModel::from(shared_fields(&config)));
+        let roundtrip = read_shared_config(&config, &rows).unwrap();
+        assert_eq!(roundtrip, config);
+        let theme = theme_from(&config);
+        apply_theme(&mut config, &theme).unwrap();
+        assert_eq!(config.theme.font_size, 16.5);
+    }
+
     use super::*;
 
     #[test]

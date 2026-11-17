@@ -1,33 +1,107 @@
 name: Release
 
-# 推送 v* 標籤（例如 v0.1.0）：建置正式版安裝檔並建立 GitHub Release
+# 推送 v* 標籤：所有平台建置成功後，統一發布同一個 GitHub Release
 # 標籤有 -（例如 v0.2.0-rc.1）時標成 pre-release
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: 標籤與版號一致
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PYTHON'
+          import os, tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          if os.environ["RELEASE_TAG"] != f"v{version}":
+              raise SystemExit("標籤與 Cargo.toml workspace 版本不一致")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          PYTHON
+
+  macos:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '15.0'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target/macos'
+      - name: 詞庫快取
+        id: dict
+        uses: actions/cache@v4
+        with:
+          path: assets/dict
+          key: dict-${{ hashFiles('scripts/fetch-dict.sh') }}
+      - name: 下載詞庫
+        if: steps.dict.outputs.cache-hit != 'true'
+        run: sh scripts/fetch-dict.sh
+      - name: 檢查、測試與 Release 建置
+        run: sh scripts/build-macos.sh --check
+      - name: 打包與 SHA256
+        run: sh scripts/package-macos.sh
+      - name: 設定視窗、候選窗與選單圖示驗證
+        run: '"target/macos/動物園輸入法.app/Contents/MacOS/zoo-type" --ui-self-test target/macos/ui-preview'
+      - name: 保存 UI 預覽
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-preview-${{ matrix.arch }}
+          path: target/macos/ui-preview/*.png
+          if-no-files-found: error
+      - name: 保存 macOS 發布檔案
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: |
+            target/installer/*-macos-${{ matrix.arch }}.zip
+            target/installer/*-macos-${{ matrix.arch }}.zip.sha256
+            target/installer/*-macos-${{ matrix.arch }}-tools.tar.gz
+            target/installer/*-macos-${{ matrix.arch }}-tools.tar.gz.sha256
+          if-no-files-found: error
+
   windows:
+    needs: version
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
-
-      - name: 標籤與版號一致
-        shell: pwsh
-        run: |
-          $tag = '${{ github.ref_name }}'.TrimStart('v')
-          $cargo = Get-Content Cargo.toml -Raw
-          if ($cargo -notmatch '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"') { throw '讀不到 Cargo.toml 的版號' }
-          if ($Matches[1] -ne $tag) { throw "標籤 $tag 和 Cargo.toml 的版號 $($Matches[1]) 不一致" }
-          "VERSION=$tag" >> $env:GITHUB_ENV
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -70,22 +144,71 @@ jobs:
           ZOO_TYPE_SIGNING_KEY: ${{ secrets.ZOO_TYPE_SIGNING_KEY }}
         run: cargo run -p zct-update --bin zct-release --release --locked -- sign "target/installer/zoo-type-$env:VERSION-windows-x64-setup.exe" $env:VERSION
 
-      - name: GitHub Release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: 保存 Windows 發布檔案
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: |
+            target/installer/*.exe
+            target/installer/*.exe.sha256
+            target/installer/*.exe.sig
+          if-no-files-found: error
+
+  publish:
+    needs: [version, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: 取得所有平台發布檔案
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+      - name: 驗證發布檔案
+        working-directory: release-assets
         run: |
-          $setup = "target/installer/zoo-type-$env:VERSION-windows-x64-setup.exe"
-          $hash = (Get-Content "$setup.sha256").Split(' ')[0]
-          @"
-          ## 安裝
-
-          下載 ``zoo-type-$env:VERSION-windows-x64-setup.exe`` 執行（需要系統管理員權限，Windows 10 / 11 64 位元）。
-
+          test -s "zoo-type-$VERSION-windows-x64-setup.exe.sig"
+          for name in "zoo-type-$VERSION-windows-x64-setup.exe" \
+            "zoo-type-$VERSION-macos-arm64.zip" \
+            "zoo-type-$VERSION-macos-x64.zip" \
+            "zoo-type-$VERSION-macos-arm64-tools.tar.gz" \
+            "zoo-type-$VERSION-macos-x64-tools.tar.gz"; do
+            test -s "$name"
+            sha256sum --check "$name.sha256"
+          done
+      - name: GitHub Release
+        run: |
+          cat > notes.md <<EOF
+          ## Windows
+          下載 zoo-type-$VERSION-windows-x64-setup.exe 執行（需要系統管理員權限，Windows 10 / 11 64 位元）。
           安裝檔沒有程式碼簽章，Windows 可能顯示「Windows 已保護您的電腦」：按「其他資訊」→「仍要執行」。
 
-          SHA256：``$hash``
-          "@ | Set-Content notes.md -Encoding utf8
-          $flags = @()
-          if ('${{ github.ref_name }}' -like '*-*') { $flags += '--prerelease' }
-          gh release create '${{ github.ref_name }}' $setup "$setup.sha256" "$setup.sig" --title "動物園輸入法 $env:VERSION" --notes-file notes.md --generate-notes @flags
+          ## macOS 輸入法（macOS 15 以上，初版）
+          Apple Silicon：zoo-type-$VERSION-macos-arm64.zip
+          Intel：zoo-type-$VERSION-macos-x64.zip
+          包含 InputMethodKit .app 與詞庫。解壓後執行 sh install.sh，並在系統設定 → 鍵盤 → 輸入方式加入「動物園輸入法」。詳細步驟見 README.txt。
+          尚未做 Developer ID 簽章或公證，macOS 可能要求在「隱私權與安全性」允許開啟。
+          初版支援注音、組字、鍵盤選字、標點、中英切換與學習；包含原生設定視窗（上方「動」圖示 →「設定…」）；AI、git 同步與詞庫管理 GUI 尚未移植。
+          另附 -tools.tar.gz 命令列工具包，供模擬打字與評測使用。
+
+          所有下載均附 SHA256 校驗檔。
+          EOF
+          flags=()
+          prerelease=false
+          if [[ "$VERSION" == *-* ]]; then
+            flags+=(--prerelease)
+            prerelease=true
+          fi
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "動物園輸入法 $VERSION" --notes-file notes.md --generate-notes "${flags[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease="$prerelease"

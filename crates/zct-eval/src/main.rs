@@ -15,7 +15,14 @@ use zct_core::config::Config;
 use zct_eval::{Readings, evaluate};
 
 fn main() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::var_os("ZCT_RESOURCE_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let exe = std::env::current_exe().ok()?;
+            let root = exe.parent()?.parent()?;
+            root.join("assets/dict").is_dir().then(|| root.to_owned())
+        })
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
     let mut config = Config::default();
     let mut show = 10usize;
     let mut corpus_path = root.join("tests/eval/corpus.txt");

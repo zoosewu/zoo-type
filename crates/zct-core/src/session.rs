@@ -1876,6 +1876,12 @@ impl Session {
         text
     }
 
+    /// 平台失焦時送出組字，套用與 Enter 相同的繁簡輸出轉換。
+    pub fn flush_output(&mut self) -> String {
+        let raw = self.flush();
+        self.convert(&raw)
+    }
+
     /// 丟棄組字內容與 Shift 狀態（App 中止組字時）
     pub fn reset(&mut self) {
         self.editor.clear();

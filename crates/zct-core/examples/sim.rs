@@ -9,14 +9,21 @@ use zct_core::config::Config;
 use zct_core::{Key, KeyEvent, Mods, Session, SessionOptions, Side};
 
 fn main() {
-    let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/dict");
+    let root = std::env::var_os("ZCT_RESOURCE_ROOT")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let exe = std::env::current_exe().ok()?;
+            let root = exe.parent()?.parent()?;
+            root.join("assets/dict").is_dir().then(|| root.to_owned())
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    let dict = root.join("assets/dict");
     // ZCT_SIM_LEARNING：指定學習資料夾（例如使用者資料的複本），重現個人化後的選字
     let user = std::env::var_os("ZCT_SIM_LEARNING")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("zct-sim"));
     let t0 = Instant::now();
-    let engine = zct_core::Engine::open(std::path::Path::new(dict), &user)
-        .expect("需要先執行 scripts/fetch-dict.sh");
+    let engine = zct_core::Engine::open(&dict, &user).expect("需要先執行 scripts/fetch-dict.sh");
     let engine = std::sync::Arc::new(engine);
     let mut s = Session::new(&SessionOptions {
         engine: engine.clone(),

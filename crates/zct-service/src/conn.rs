@@ -9,6 +9,7 @@ use zct_core::CandidatePage;
 use zct_core::{InputMode, KeyResult, Output, Session, SessionOptions, Width};
 use zct_ipc::pipe::ServerConn;
 use zct_ipc::{Command, PROTOCOL_VERSION, Request, Response};
+use zct_preferences::{Action, Backend, EngineBackend, Reply};
 
 use crate::app::Shared;
 use crate::ui::UiCmd;
@@ -362,40 +363,55 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 Response::Ok
             }
-            Request::ListPhrases => {
-                let mut list = shared.engine.phrases();
-                list.extend(shared.engine.english_entries());
-                Response::Phrases(list)
-            }
-            Request::AddPhrase { word, bopomofo } => {
-                match shared.engine.add_phrase(&word, &bopomofo) {
-                    Ok(()) => Response::Ok,
+            Request::ListPhrases
+            | Request::AddPhrase { .. }
+            | Request::Phrase { .. }
+            | Request::Stats
+            | Request::Backups => {
+                let action = match req {
+                    Request::ListPhrases => Action::ListPhrases,
+                    Request::AddPhrase { word, bopomofo } => Action::AddPhrase { word, bopomofo },
+                    Request::Phrase {
+                        word,
+                        bopomofo,
+                        action,
+                    } => Action::Phrase {
+                        word,
+                        bopomofo,
+                        action,
+                    },
+                    Request::Stats => Action::Stats,
+                    Request::Backups => Action::Backups,
+                    _ => unreachable!(),
+                };
+                match EngineBackend::new(&shared.engine, &shared.backup).execute(action) {
+                    Ok(Reply::Done { .. }) => Response::Ok,
+                    Ok(Reply::Phrases { items }) => {
+                        Response::Phrases(items.into_iter().map(|row| row.entry).collect())
+                    }
+                    Ok(Reply::Stats { items }) => {
+                        Response::Stats(items.into_iter().map(|row| row.entry).collect())
+                    }
+                    Ok(Reply::Backups { items }) => Response::Backups(items),
+                    Ok(_) => Response::Error("管理回應種類錯誤".into()),
                     Err(e) => Response::Error(e),
                 }
             }
-            Request::Phrase {
-                word,
-                bopomofo,
-                action,
-            } => match shared.engine.phrase_action(&word, &bopomofo, action) {
-                Ok(()) => Response::Ok,
-                Err(e) => Response::Error(e),
-            },
-            Request::Stats => Response::Stats(shared.engine.stats()),
-            Request::Backups => Response::Backups(zct_core::Engine::backups(&shared.backup)),
-            Request::Restore { day } => match shared.engine.restore(&shared.backup, &day) {
-                Ok(()) => {
-                    log::info!("已從備份 {day} 還原，服務程序結束後重新載入");
-                    // 先回應再結束；DLL 會在下次按鍵時重新啟動服務程序
-                    let ui = shared.ui.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                        ui.send(UiCmd::Exit);
-                    });
-                    Response::Ok
+            Request::Restore { day } => {
+                let result = EngineBackend::new(&shared.engine, &shared.backup)
+                    .execute(Action::Restore { day });
+                // Reload even after a copy error: restore may already have frozen
+                // the old engine. Reconnection creates fresh sessions.
+                let ui = shared.ui.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    ui.send(UiCmd::Exit);
+                });
+                match result {
+                    Ok(_) => Response::Ok,
+                    Err(error) => Response::Error(error),
                 }
-                Err(e) => Response::Error(e.to_string()),
-            },
+            }
             Request::Status => Response::Status {
                 chinese: session
                     .as_ref()
