@@ -292,6 +292,10 @@ pub struct CandidateConfig {
     pub sort_by_frequency: bool,
     /// 智慧選字（T0）：用內建的字 n-gram 語言模型挑最通順的首選（系統詞庫有 ngram.bin 時才有作用）
     pub language_model: bool,
+    /// ↓ 選的是游標後面還是前面的詞
+    pub select: SelectSide,
+    /// 選完字後游標移到哪裡
+    pub after_select: AfterSelect,
 }
 
 impl Default for CandidateConfig {
@@ -300,8 +304,34 @@ impl Default for CandidateConfig {
             per_page: 9,
             sort_by_frequency: true,
             language_model: true,
+            select: SelectSide::default(),
+            after_select: AfterSelect::default(),
         }
     }
+}
+
+/// ↓ 選字的對象（`今天天氣|很好`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectSide {
+    /// 游標後面的詞（很好）；游標在最後時是最後一個字
+    #[default]
+    After,
+    /// 游標前面的詞（天氣）；游標在最前面時是第一個字
+    Before,
+}
+
+/// 選完字後游標的位置
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AfterSelect {
+    /// 移到選好的詞後面
+    #[default]
+    Forward,
+    /// 留在原處
+    Stay,
+    /// 移到選好的詞前面
+    Backward,
 }
 
 /// 候選窗排列方向

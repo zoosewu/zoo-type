@@ -165,6 +165,24 @@ pub fn catalog(platform: Platform) -> Catalog {
         &[],
     );
     add(
+        "candidates.select",
+        "選字對象",
+        "general",
+        Choice,
+        &[("游標後的詞", "after"), ("游標前的詞", "before")],
+    );
+    add(
+        "candidates.after_select",
+        "選字後游標",
+        "general",
+        Choice,
+        &[
+            ("移到詞後面", "forward"),
+            ("不動", "stay"),
+            ("移到詞前面", "backward"),
+        ],
+    );
+    add(
         "mixed.auto_english",
         "自動辨識英文單字",
         "general",

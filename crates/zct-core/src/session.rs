@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::apps::{AppRule, Effective};
 use crate::config::{
-    Config, GameMode, HotkeyConfig, InputMode, MixedConfig, OnFocus, Output, PunctuationTable,
-    Width,
+    AfterSelect, Config, GameMode, HotkeyConfig, InputMode, MixedConfig, OnFocus, Output,
+    PunctuationTable, SelectSide, Width,
 };
 use crate::engine::Engine;
 use crate::hotkey::Binding;
@@ -241,6 +241,14 @@ pub struct Session {
     punct: PunctuationTable,
     per_page: usize,
     highlight: usize,
+    /// ↓ 選游標後面（後選）還是前面（前選）的詞
+    select_side: SelectSide,
+    /// 選完字後游標的位置
+    after_select: AfterSelect,
+    /// 使用者按 ↓ 開始選字時的游標；選字中 chewing 的游標是選字的那個字，結束（選完或取消）後從這裡算
+    select_origin: Option<usize>,
+    /// 這次選字是前選：chewing 的游標是詞的最後一個字（後選是第一個字）
+    select_rear: bool,
     mixed: MixedConfig,
     /// 目前這個音節的原始按鍵（中英混打判斷用）
     raw: String,
@@ -286,8 +294,8 @@ impl Session {
             o.candidates_per_page = per_page;
             // 空白不開候選窗（↓ 才開）：注音未完成時是一聲，否則在組字區插入空白
             o.space_is_select_key = false;
-            // 選完字後游標跳到該詞後面（今天|天氣很好 → 今天天氣|很好）
-            o.auto_shift_cursor = true;
+            // 選完字後的游標由 ZCT 依設定移動（見 `select_menu`）
+            o.auto_shift_cursor = false;
             // 全半形切換由 ZCT 自己處理，避免 chewing 吃掉 Shift+Space
             o.enable_fullwidth_toggle_key = false;
             o.sort_candidates_by_frequency = sort;
@@ -311,6 +319,10 @@ impl Session {
             punct: opts.config.punctuation.compile().map_err(SessionError)?,
             per_page,
             highlight: 0,
+            select_side: opts.config.candidates.select,
+            after_select: opts.config.candidates.after_select,
+            select_origin: None,
+            select_rear: false,
             mixed: opts.config.mixed.clone(),
             raw: String::new(),
             raw_english_ok: false,
@@ -898,10 +910,60 @@ impl Session {
         true
     }
 
-    /// ↓ 會作用的位置：游標在最後時是最後一個字
+    /// ↓ 會作用的位置：後選是游標後的字（游標在最後時是最後一個字）；
+    /// 前選是游標前的字（游標在最前面時是第一個字）
     fn select_target(&self) -> Option<usize> {
         let (c, len) = (self.editor.cursor(), self.editor.len());
-        (len > 0).then(|| if c < len { c } else { len - 1 })
+        if len == 0 {
+            return None;
+        }
+        Some(match self.select_side {
+            SelectSide::Before if c > 0 => c - 1,
+            _ if c < len => c,
+            _ => len - 1,
+        })
+    }
+
+    /// 使用者按 ↓ 開始選字
+    ///
+    /// chewing 的「後方選詞」選的是結束在游標所在那個字的詞，所以前選先把游標往左移一格，
+    /// 選的就是結束在游標前面的詞（`今天天氣|很好` → 天氣）。
+    fn start_select(&mut self) {
+        let c = self.editor.cursor();
+        let rear = self.select_side == SelectSide::Before && c > 0;
+        self.select_origin = Some(c);
+        if rear {
+            self.chewing_key(Key::Left);
+        }
+        self.editor
+            .set_editor_options(|o| o.phrase_choice_rearward = rear);
+        self.chewing_key(Key::Down);
+        // 其他地方（重新選字）開的選字一律是後選
+        self.editor
+            .set_editor_options(|o| o.phrase_choice_rearward = false);
+        self.select_rear = rear && self.editor.is_selecting();
+    }
+
+    /// 選字中：長度 `n` 的候選詞在組字區的起點
+    fn phrase_start(&self, n: usize) -> usize {
+        let c = self.editor.cursor();
+        if self.select_rear {
+            (c + 1).saturating_sub(n)
+        } else {
+            c
+        }
+    }
+
+    /// 移動游標到 `to`（不在選字中）
+    fn move_cursor_to(&mut self, to: usize) {
+        let to = to.min(self.editor.len());
+        while self.editor.cursor() != to {
+            let before = self.editor.cursor();
+            self.chewing_key(if before > to { Key::Left } else { Key::Right });
+            if self.editor.cursor() == before {
+                break;
+            }
+        }
     }
 
     /// B：英文（或縮寫的詞）選項目前可以出現嗎（對應的是最後一個音節；候選窗必須正在選最後一個字）
@@ -914,6 +976,7 @@ impl Session {
     /// B：選了英文選項 → 最後一個音節換成英文（仍留在組字區）
     fn apply_english(&mut self) {
         let word = self.english_alt.take().unwrap_or_default();
+        self.select_origin = None;
         let _ = self.editor.cancel_selecting();
         let len = self.editor.len();
         while self.editor.cursor() < len {
@@ -1328,6 +1391,14 @@ impl Session {
                 {
                     return self.finish(r, commit);
                 }
+                if !self.editor.entering_syllable()
+                    && !self.editor.is_empty()
+                    && self.ai_suggestion().is_none()
+                {
+                    self.start_select();
+                    r.eaten = true;
+                    return self.finish(r, commit);
+                }
             }
             if self.ai_key(ev, &mut commit) {
             } else if self.emoji.is_some() {
@@ -1508,6 +1579,11 @@ impl Session {
             self.expanded = false;
             self.extras_page = false;
             self.menu = None;
+            self.select_rear = false;
+            // 沒選字就結束（Esc、切換中英…）：游標回到按 ↓ 之前的位置
+            if let Some(origin) = self.select_origin.take() {
+                self.move_cursor_to(origin);
+            }
         } else if self.menu.is_none() {
             self.build_menu();
         }
@@ -1596,7 +1672,16 @@ impl Session {
                 for _ in 0..presses {
                     self.chewing_key(Key::Down);
                 }
+                let n = item.word.chars().count();
+                let begin = self.phrase_start(n);
+                let origin = self.select_origin.take();
                 let _ = self.editor.select(index % per_page);
+                let to = match self.after_select {
+                    AfterSelect::Forward => begin + n,
+                    AfterSelect::Stay => origin.unwrap_or(begin + n),
+                    AfterSelect::Backward => begin,
+                };
+                self.move_cursor_to(to);
             }
         }
         self.menu = None;
@@ -1627,14 +1712,16 @@ impl Session {
                 self.chewing_key(Key::Down);
             }
         }
-        let start = self.editor.cursor();
+        let anchor = self.editor.cursor();
         let symbols = self.editor.symbols();
         let mut items = Vec::new();
         for (group, words) in groups.iter().enumerate() {
             let mut entries: Vec<(usize, &String)> = words.iter().enumerate().collect();
             let syl = |w: &str| -> Option<Vec<chewing::zhuyin::Syllable>> {
+                let n = w.chars().count();
+                let start = self.phrase_start(n);
                 symbols
-                    .get(start..start + w.chars().count())?
+                    .get(start..start + n)?
                     .iter()
                     .map(|s| s.to_syllable())
                     .collect()
@@ -1664,14 +1751,21 @@ impl Session {
                 kind: MenuKind::Word { group, index },
             }));
         }
-        // 目前畫面上從游標開始的那個詞（或字）排第一：打開選單直接按 Enter 不會改掉原本的內容
+        // 目前畫面上正在選的那個詞（或字）排第一：打開選單直接按 Enter 不會改掉原本的內容
         //（犒 → 犒、靠…；天氣 → 天氣、…；游標在詞中間時是那個單字）
+        let rear = self.select_rear;
         let current = self
             .editor
             .intervals()
-            .find(|it| it.start == start)
+            .find(|it| {
+                if rear {
+                    it.end == anchor + 1
+                } else {
+                    it.start == anchor
+                }
+            })
             .map(|it| it.text.to_string())
-            .or_else(|| self.editor.display().chars().nth(start).map(String::from));
+            .or_else(|| self.editor.display().chars().nth(anchor).map(String::from));
         if let Some(current) = current
             && let Some(i) = items.iter().position(|it| it.word == current)
         {
@@ -1803,8 +1897,8 @@ impl Session {
             // Emoji 取代游標處的詞（第一個候選詞的長度）
             Extra::Emoji(e) => {
                 let chars: Vec<char> = self.editor.display().chars().collect();
-                let start = self.editor.cursor().min(chars.len());
                 let n = self.first_word().map_or(1, |w| w.chars().count());
+                let start = self.phrase_start(n).min(chars.len());
                 let end = (start + n).min(chars.len());
                 let before: String = chars[..start].iter().collect();
                 let after: String = chars[end..].iter().collect();
@@ -1837,7 +1931,7 @@ impl Session {
         }
         let word = item.word.clone();
         let n = word.chars().count();
-        let start = self.editor.cursor();
+        let start = self.phrase_start(n);
         let syllables: Vec<_> = self
             .editor
             .symbols()
@@ -2021,7 +2115,12 @@ impl Session {
     pub fn preedit(&self) -> Preedit {
         let converted: Vec<char> = self.editor.display().chars().collect();
         let syllable = self.editor.syllable_buffer_display();
-        let cursor = self.editor.cursor().min(converted.len());
+        // 前選中 chewing 的游標在詞的最後一個字上，畫面上的游標維持在按 ↓ 的位置
+        let cursor = match self.select_origin {
+            Some(origin) if self.select_rear => origin,
+            _ => self.editor.cursor(),
+        }
+        .min(converted.len());
         // 自動轉換偶爾會選到只屬於簡體的字（手机）：一律顯示成繁體（一對一換字，位置不變）
         let before = self
             .engine
@@ -2030,15 +2129,23 @@ impl Session {
             .engine
             .to_traditional(&converted[cursor..].iter().collect::<String>());
         let shift = before.chars().count() + syllable.chars().count();
-        // 選字目標：候選窗開啟時是正在選的詞；否則是游標後的字（英文單字整個）；
-        // 游標在最後或正在打注音時不標示（使用者可能根本不打算選字）
+        // 選字目標：候選窗開啟時是正在選的詞；否則是 ↓ 會選的字（英文單字整個）—— 後選是游標後、前選是游標前；
+        // 游標在最後（前選是最前面）或正在打注音時不標示（使用者可能根本不打算選字）
         let target = if self.editor.is_selecting() {
             let n = self
                 .menu
                 .as_ref()
                 .and_then(|m| m.items.get(m.sel))
                 .map_or(1, |i| i.word.chars().count());
-            Some((cursor, n))
+            Some((self.phrase_start(n).min(converted.len()), n))
+        } else if self.select_side == SelectSide::Before {
+            (syllable.is_empty() && cursor > 0 && cursor < converted.len()).then(|| {
+                let n = self
+                    .letters_before(cursor)
+                    .max(self.phrase_before(cursor))
+                    .max(1);
+                (cursor - n, n)
+            })
         } else if syllable.is_empty() && cursor < converted.len() {
             // 英文單字、中文詞整個標示（← → 也是整個跳過）
             let n = self

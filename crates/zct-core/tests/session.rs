@@ -2496,3 +2496,117 @@ fn backspace_right_after_word_in_middle_deletes_whole_word() {
     h.press(Key::Backspace, Mods::NONE);
     assert_eq!(h.s.preedit().text, "我  你");
 }
+
+fn select_config(
+    side: zct_core::config::SelectSide,
+    after: zct_core::config::AfterSelect,
+) -> Config {
+    let mut c = Config::default();
+    c.candidates.select = side;
+    c.candidates.after_select = after;
+    c
+}
+
+/// 天氣很好，游標停在 `at`
+fn tianqi_henhao(config: Config, at: usize) -> Harness {
+    let mut h = Harness::with_config(config);
+    h.type_str("wu0 fu4cp3cl3");
+    assert_eq!(h.s.preedit().text, "天氣很好");
+    h.press(Key::Home, Mods::NONE);
+    for _ in 0..at {
+        h.press(Key::Right, ctrl());
+    }
+    assert_eq!(h.s.preedit().cursor, at);
+    h
+}
+
+/// 天氣|很好：前選選「天氣」、後選選「很好」；Enter 選目前的詞（不改字）後游標依設定移動
+#[test]
+fn select_side_and_cursor_jump_combinations() {
+    use zct_core::config::{AfterSelect as A, SelectSide as S};
+    let cases = [
+        (S::After, A::Forward, (2, 2), 4),
+        (S::After, A::Stay, (2, 2), 2),
+        (S::After, A::Backward, (2, 2), 2),
+        (S::Before, A::Forward, (0, 2), 2),
+        (S::Before, A::Stay, (0, 2), 2),
+        (S::Before, A::Backward, (0, 2), 0),
+    ];
+    for (side, after, target, cursor) in cases {
+        let mut h = tianqi_henhao(select_config(side, after), 2);
+        h.press(Key::Down, Mods::NONE);
+        let p = h.s.preedit();
+        assert_eq!(p.target, Some(target), "{side:?} {after:?} 選字目標");
+        assert_eq!(p.cursor, 2, "{side:?} {after:?} 選字中游標不動");
+        assert_eq!(
+            h.s.candidates().unwrap().items[0],
+            if side == S::Before {
+                "天氣"
+            } else {
+                "很好"
+            }
+        );
+        h.press(Key::Enter, Mods::NONE);
+        let p = h.s.preedit();
+        assert_eq!(p.text, "天氣很好");
+        assert_eq!(p.cursor, cursor, "{side:?} {after:?} 選完游標");
+    }
+}
+
+/// 邊界：前選在最前面選第一個字開始的詞、後選在最後選最後一個字；前選在最後選最後一個詞
+#[test]
+fn select_side_at_edges() {
+    use zct_core::config::{AfterSelect as A, SelectSide as S};
+    let cases = [
+        (S::Before, 0, (0, 2)),
+        (S::Before, 4, (2, 2)),
+        (S::After, 0, (0, 2)),
+        (S::After, 4, (3, 1)),
+    ];
+    for (side, at, target) in cases {
+        let mut h = tianqi_henhao(select_config(side, A::Forward), at);
+        h.press(Key::Down, Mods::NONE);
+        assert!(h.s.candidates().is_some(), "{side:?} 游標 {at}");
+        assert_eq!(h.s.preedit().target, Some(target), "{side:?} 游標 {at}");
+    }
+}
+
+#[test]
+fn before_select_esc_returns_cursor() {
+    use zct_core::config::{AfterSelect as A, SelectSide as S};
+    let mut h = tianqi_henhao(select_config(S::Before, A::Forward), 2);
+    h.press(Key::Down, Mods::NONE);
+    h.press(Key::Esc, Mods::NONE);
+    assert!(h.s.candidates().is_none());
+    assert_eq!(h.s.preedit().cursor, 2);
+}
+
+#[test]
+fn before_select_changes_word_before_cursor() {
+    // 前選換掉游標前的字：天氣很好|，選「好」以外的單字，只有最後一個字改變
+    use zct_core::config::{AfterSelect as A, SelectSide as S};
+    let mut h = tianqi_henhao(select_config(S::Before, A::Stay), 4);
+    h.press(Key::Down, Mods::NONE);
+    let items = h.s.candidates().unwrap().items;
+    let single = items
+        .iter()
+        .position(|w| w.chars().count() == 1 && w != "好")
+        .expect("單字候選");
+    let word = items[single].clone();
+    for _ in 0..single {
+        h.press(Key::Down, Mods::NONE);
+    }
+    h.press(Key::Enter, Mods::NONE);
+    let p = h.s.preedit();
+    assert_eq!(p.text, format!("天氣很{word}"));
+    assert_eq!(p.cursor, 4);
+}
+
+#[test]
+fn before_select_hint_marks_word_before_cursor() {
+    use zct_core::config::{AfterSelect as A, SelectSide as S};
+    let h = tianqi_henhao(select_config(S::Before, A::Forward), 2);
+    assert_eq!(h.s.preedit().target, Some((0, 2)));
+    let h = tianqi_henhao(select_config(S::Before, A::Forward), 4);
+    assert_eq!(h.s.preedit().target, None, "游標在最後不標示");
+}

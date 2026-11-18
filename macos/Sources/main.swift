@@ -40,7 +40,11 @@ func selfTest(dictionary: String) throws {
     try check(try session.flush().commit == "天氣", "失焦送出")
     runtime.save()
     let preferences = try PreferencesModel(client: runtime)
-    try check(preferences.pages.count == 9 && preferences.fields.count == 44 && preferences.appFields.count == 10, "共用設定欄位完整性")
+    // 欄位目錄與設定內容對得上：每個欄位都在某一頁、都讀得到值（欄位數跟著 Rust 目錄走，不寫死）
+    let pageIDs = Set(preferences.pages.compactMap { $0["id"] as? String })
+    try check(!preferences.fields.isEmpty && !preferences.appFields.isEmpty
+        && preferences.fields.allSatisfy { pageIDs.contains($0.page) && ($0.nullable || preferences.value($0.path) != nil) },
+        "共用設定欄位完整性")
     let stale = try PreferencesModel(client: runtime)
     preferences.set("theme.font_size", 18.5)
     try preferences.save()
