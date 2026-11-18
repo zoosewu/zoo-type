@@ -134,7 +134,7 @@ mod app {
             .map(|_| ())
     }
 
-    /// 已有更新的版本：協定相同就讓位給新版；不同就改為唯讀，沒有連線時結束
+    /// 已有更新的版本：協定相同就讓位給新版；不同就改為唯讀，定期檢查時沒有連線就結束
     fn handle_stale(engine: Option<&Engine>) {
         match version::state() {
             version::State::Current => {}
@@ -162,7 +162,9 @@ mod app {
                 if let Some(engine) = engine {
                     engine.freeze();
                 }
-                if version::active() == 0 {
+                // 剛啟動（`engine` 是 None）多半是舊 DLL 叫起這個舊版、正要連線：先服務，
+                // 由之後每 30 秒的檢查判斷要不要結束；啟動時就結束會讓舊 App 一直連不上（只能打英文）
+                if engine.is_some() && version::active() == 0 {
                     log::info!("舊版沒有連線，結束");
                     std::process::exit(0);
                 }
