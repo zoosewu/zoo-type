@@ -104,3 +104,11 @@
 - 現象：catalog 加了 candidates.language_model，Windows CI 全過，macOS 的 `--self-test` 報「共用設定欄位完整性」
 - 原因：macos/Sources/main.swift 寫死欄位數（43），docs/macos.md 也寫了數字；Windows 本機跑不到 Swift
 - 規則：改 zct-preferences catalog 時，一併 grep `fields.count` 與文件中的欄位數一起更新
+
+## 回覆語言
+- 使用者糾正：「使用中文和我討論」（我整則回覆用了英文）
+- 規則：所有回覆、說明、表格一律繁體中文；寫完回覆前檢查語言
+
+## 英文單字「打到一半」的假設
+- 我說「還在打的單字 Backspace 一次刪一個字母」，但中文模式下按第二個空白前畫面是注音，根本沒有看得到的半個單字
+- 規則：描述輸入行為前，先確認使用者實際的打字流程（中文模式自動英文 vs Shift 英文模式），用測試印出每一步畫面再下結論
