@@ -99,3 +99,8 @@
 - 規則：
   - 使用者描述的症狀跟核心測試結果對不上時，先用一句話複述「你按了什麼、預期看到什麼、實際看到什麼」確認，再開始查
   - 單一按鍵的行為問題先在測試裡把各種按法（單按、連按、接空白）列成表，對照使用者描述找出哪一種符合
+
+## 加設定欄位後 macOS self-test 失敗
+- 現象：catalog 加了 candidates.language_model，Windows CI 全過，macOS 的 `--self-test` 報「共用設定欄位完整性」
+- 原因：macos/Sources/main.swift 寫死欄位數（43），docs/macos.md 也寫了數字；Windows 本機跑不到 Swift
+- 規則：改 zct-preferences catalog 時，一併 grep `fields.count` 與文件中的欄位數一起更新

@@ -40,7 +40,7 @@ func selfTest(dictionary: String) throws {
     try check(try session.flush().commit == "天氣", "失焦送出")
     runtime.save()
     let preferences = try PreferencesModel(client: runtime)
-    try check(preferences.pages.count == 9 && preferences.fields.count == 43 && preferences.appFields.count == 10, "共用設定欄位完整性")
+    try check(preferences.pages.count == 9 && preferences.fields.count == 44 && preferences.appFields.count == 10, "共用設定欄位完整性")
     let stale = try PreferencesModel(client: runtime)
     preferences.set("theme.font_size", 18.5)
     try preferences.save()
