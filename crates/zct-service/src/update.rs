@@ -57,6 +57,18 @@ pub fn spawn(settings: Arc<Settings>, available: Available) -> std::io::Result<(
         .map(|_| ())
 }
 
+/// 設定程式按「檢查更新」：不管 `auto_check`，立刻查一次
+pub fn check_now(available: &Available) -> Result<Option<String>, String> {
+    if !manages_updates() {
+        return Err("只有正式版會檢查更新".into());
+    }
+    let version = check()?.map(|v| v.to_string());
+    if version.is_some() {
+        *available.lock().unwrap_or_else(|e| e.into_inner()) = version.clone();
+    }
+    Ok(version)
+}
+
 /// 上次下載、已經裝過（或更舊）的檔案清掉；還沒裝的新版直接提示，不必等下次檢查
 fn clean_inbox(available: &Available) {
     let Some(inbox) = zct_update::inbox() else {
@@ -101,7 +113,11 @@ fn agent() -> ureq::Agent {
 }
 
 /// 查最新版；比目前新就下載並驗證，回傳版號
+///
+/// 每天的檢查與設定程式的「檢查更新」可能同時發生：一次只查一個，免得兩邊同時寫 inbox
 fn check() -> Result<Option<Version>, String> {
+    static RUNNING: Mutex<()> = Mutex::new(());
+    let _running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
     let release: Release = agent()
         .get(LATEST)
         .header("User-Agent", "zoo-type")

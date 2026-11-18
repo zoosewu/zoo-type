@@ -2420,3 +2420,51 @@ fn t0_keeps_what_the_user_picked_and_pinned() {
     assert!(h.s.preedit().text.ends_with('汽'));
     assert_eq!(candidates_for_qi(&mut h)[0], "汽");
 }
+
+/// 「我 love 你」各游標位置按一次 Backspace / Delete：單字整個刪，旁邊的空白先刪
+#[test]
+fn word_delete_at_every_cursor_position() {
+    let cases = [
+        (Key::Backspace, 2, "我love 你"),
+        (Key::Backspace, 4, "我 lve 你"),
+        (Key::Backspace, 6, "我  你"),
+        (Key::Backspace, 7, "我 love你"),
+        (Key::Delete, 1, "我love 你"),
+        (Key::Delete, 2, "我  你"),
+        (Key::Delete, 4, "我 loe 你"),
+        (Key::Delete, 6, "我 love你"),
+    ];
+    for (key, pos, want) in cases {
+        let mut h = Harness::new();
+        english_commit(&mut h, "ji3 love su3");
+        h.press(Key::Home, Mods::NONE);
+        for _ in 0..pos {
+            h.press(Key::Right, ctrl());
+        }
+        h.press(key, Mods::NONE);
+        assert_eq!(h.s.preedit().text, want, "{key:?} 游標 {pos}");
+    }
+}
+
+#[test]
+fn delete_removes_space_then_whole_word() {
+    let mut h = Harness::new();
+    english_commit(&mut h, "ji3 love su3");
+    h.press(Key::Home, Mods::NONE);
+    h.press(Key::Right, Mods::NONE); // 我|
+    h.press(Key::Delete, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我love 你");
+    h.press(Key::Delete, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我 你");
+}
+
+#[test]
+fn backspace_right_after_word_in_middle_deletes_whole_word() {
+    // 從最後往左跳到 love 後面再 Backspace
+    let mut h = Harness::new();
+    english_commit(&mut h, "ji3 love su3");
+    h.press(Key::Left, Mods::NONE); // |你
+    h.press(Key::Left, ctrl()); // love|
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我  你");
+}

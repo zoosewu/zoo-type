@@ -459,6 +459,13 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 let _ = shared.sync.send(());
                 Response::Ok
             }
+            Request::CheckUpdate => match crate::update::check_now(&shared.update) {
+                Ok(version) => Response::Update(version),
+                Err(e) => {
+                    log::warn!("檢查更新失敗：{e}");
+                    Response::Error(e)
+                }
+            },
             Request::Reset | Request::Focus => {
                 if shared.debug_keys {
                     log::info!("[{id}] 清除組字（{req:?}）");

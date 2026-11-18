@@ -11,7 +11,8 @@ pub mod secret;
 
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
 /// 12：程式改名為 zoo-type-*（舊版服務程序不能讓位給不同檔名的新版，改走協定不同的唯讀模式）
-pub const PROTOCOL_VERSION: u32 = 18;
+/// 19：設定程式的「檢查更新」（CheckUpdate → Update）
+pub const PROTOCOL_VERSION: u32 = 19;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -88,6 +89,8 @@ pub enum Request {
     ToggleMode,
     /// 輸入法圖示右鍵選單 → `Ok`
     Command(Command),
+    /// 設定程式按「檢查更新」：立刻查一次，有新版就下載 → `Update`（會花上下載的時間）
+    CheckUpdate,
 }
 
 // 每次呼叫只傳一個回應，大小差異不影響效能；不裝箱讓序列化格式保持單純
@@ -119,6 +122,8 @@ pub enum Response {
         passthrough: Option<Vec<Binding>>,
     },
     Error(String),
+    /// 回應 `CheckUpdate`：已下載、可以安裝的新版版號；`None` 是已經最新
+    Update(Option<String>),
 }
 
 #[derive(Debug)]

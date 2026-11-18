@@ -270,8 +270,8 @@ pub struct Session {
     picks: Vec<Pick>,
     /// 候選清單（選字中）：詞與單字合併成同一份，由 ZCT 自己翻頁與選擇
     menu: Option<Menu>,
-    /// 剛用 Backspace 刪掉完整英文單字後面的空白：下一次 Backspace 刪整個單字
-    word_backspace: bool,
+    /// 剛用 Backspace / Delete 刪掉英文單字旁邊的空白：同一個鍵再按一次刪整個單字
+    word_armed: Option<Key>,
     /// 按了 `，等下一個鍵換成那個鍵帽上的符號
     symbol_prefix: bool,
 }
@@ -328,7 +328,7 @@ impl Session {
             shift_words: Vec::new(),
             picks: Vec::new(),
             menu: None,
-            word_backspace: false,
+            word_armed: None,
             symbol_prefix: false,
         })
     }
@@ -850,9 +850,10 @@ impl Session {
     }
 
     /// 組字區中英文單字、中文詞都當成一個單位：← → 跳過整個單字 / 詞（Ctrl + ← / → 逐字移動）；
-    /// Backspace / Delete 刪整個完整英文單字，中文仍然一次刪一個字
+    /// Backspace / Delete 刪整個英文單字（旁邊有空白時先刪空白），中文仍然一次刪一個字。
+    /// 只有還在打的單字（在組字區最後、游標緊接在後）Backspace 一次刪一個字母。
     fn word_key(&mut self, ev: &KeyEvent) -> bool {
-        let backspace_armed = std::mem::take(&mut self.word_backspace);
+        let armed = self.word_armed.take() == Some(ev.key);
         if ev.mods.shift
             || self.editor.is_selecting()
             || self.editor.entering_syllable()
@@ -865,24 +866,30 @@ impl Session {
             return true;
         }
         let c = self.editor.cursor();
+        let len = self.editor.len();
+        let word_end = c > 0 && self.sym_letter(c - 1) && !self.sym_letter(c);
+        let word_start = self.sym_letter(c) && (c == 0 || !self.sym_letter(c - 1));
         let (key, times) = match ev.key {
             Key::Left if c > 0 && self.sym_letter(c - 1) => (Key::Left, self.letters_before(c)),
             Key::Right if self.sym_letter(c) => (Key::Right, self.letters_after(c)),
             Key::Left if self.phrase_before(c) > 1 => (Key::Left, self.phrase_before(c)),
             Key::Right if self.phrase_after(c) > 1 => (Key::Right, self.phrase_after(c)),
-            // 完整單字（後面有空白）：第一次刪空白，並記下來
+            // 單字後面的空白：第一次刪空白，並記下來
             Key::Backspace if c >= 2 && self.sym_space(c - 1) && self.sym_letter(c - 2) => {
-                self.word_backspace = true;
+                self.word_armed = Some(Key::Backspace);
                 (Key::Backspace, 1)
             }
-            // 剛刪過完整單字後面的空白：刪整個單字
-            Key::Backspace if backspace_armed && c > 0 && self.sym_letter(c - 1) => {
+            // 剛刪過空白，或游標在完整單字（後面還有字）的尾端：刪整個單字
+            Key::Backspace if word_end && (armed || c < len) => {
                 (Key::Backspace, self.letters_before(c))
             }
-            // 游標在完整單字前面：Delete 刪整個單字
-            Key::Delete if self.sym_letter(c) && self.sym_space(c + self.letters_after(c)) => {
-                (Key::Delete, self.letters_after(c))
+            // 單字前面的空白：第一次刪空白，並記下來
+            Key::Delete if self.sym_space(c) && self.sym_letter(c + 1) => {
+                self.word_armed = Some(Key::Delete);
+                (Key::Delete, 1)
             }
+            // 游標在單字開頭：Delete 刪整個單字
+            Key::Delete if word_start => (Key::Delete, self.letters_after(c)),
             _ => return false,
         };
         for _ in 0..times {
@@ -1960,7 +1967,7 @@ impl Session {
         self.reconvert_original = None;
         self.ai = None;
         self.extras_page = false;
-        self.word_backspace = false;
+        self.word_armed = None;
         self.latin_word.clear();
         self.shift_words.clear();
         self.picks.clear();

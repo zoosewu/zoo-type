@@ -949,6 +949,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let b: Vec<SharedString> = b.into_iter().map(Into::into).collect();
                 ui.set_backups(ModelRc::new(VecModel::from(b)));
             }
+            if let Ok(Response::Status { update, .. }) = st.service.call(Request::Status) {
+                ui.set_update_version(update.unwrap_or_default().into());
+            }
             ui.set_online(st.service.client.is_some());
             let sync_status = std::fs::read_to_string(st.data.local().join("sync-status.txt"))
                 .unwrap_or_else(|_| "尚未同步".into());
@@ -1007,6 +1010,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui_weak.unwrap().set_sync_status(
                 match r {
                     Ok(_) => "同步中…（完成後按「重新整理狀態」）".to_string(),
+                    Err(e) => e,
+                }
+                .into(),
+            );
+        });
+    }
+    {
+        // 查詢加上下載可能要一陣子：另開連線在背景等，不卡住視窗
+        let ui_weak = ui.as_weak();
+        ui.on_check_update(move || {
+            let ui = ui_weak.unwrap();
+            ui.set_checking_update(true);
+            ui.set_update_status("".into());
+            let ui_weak = ui_weak.clone();
+            std::thread::spawn(move || {
+                let result = match Service::connect() {
+                    Some(mut c) => c
+                        .call(&Request::CheckUpdate, Duration::from_secs(10 * 60))
+                        .map_err(|e| e.to_string()),
+                    None => Err("輸入法服務未執行".into()),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = ui_weak.upgrade() else { return };
+                    ui.set_checking_update(false);
+                    let status = match result {
+                        Ok(Response::Update(Some(v))) => {
+                            ui.set_update_version(v.into());
+                            String::new()
+                        }
+                        Ok(Response::Update(None)) => "已是最新版".into(),
+                        Ok(Response::Error(e)) | Err(e) => format!("檢查失敗：{e}"),
+                        Ok(_) => "檢查失敗：回應種類錯誤".into(),
+                    };
+                    ui.set_update_status(status.into());
+                });
+            });
+        });
+    }
+    {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        ui.on_install_update(move || {
+            let r = state
+                .borrow_mut()
+                .service
+                .call(Request::Command(Command::InstallUpdate));
+            ui_weak.unwrap().set_update_status(
+                match r {
+                    Ok(_) => "正在背景安裝新版".to_string(),
                     Err(e) => e,
                 }
                 .into(),
