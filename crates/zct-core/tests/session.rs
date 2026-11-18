@@ -2610,3 +2610,26 @@ fn before_select_hint_marks_word_before_cursor() {
     let h = tianqi_henhao(select_config(S::Before, A::Forward), 4);
     assert_eq!(h.s.preedit().target, None, "游標在最後不標示");
 }
+
+/// 操作習慣蓋過自己的設定，但不改掉它（切回自訂就恢復）
+#[test]
+fn habit_overrides_selection_settings() {
+    use zct_core::config::{AfterSelect as A, Habit, SelectSide as S};
+    let cases = [
+        (Habit::Windows, (0, 2), 2),
+        (Habit::Macos, (2, 2), 2),
+        (Habit::Custom, (0, 2), 0),
+    ];
+    for (habit, target, cursor) in cases {
+        // 自己設定的是 前選 + 移到詞前面
+        let mut config = select_config(S::Before, A::Backward);
+        config.candidates.habit = habit;
+        let mut h = tianqi_henhao(config.clone(), 2);
+        h.press(Key::Down, Mods::NONE);
+        assert_eq!(h.s.preedit().target, Some(target), "{habit:?}");
+        h.press(Key::Enter, Mods::NONE);
+        assert_eq!(h.s.preedit().cursor, cursor, "{habit:?}");
+        assert_eq!(config.candidates.select, S::Before, "自己的設定還在");
+        assert_eq!(config.candidates.after_select, A::Backward);
+    }
+}

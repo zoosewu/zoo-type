@@ -56,6 +56,17 @@ fn every_config_and_app_field_has_one_shared_descriptor() {
         if field.kind == FieldKind::Choice {
             assert!(field.choices.iter().any(|v| v.value == field.default));
         }
+        if let Some(lock) = &field.lock {
+            let by = win
+                .fields
+                .iter()
+                .find(|f| f.path == lock.by)
+                .expect("lock controller is a field");
+            for (when, value) in &lock.values {
+                assert!(by.choices.iter().any(|c| c.value == *when), "{when}");
+                assert!(field.choices.iter().any(|c| c.value == *value), "{value}");
+            }
+        }
     }
     let keys: BTreeSet<_> = serde_json::to_value(AppRule::default())
         .unwrap()

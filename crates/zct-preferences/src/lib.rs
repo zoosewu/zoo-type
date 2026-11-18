@@ -10,7 +10,7 @@ pub use sync_worker::SyncWorker;
 pub use backend::{
     Action, Backend, Capabilities, DayView, EngineBackend, PhraseView, Reply, accuracy, edit_phrase,
 };
-pub use catalog::{Catalog, Choice, Field, FieldKind, Page, Platform, app_fields, catalog};
+pub use catalog::{Catalog, Choice, Field, FieldKind, Lock, Page, Platform, app_fields, catalog};
 pub use store::{Document, SettingsStore, Snapshot, relocate_directory, validate};
 
 use serde::{Deserialize, Serialize};

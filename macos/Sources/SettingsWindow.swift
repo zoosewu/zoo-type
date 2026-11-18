@@ -110,7 +110,12 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     }
     @objc private func changed(_ sender: Any?) {
         collect(); status.stringValue = "尚未儲存"
-        if model.pages[page]["id"] as? String == "appearance" { updatePreview() }
+        let id = model.pages[page]["id"] as? String
+        if id == "appearance" { updatePreview() }
+        // 換了選項（例如操作習慣）：重畫這一頁，套用鎖定（文字欄位打字時不重畫，免得失去焦點）
+        if sender is NSPopUpButton, model.fields.contains(where: { $0.page == id && $0.lockBy != nil }) {
+            showPage(); status.stringValue = "尚未儲存"
+        }
     }
     func controlTextDidChange(_ notification: Notification) {
         if (notification.object as? NSControl)?.identifier?.rawValue == "phrase-search" {
@@ -123,16 +128,18 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         body.addArrangedSubview(row)
     }
     private func render(_ field: PreferenceField, appIndex: Int? = nil) {
-        let current = appIndex.map { model.apps[$0][field.path] ?? NSNull() } ?? model.value(field.path) ?? field.defaultValue
+        // 被操作習慣鎖定：顯示固定值、不能編輯，也不寫回（自己的設定保留著）
+        let locked = appIndex == nil ? model.lockedValue(field) : nil
+        let current = locked ?? appIndex.map { model.apps[$0][field.path] ?? NSNull() } ?? model.value(field.path) ?? field.defaultValue
         let set: (Any) -> Void = { [weak self] value in
-            guard let self else { return }
+            guard let self, locked == nil else { return }
             if let index = appIndex {
                 var apps = self.model.apps
                 guard apps.indices.contains(index) else { return }
                 apps[index][field.path] = value; self.model.apps = apps
             } else { self.model.set(field.path, value) }
         }
-        let enabled = field.feature.map(model.supports) ?? true
+        let enabled = locked == nil && (field.feature.map(model.supports) ?? true)
         let title = field.label
         switch field.kind {
         case "bool":

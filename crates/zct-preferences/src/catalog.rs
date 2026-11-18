@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use zct_core::config::Habit;
 use zct_core::{AppRule, Config};
 
 use crate::Capabilities;
@@ -39,6 +42,26 @@ pub struct Field {
     pub help: String,
     /// Runtime capability, independent of whether a portable setting may be edited.
     pub feature: Option<String>,
+    /// 另一個欄位選了特定值時，這個欄位固定成對應的值、不能編輯（自己設定的值保留著）
+    pub lock: Option<Lock>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Lock {
+    /// 控制的欄位
+    pub by: String,
+    /// 控制欄位的值 → 這個欄位固定的值；不在表裡的值不鎖定
+    pub values: BTreeMap<String, Value>,
+}
+impl Field {
+    /// 依目前的設定，這個欄位被鎖定成的值；沒有鎖定是 None
+    pub fn locked_value(&self, config: &Value) -> Option<&Value> {
+        let lock = self.lock.as_ref()?;
+        let mut by = config;
+        for key in lock.by.split('.') {
+            by = &by[key];
+        }
+        lock.values.get(by.as_str()?)
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Page {
@@ -86,6 +109,7 @@ fn field(
         integer: value.as_number().is_some_and(|n| !n.is_f64()),
         help: String::new(),
         feature: None,
+        lock: None,
     }
 }
 pub fn catalog(platform: Platform) -> Catalog {
@@ -163,6 +187,17 @@ pub fn catalog(platform: Platform) -> Catalog {
         "general",
         Bool,
         &[],
+    );
+    add(
+        "candidates.habit",
+        "操作習慣",
+        "general",
+        Choice,
+        &[
+            ("自訂", "custom"),
+            ("Windows", "windows"),
+            ("macOS", "macos"),
+        ],
     );
     add(
         "candidates.select",
@@ -316,6 +351,24 @@ pub fn catalog(platform: Platform) -> Catalog {
         }
         if field.path == "update.auto_check" {
             field.feature = Some("auto_update".into());
+        }
+        if field.path == "candidates.select" || field.path == "candidates.after_select" {
+            let values = Habit::PRESETS
+                .iter()
+                .filter_map(|&habit| {
+                    let (side, after) = habit.selection()?;
+                    let value = if field.path == "candidates.select" {
+                        json!(side)
+                    } else {
+                        json!(after)
+                    };
+                    Some((json!(habit).as_str()?.to_owned(), value))
+                })
+                .collect();
+            field.lock = Some(Lock {
+                by: "candidates.habit".into(),
+                values,
+            });
         }
         if field.kind == Hotkey {
             field.help = "留空表示不綁定；ctrl、shift、alt（Option）、win（Command）加按鍵，例如 shift+space。".into();

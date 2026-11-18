@@ -10,6 +10,9 @@ export struct General {
     per-page: int,
     sort-freq: bool,
     language-model: bool,
+    habit: int,             // 0 自訂 1 Windows 2 macOS
+    select: int,            // 0 游標後的詞 1 游標前的詞
+    after-select: int,      // 0 移到詞後面 1 不動 2 移到詞前面
     detect-legacy: bool,
     detect-fullscreen: bool,
     auto-english: bool,
@@ -286,6 +289,8 @@ export struct SharedField {
     options: [string],
     selected: int,
     enabled: bool,
+    // 被操作習慣鎖定：顯示的是固定值，儲存時保留自己的設定
+    locked: bool,
     help: string,
 }
 
@@ -295,6 +300,9 @@ export component SettingsWindow inherits Window {
     in property <string> app-name: "動物園輸入法";
     // 正式版才有自動更新
     in property <bool> official: true;
+    // 各操作習慣固定的選字對象、選字後游標（以 general.habit 為索引，自訂那格不用）
+    in property <[int]> habit-select;
+    in property <[int]> habit-after-select;
     // 檢查更新：已下載、可以安裝的新版版號（空字串是沒有）
     in property <string> update-version;
     in property <string> update-status;
@@ -351,6 +359,8 @@ export component SettingsWindow inherits Window {
     callback restore(string);
     callback refresh();
     callback sync-now();
+    // 全部設定頁的選項變了：重新套用鎖定（操作習慣）
+    callback shared-choice-changed();
     callback check-update();
     callback install-update();
     callback save-api-key(string);
@@ -412,6 +422,17 @@ export component SettingsWindow inherits Window {
                     Note { text: "常用字在前，並參考你的選字紀錄。"; }
                     Row { label: "智慧選字"; Switch { checked <=> root.general.language-model; } }
                     Note { text: "用內建的語言模型判斷整句哪個同音字最通順（例如「下次再說」「在家」），在電腦上執行，不連網路。"; }
+                    Row { label: "操作習慣"; ComboBox { width: 160px; model: ["自訂", "Windows", "macOS"]; current-index <=> root.general.habit; } }
+                    Row {
+                        label: "選字對象";
+                        if root.general.habit == 0: ComboBox { width: 160px; model: ["游標後的詞", "游標前的詞"]; current-index <=> root.general.select; }
+                        if root.general.habit != 0: ComboBox { width: 160px; enabled: false; model: ["游標後的詞", "游標前的詞"]; current-index: root.habit-select[root.general.habit]; }
+                    }
+                    Row {
+                        label: "選字後游標";
+                        if root.general.habit == 0: ComboBox { width: 160px; model: ["移到詞後面", "不動", "移到詞前面"]; current-index <=> root.general.after-select; }
+                        if root.general.habit != 0: ComboBox { width: 160px; enabled: false; model: ["移到詞後面", "不動", "移到詞前面"]; current-index: root.habit-after-select[root.general.habit]; }
+                    }
                     Section { text: "不在打字時不處理按鍵"; }
                     Help { text: "偵測到不是在打字（遊戲、全螢幕影片）時，按鍵直接交給 App，Shift 也不切換中英。下面兩項判斷誤判時可以關掉。"; }
                     Row { label: "舊式程式全螢幕"; Switch { checked <=> root.general.detect-legacy; } }
@@ -752,7 +773,7 @@ export component SettingsWindow inherits Window {
                         Row {
                             label: field.section + " · " + field.label;
                             if field.kind == 0: Switch { checked <=> field.checked; enabled: field.enabled; }
-                            if field.kind == 1: ComboBox { width: 300px; model: field.options; current-index <=> field.selected; enabled: field.enabled; }
+                            if field.kind == 1: ComboBox { width: 300px; model: field.options; current-index <=> field.selected; enabled: field.enabled; selected => { root.shared-choice-changed(); } }
                             if field.kind == 2: LineEdit { width: 360px; text <=> field.value; enabled: field.enabled; }
                         }
                         Help { text: field.path + (field.help == "" ? "" : " — " + field.help); }

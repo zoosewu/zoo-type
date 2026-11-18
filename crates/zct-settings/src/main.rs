@@ -10,7 +10,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use slint::{Model, ModelRc, SharedString, StandardListViewItem, VecModel};
-use zct_core::config::{Color, GameMode, InputMode, Layout, OnFocus, Output, ShiftToggle, Width};
+use zct_core::config::{
+    AfterSelect, Color, GameMode, Habit, InputMode, Layout, OnFocus, Output, SelectSide,
+    ShiftToggle, Width,
+};
 use zct_core::hotkey::{Binding, Hotkey};
 use zct_core::paths::DataRoot;
 use zct_core::symbols::{PrimarySymbols, SecondarySymbols};
@@ -39,6 +42,9 @@ fn general_from(c: &Config) -> General {
         per_page: c.candidates.per_page as i32,
         sort_freq: c.candidates.sort_by_frequency,
         language_model: c.candidates.language_model,
+        habit: habit_index(c.candidates.habit),
+        select: select_index(c.candidates.select),
+        after_select: after_select_index(c.candidates.after_select),
         detect_legacy: c.detect.legacy_fullscreen,
         detect_fullscreen: c.detect.exclusive_fullscreen,
         auto_english: c.mixed.auto_english,
@@ -52,6 +58,38 @@ fn general_from(c: &Config) -> General {
         },
         secondary: (c.punctuation.effective().1 == SecondarySymbols::Layer) as i32,
     }
+}
+
+fn habit_index(h: Habit) -> i32 {
+    match h {
+        Habit::Custom => 0,
+        Habit::Windows => 1,
+        Habit::Macos => 2,
+    }
+}
+
+fn select_index(s: SelectSide) -> i32 {
+    (s == SelectSide::Before) as i32
+}
+
+fn after_select_index(a: AfterSelect) -> i32 {
+    match a {
+        AfterSelect::Forward => 0,
+        AfterSelect::Stay => 1,
+        AfterSelect::Backward => 2,
+    }
+}
+
+/// 各操作習慣固定的（選字對象, 選字後游標）索引，依 `habit_index` 排列
+fn habit_presets() -> (Vec<i32>, Vec<i32>) {
+    [Habit::Custom, Habit::Windows, Habit::Macos]
+        .into_iter()
+        .map(|h| {
+            h.selection().map_or((0, 0), |(side, after)| {
+                (select_index(side), after_select_index(after))
+            })
+        })
+        .unzip()
 }
 
 fn apply_general(c: &mut Config, g: &General) {
@@ -85,6 +123,24 @@ fn apply_general(c: &mut Config, g: &General) {
     c.candidates.per_page = g.per_page.clamp(1, 10) as usize;
     c.candidates.sort_by_frequency = g.sort_freq;
     c.candidates.language_model = g.language_model;
+    c.candidates.habit = match g.habit {
+        1 => Habit::Windows,
+        2 => Habit::Macos,
+        _ => Habit::Custom,
+    };
+    // 操作習慣不是自訂時畫面上的兩項是固定值，不寫回（自己的設定保留著）
+    if c.candidates.habit == Habit::Custom {
+        c.candidates.select = if g.select == 1 {
+            SelectSide::Before
+        } else {
+            SelectSide::After
+        };
+        c.candidates.after_select = match g.after_select {
+            1 => AfterSelect::Stay,
+            2 => AfterSelect::Backward,
+            _ => AfterSelect::Forward,
+        };
+    }
     c.detect.legacy_fullscreen = g.detect_legacy;
     c.detect.exclusive_fullscreen = g.detect_fullscreen;
     c.mixed.auto_english = g.auto_english;
@@ -580,10 +636,13 @@ fn shared_fields(config: &Config) -> Vec<SharedField> {
         .fields
         .iter()
         .map(|field| {
+            let locked = field.locked_value(&values);
             let mut value = &values;
             for key in field.path.split('.') {
                 value = &value[key];
             }
+            // 被操作習慣鎖定：顯示固定值、不能編輯
+            let value = locked.unwrap_or(value);
             let section = catalog
                 .pages
                 .iter()
@@ -617,10 +676,12 @@ fn shared_fields(config: &Config) -> Vec<SharedField> {
                     .iter()
                     .position(|c| &c.value == value)
                     .unwrap_or(0) as i32,
-                enabled: field
-                    .feature
-                    .as_ref()
-                    .is_none_or(|f| capabilities[f].as_bool().unwrap_or(false)),
+                enabled: locked.is_none()
+                    && field
+                        .feature
+                        .as_ref()
+                        .is_none_or(|f| capabilities[f].as_bool().unwrap_or(false)),
+                locked: locked.is_some(),
                 help: field.help.clone().into(),
             }
         })
@@ -637,6 +698,10 @@ fn read_shared_config(config: &Config, rows: &ModelRc<SharedField>) -> Result<Co
         let row = rows.row_data(i).ok_or("設定欄位不存在")?;
         if row.path.as_str() != field.path {
             return Err("設定欄位定義不一致".into());
+        }
+        // 畫面上是操作習慣的固定值：保留原本自己的設定
+        if row.locked {
+            continue;
         }
         let value = match field.kind {
             FieldKind::Bool => serde_json::Value::Bool(row.checked),
@@ -684,6 +749,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_window_title(zct_core::channel::settings_title().into());
     ui.set_app_name(zct_core::channel::CURRENT.name.into());
     ui.set_official(zct_core::channel::CURRENT.id == zct_core::channel::OFFICIAL.id);
+    let (habit_select, habit_after) = habit_presets();
+    ui.set_habit_select(ModelRc::new(VecModel::from(habit_select)));
+    ui.set_habit_after_select(ModelRc::new(VecModel::from(habit_after)));
     // --page N：直接開啟某一頁（系統匣與開發截圖用）
     // --notice 文字：開啟後在狀態列顯示（變更資料位置後重新開啟時用）
     let mut notice: Option<String> = None;
@@ -801,6 +869,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => {
                     ui.set_status(e.into());
                     false
+                }
+            }
+        });
+    }
+
+    // 全部設定頁換了選項：依畫面上的值重新套用鎖定（只更新有鎖定的列，正在操作的那一列不動）
+    {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        ui.on_shared_choice_changed(move || {
+            let ui = ui_weak.unwrap();
+            let rows = ui.get_shared_fields();
+            let st = state.borrow();
+            let Ok(config) = read_shared_config(&st.config, &rows) else {
+                return;
+            };
+            let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
+            for (i, row) in shared_fields(&config).into_iter().enumerate() {
+                if catalog.fields.get(i).is_some_and(|f| f.lock.is_some()) {
+                    rows.set_row_data(i, row);
                 }
             }
         });
@@ -1294,6 +1381,48 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn habit_locks_selection_fields_but_keeps_own_values() {
+        let mut config = Config::default();
+        config.candidates.habit = Habit::Windows;
+        config.candidates.select = SelectSide::After;
+        config.candidates.after_select = AfterSelect::Backward;
+        let row = |rows: &ModelRc<SharedField>, path: &str| {
+            (0..rows.row_count())
+                .filter_map(|i| rows.row_data(i))
+                .find(|r| r.path == path)
+                .unwrap()
+        };
+        let rows = ModelRc::new(VecModel::from(shared_fields(&config)));
+        let select = row(&rows, "candidates.select");
+        assert!(select.locked && !select.enabled);
+        assert_eq!(select.selected, 1, "顯示 Windows 的「游標前的詞」");
+        assert_eq!(row(&rows, "candidates.after_select").selected, 0);
+        // 儲存全部設定：自己的設定不會被固定值蓋掉
+        assert_eq!(read_shared_config(&config, &rows).unwrap(), config);
+        // 一般頁：操作習慣不是自訂時，畫面上的固定值不寫回
+        let mut general = general_from(&config);
+        general.select = 1;
+        general.after_select = 0;
+        let mut saved = config.clone();
+        apply_general(&mut saved, &general);
+        assert_eq!(saved, config);
+        // 切回自訂：恢復自己的設定
+        general.habit = 0;
+        general.select = select_index(config.candidates.select);
+        general.after_select = after_select_index(config.candidates.after_select);
+        apply_general(&mut saved, &general);
+        assert_eq!(saved.candidates.habit, Habit::Custom);
+        let rows = ModelRc::new(VecModel::from(shared_fields(&saved)));
+        let select = row(&rows, "candidates.select");
+        assert!(!select.locked && select.enabled);
+        assert_eq!(select.selected, 0, "自己的「游標後的詞」");
+        // 一般頁顯示的固定值來自核心的操作習慣定義
+        let (sel, after) = habit_presets();
+        assert_eq!((sel[1], after[1]), (1, 0), "Windows");
+        assert_eq!((sel[2], after[2]), (0, 1), "macOS");
+    }
 
     #[test]
     fn config_roundtrips_through_ui_structs() {

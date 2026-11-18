@@ -45,6 +45,14 @@ func selfTest(dictionary: String) throws {
     try check(!preferences.fields.isEmpty && !preferences.appFields.isEmpty
         && preferences.fields.allSatisfy { pageIDs.contains($0.page) && ($0.nullable || preferences.value($0.path) != nil) },
         "共用設定欄位完整性")
+    if let select = preferences.fields.first(where: { $0.path == "candidates.select" }) {
+        preferences.set("candidates.habit", "windows")
+        try check(preferences.lockedValue(select) as? String == "before", "操作習慣鎖定選字對象")
+        preferences.set("candidates.habit", "custom")
+        try check(preferences.lockedValue(select) == nil, "自訂不鎖定")
+    } else {
+        try check(false, "設定目錄有選字對象")
+    }
     let stale = try PreferencesModel(client: runtime)
     preferences.set("theme.font_size", 18.5)
     try preferences.save()

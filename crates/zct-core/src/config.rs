@@ -292,10 +292,52 @@ pub struct CandidateConfig {
     pub sort_by_frequency: bool,
     /// 智慧選字（T0）：用內建的字 n-gram 語言模型挑最通順的首選（系統詞庫有 ngram.bin 時才有作用）
     pub language_model: bool,
-    /// ↓ 選的是游標後面還是前面的詞
+    /// 操作習慣：Windows / macOS 時下面兩項照該平台的注音輸入法，自己設定的值保留著（切回自訂就恢復）
+    pub habit: Habit,
+    /// ↓ 選的是游標後面還是前面的詞（操作習慣是自訂時才有作用，見 [`CandidateConfig::select_side`]）
     pub select: SelectSide,
-    /// 選完字後游標移到哪裡
+    /// 選完字後游標移到哪裡（操作習慣是自訂時才有作用，見 [`CandidateConfig::cursor_after_select`]）
     pub after_select: AfterSelect,
+}
+
+impl CandidateConfig {
+    /// 實際使用的選字對象（套用操作習慣）
+    pub fn select_side(&self) -> SelectSide {
+        self.habit.selection().map_or(self.select, |(side, _)| side)
+    }
+
+    /// 實際使用的選字後游標位置（套用操作習慣）
+    pub fn cursor_after_select(&self) -> AfterSelect {
+        self.habit
+            .selection()
+            .map_or(self.after_select, |(_, after)| after)
+    }
+}
+
+/// 操作習慣
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Habit {
+    /// 各項自己設定
+    #[default]
+    Custom,
+    /// 微軟注音：選游標前的詞，選完游標移到詞後面
+    Windows,
+    /// macOS 注音：選游標後的詞，選完游標不動
+    Macos,
+}
+
+impl Habit {
+    pub const PRESETS: [Habit; 2] = [Habit::Windows, Habit::Macos];
+
+    /// 這個習慣固定的（選字對象, 選字後游標）；自訂是 None
+    pub fn selection(self) -> Option<(SelectSide, AfterSelect)> {
+        match self {
+            Habit::Custom => None,
+            Habit::Windows => Some((SelectSide::Before, AfterSelect::Forward)),
+            Habit::Macos => Some((SelectSide::After, AfterSelect::Stay)),
+        }
+    }
 }
 
 impl Default for CandidateConfig {
@@ -304,6 +346,7 @@ impl Default for CandidateConfig {
             per_page: 9,
             sort_by_frequency: true,
             language_model: true,
+            habit: Habit::default(),
             select: SelectSide::default(),
             after_select: AfterSelect::default(),
         }

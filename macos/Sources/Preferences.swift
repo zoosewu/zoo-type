@@ -18,7 +18,13 @@ struct PreferenceField {
     let integer: Bool
     let help: String
     let feature: String?
+    /// 另一個欄位（操作習慣）選了特定值時，這個欄位固定成對應的值、不能編輯
+    let lockBy: String?
+    let lockValues: [String: Any]
     init(_ value: [String: Any]) {
+        let lock = value["lock"] as? [String: Any]
+        lockBy = lock?["by"] as? String
+        lockValues = lock?["values"] as? [String: Any] ?? [:]
         path = value["path"] as? String ?? ""
         label = value["label"] as? String ?? path
         page = value["page"] as? String ?? ""
@@ -59,6 +65,11 @@ final class PreferencesModel {
     func value(_ path: String) -> Any? {
         let keys = path.split(separator: ".").map(String.init)
         return (config[keys[0]] as? [String: Any])?[keys[1]]
+    }
+    /// 依目前的設定，欄位被鎖定成的值；沒有鎖定是 nil（自己設定的值保留在 config 裡）
+    func lockedValue(_ field: PreferenceField) -> Any? {
+        guard let by = field.lockBy, let key = value(by) as? String else { return nil }
+        return field.lockValues[key]
     }
     func set(_ path: String, _ value: Any) {
         let keys = path.split(separator: ".").map(String.init)
