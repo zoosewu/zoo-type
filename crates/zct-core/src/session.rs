@@ -1209,6 +1209,32 @@ impl Session {
         false
     }
 
+    /// 打到一半的音節按 Backspace：退掉最後一個按鍵，剩下的按鍵重新組一次注音
+    ///
+    /// 照按鍵退（不是照畫面上的注音符號）：原始按鍵和畫面保持一致，補打完按空白一樣能判斷英文；
+    /// 大千重打韻母會取代前一個（`lo` 畫面是 ㄟ），退一鍵就回到 ㄠ。
+    /// 最後是聲調（組不成字、保留著聲調）時，連續的聲調一次退掉。
+    fn backspace_syllable_key(&mut self) {
+        self.english_alt = None;
+        let tone = self
+            .raw
+            .ends_with(|c: char| c.is_ascii() && is_tone(c as u8));
+        if tone {
+            while self
+                .raw
+                .ends_with(|c: char| c.is_ascii() && is_tone(c as u8))
+            {
+                self.raw.pop();
+            }
+        } else {
+            self.raw.pop();
+        }
+        self.editor.cancel_entering_syllable();
+        for b in self.raw.bytes() {
+            self.editor.process_keyevent(ascii_event(b));
+        }
+    }
+
     /// 音節完成：候選窗要附上的另一個選項 —— 自訂縮寫的詞優先，其次是英文單字
     fn complete_segment(&mut self) {
         let raw = std::mem::take(&mut self.raw);
@@ -1277,7 +1303,7 @@ impl Session {
             {
                 self.learn_corrections();
             }
-            // 正在打的注音：Backspace 取消整個音節（「相ㄑㄧㄣ」→「相」）；
+            // 正在打的注音：Backspace 退掉最後一個按鍵（「相ㄑㄧㄣ」→「相ㄑㄧ」）；
             // Enter 連同注音符號一起送出（「我ㄍㄟ」→「我ㄍㄟ」）
             let pending_syllable = !ev.mods.has_command_modifier()
                 && self.emoji.is_none()
@@ -1285,9 +1311,7 @@ impl Session {
                 && self.editor.entering_syllable()
                 && !self.editor.is_selecting();
             if pending_syllable && ev.key == Key::Backspace {
-                self.editor.cancel_entering_syllable();
-                self.raw.clear();
-                self.english_alt = None;
+                self.backspace_syllable_key();
                 return self.finish(r, commit);
             }
             if pending_syllable && ev.key == Key::Enter && !ev.mods.shift {

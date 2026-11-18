@@ -1220,7 +1220,10 @@ fn invalid_syllable_stays_with_bell() {
     // 換一個聲調就直接取代
     h.press(Key::Char(b'4'), Mods::NONE);
     assert_eq!(h.s.preedit().text, "ㄍㄧˋ");
-    // Backspace 清掉整個注音後照常打字
+    // Backspace 退掉聲調，再退兩鍵清空後照常打字
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "ㄍㄧ");
+    h.press(Key::Backspace, Mods::NONE);
     h.press(Key::Backspace, Mods::NONE);
     assert_eq!(h.s.preedit().text, "");
     let r = h.press(Key::Char(b'j'), Mods::NONE); // ㄨ
@@ -1239,19 +1242,44 @@ fn invalid_first_tone_with_space_stays_with_bell() {
 }
 
 #[test]
-fn backspace_cancels_half_typed_syllable() {
-    // 相ㄑㄧㄣ + Backspace → 相
+fn backspace_removes_last_key_of_half_typed_syllable() {
+    // 相ㄑㄧㄣ：Backspace 一次退一個按鍵
     let mut h = Harness::new();
     h.type_str("vu; ");
     let first = h.s.preedit().text;
     h.type_str("fup");
     assert_eq!(h.s.preedit().text, format!("{first}ㄑㄧㄣ"));
-    let r = h.press(Key::Backspace, Mods::NONE);
-    assert!(r.eaten);
-    assert_eq!(h.s.preedit().text, first);
+    for want in ["ㄑㄧ", "ㄑ", ""] {
+        let r = h.press(Key::Backspace, Mods::NONE);
+        assert!(r.eaten);
+        assert_eq!(h.s.preedit().text, format!("{first}{want}"));
+    }
     // 沒有注音時 Backspace 照常刪前一個字
     h.press(Key::Backspace, Mods::NONE);
     assert_eq!(h.s.preedit().text, "");
+}
+
+#[test]
+fn backspace_fixes_typo_in_english_word_before_space() {
+    // 打錯一個字母：退一鍵、補打，按空白照樣變英文
+    for (typo, fix, want) in [("lovw", "e ", "我 love "), ("hellp", "o ", "我 hello ")] {
+        let mut h = Harness::new();
+        english_commit(&mut h, "ji3 ");
+        english_commit(&mut h, typo);
+        h.press(Key::Backspace, Mods::NONE);
+        english_commit(&mut h, fix);
+        assert_eq!(h.s.preedit().text, want, "{typo}");
+    }
+}
+
+#[test]
+fn backspace_undoes_replaced_final_key_by_key() {
+    // 大千重打韻母會取代：ㄠ（l）再按 o 變 ㄟ；退一鍵回到 ㄠ
+    let mut h = Harness::new();
+    h.type_str("lo");
+    assert_eq!(h.s.preedit().text, "ㄟ");
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "ㄠ");
 }
 
 #[test]
