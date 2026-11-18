@@ -271,6 +271,10 @@ pub struct MixedConfig {
     pub english_candidate: bool,
     /// E：中英文之間自動加空格（盤古之白）
     pub auto_space: bool,
+    /// 打字中組字區顯示按下的字母（`我 lov`），注音另外顯示在旁邊的小視窗，打完就消失
+    pub show_keys: bool,
+    /// 顯示按鍵字母時，小視窗除了注音也列出這個注音常用的字
+    pub typing_candidates: bool,
 }
 
 impl Default for MixedConfig {
@@ -280,6 +284,8 @@ impl Default for MixedConfig {
             english_candidate: true,
             // 空白由使用者自己輸入（使用者回饋）
             auto_space: false,
+            show_keys: false,
+            typing_candidates: false,
         }
     }
 }

@@ -54,6 +54,26 @@ pub struct CandidatePage {
     pub first_column: usize,
 }
 
+impl CandidatePage {
+    /// `highlight` 是這個值：只顯示、不能選（打字時的注音小視窗），不畫數字與選擇框。
+    /// 用既有欄位表示，不改 IPC 的資料格式
+    pub const DISPLAY_ONLY: usize = usize::MAX;
+
+    pub fn display_only(items: Vec<String>) -> CandidatePage {
+        CandidatePage {
+            items,
+            page: 0,
+            total_pages: 1,
+            highlight: CandidatePage::DISPLAY_ONLY,
+            ..CandidatePage::default()
+        }
+    }
+
+    pub fn is_display_only(&self) -> bool {
+        self.highlight == CandidatePage::DISPLAY_ONLY
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct KeyResult {
     /// `false` → 平台層要把按鍵交還給 App
@@ -2112,9 +2132,40 @@ impl Session {
         }
     }
 
+    /// 顯示按鍵字母：打字中的音節在組字區顯示成按下的字母，注音移到小視窗
+    fn showing_keys(&self) -> bool {
+        self.mixed.show_keys
+            && self.editor.entering_syllable()
+            && !self.editor.is_selecting()
+            && !self.raw.is_empty()
+    }
+
+    /// 打字時的小視窗：注音（開了「列出可能的字」時再加上這個注音常用的字）
+    fn typing_popup(&self) -> Option<CandidatePage> {
+        if !self.showing_keys() {
+            return None;
+        }
+        let bopomofo = self.editor.syllable_buffer_display();
+        let mut items = vec![bopomofo.clone()];
+        if self.mixed.typing_candidates {
+            let n = self.per_page.saturating_sub(1).max(1);
+            items.extend(
+                self.engine
+                    .chars_for_syllable(&bopomofo, n)
+                    .into_iter()
+                    .map(String::from),
+            );
+        }
+        Some(CandidatePage::display_only(items))
+    }
+
     pub fn preedit(&self) -> Preedit {
         let converted: Vec<char> = self.editor.display().chars().collect();
-        let syllable = self.editor.syllable_buffer_display();
+        let syllable = if self.showing_keys() {
+            self.raw.clone()
+        } else {
+            self.editor.syllable_buffer_display()
+        };
         // 前選中 chewing 的游標在詞的最後一個字上，畫面上的游標維持在按 ↓ 的位置
         let cursor = match self.select_origin {
             Some(origin) if self.select_rear => origin,
@@ -2182,7 +2233,7 @@ impl Session {
             return Some(pick.list.page(self.per_page));
         }
         if !self.editor.is_selecting() {
-            return None;
+            return self.typing_popup();
         }
         if self.extras_page {
             let extras = self.extras();
@@ -2204,14 +2255,15 @@ impl Session {
         let page = menu.sel / per_page;
         let slice = &menu.items[(page * per_page).min(menu.items.len())
             ..((page + 1) * per_page).min(menu.items.len())];
-        let start = self.editor.cursor();
         let symbols = self.editor.symbols();
         let pinned = slice
             .iter()
             .map(|it| {
+                let n = it.word.chars().count();
+                let start = self.phrase_start(n);
                 it.kind != MenuKind::English
                     && symbols
-                        .get(start..start + it.word.chars().count())
+                        .get(start..start + n)
                         .and_then(|s| {
                             s.iter()
                                 .map(|s| s.to_syllable())

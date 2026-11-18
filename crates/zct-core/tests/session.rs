@@ -2633,3 +2633,71 @@ fn habit_overrides_selection_settings() {
         assert_eq!(config.candidates.after_select, A::Backward);
     }
 }
+
+fn show_keys_config(typing_candidates: bool) -> Config {
+    let mut c = Config::default();
+    c.mixed.show_keys = true;
+    c.mixed.typing_candidates = typing_candidates;
+    c
+}
+
+/// 顯示按鍵字母：打字中組字區是字母，注音在只顯示的小視窗；打完就消失
+#[test]
+fn show_keys_puts_letters_in_preedit_and_bopomofo_in_popup() {
+    // （按鍵, 組字區, 小視窗）
+    let steps = [
+        ("ji3", "我", None),
+        (" ", "我 ", None),
+        ("l", "我 l", Some("ㄠ")),
+        ("o", "我 lo", Some("ㄟ")),
+        ("v", "我 lov", Some("ㄒㄟ")),
+        ("e", "我 love", Some("ㄍㄟ")),
+        (" ", "我 love ", None),
+        ("su", "我 love su", Some("ㄋㄧ")),
+        ("3", "我 love 你", None),
+    ];
+    let mut h = Harness::with_config(show_keys_config(false));
+    for (keys, preedit, popup) in steps {
+        english_commit(&mut h, keys);
+        assert_eq!(h.s.preedit().text, preedit, "{keys}");
+        let page = h.s.candidates();
+        match popup {
+            Some(b) => {
+                let page = page.unwrap_or_else(|| panic!("{keys}：沒有小視窗"));
+                assert!(page.is_display_only());
+                assert_eq!(page.items, vec![b.to_string()], "{keys}");
+            }
+            None => assert!(page.is_none(), "{keys}：小視窗應該消失"),
+        }
+    }
+}
+
+#[test]
+fn show_keys_backspace_removes_one_letter() {
+    let mut h = Harness::with_config(show_keys_config(false));
+    english_commit(&mut h, "lovw");
+    assert_eq!(h.s.preedit().text, "lovw");
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "lov");
+    assert_eq!(h.s.preedit().cursor, 3);
+}
+
+#[test]
+fn typing_candidates_list_common_chars_after_bopomofo() {
+    let mut h = Harness::with_config(show_keys_config(true));
+    h.s.engine().char_usage('一', "ㄧ"); // 等詞庫統計載入
+    english_commit(&mut h, "su");
+    let page = h.s.candidates().expect("小視窗");
+    assert!(page.is_display_only());
+    assert_eq!(page.items[0], "ㄋㄧ");
+    assert!(page.items.len() > 1, "{:?}", page.items);
+    assert!(page.items.iter().any(|w| w == "你"), "{:?}", page.items);
+}
+
+#[test]
+fn show_keys_off_keeps_bopomofo_in_preedit() {
+    let mut h = Harness::new();
+    english_commit(&mut h, "su");
+    assert_eq!(h.s.preedit().text, "ㄋㄧ");
+    assert!(h.s.candidates().is_none());
+}

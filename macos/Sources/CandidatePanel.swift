@@ -158,10 +158,13 @@ final class CandidatePanel: NSPanel {
     func show(result: EngineResult, caret: NSRect, theme: CandidateTheme, showComposition: Bool) {
         noticeTimer?.invalidate()
         let preedit = showComposition ? result.preedit : ""
-        guard !preedit.isEmpty || !result.candidates.isEmpty || !result.notice.isEmpty else { orderOut(nil); return }
-        let size = candidateView.update(items: result.candidates, pinned: result.pinned, columns: result.columns,
+        // 打字時的注音小視窗：一列文字，沒有數字與選擇框
+        let items = result.displayOnly ? [] : result.candidates
+        let notice = result.displayOnly ? result.candidates.joined(separator: "  ") : result.notice
+        guard !preedit.isEmpty || !items.isEmpty || !notice.isEmpty else { orderOut(nil); return }
+        let size = candidateView.update(items: items, pinned: result.pinned, columns: result.columns,
                                         firstColumn: result.firstColumn, highlight: result.highlight, page: result.page,
-                                        totalPages: result.totalPages, preedit: preedit, notice: result.notice, theme: theme)
+                                        totalPages: result.totalPages, preedit: preedit, notice: notice, theme: theme)
         let screen = NSScreen.screens.first { $0.frame.intersects(caret) } ?? NSScreen.main
         let bounds = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         var origin = NSPoint(x: caret.minX, y: caret.minY - size.height - 4)
@@ -170,7 +173,7 @@ final class CandidatePanel: NSPanel {
         origin.y = max(bounds.minY, min(origin.y, bounds.maxY - size.height))
         setFrame(NSRect(origin: origin, size: size), display: true)
         orderFrontRegardless()
-        if preedit.isEmpty && result.candidates.isEmpty {
+        if preedit.isEmpty && items.isEmpty && !result.displayOnly {
             noticeTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.orderOut(nil) }
         }
     }

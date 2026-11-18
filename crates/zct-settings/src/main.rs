@@ -50,6 +50,8 @@ fn general_from(c: &Config) -> General {
         auto_english: c.mixed.auto_english,
         english_candidate: c.mixed.english_candidate,
         auto_space: c.mixed.auto_space,
+        show_keys: c.mixed.show_keys,
+        typing_candidates: c.mixed.typing_candidates,
         auto_update: c.update.auto_check,
         primary: match c.punctuation.effective().0 {
             PrimarySymbols::Backtick => 0,
@@ -146,6 +148,8 @@ fn apply_general(c: &mut Config, g: &General) {
     c.mixed.auto_english = g.auto_english;
     c.mixed.english_candidate = g.english_candidate;
     c.mixed.auto_space = g.auto_space;
+    c.mixed.show_keys = g.show_keys;
+    c.mixed.typing_candidates = g.typing_candidates;
     c.update.auto_check = g.auto_update;
     c.punctuation.primary = match g.primary {
         1 => PrimarySymbols::RightAlt,

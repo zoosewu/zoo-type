@@ -239,6 +239,20 @@ pub fn catalog(platform: Platform) -> Catalog {
         &[],
     );
     add(
+        "mixed.show_keys",
+        "組字區顯示按鍵字母",
+        "general",
+        Bool,
+        &[],
+    );
+    add(
+        "mixed.typing_candidates",
+        "打字時列出可能的字",
+        "general",
+        Bool,
+        &[],
+    );
+    add(
         "detect.legacy_fullscreen",
         "偵測舊式全螢幕程式",
         "general",

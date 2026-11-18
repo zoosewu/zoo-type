@@ -109,6 +109,9 @@ pub struct ZctResult {
     pub reconvert: bool,
     /// 0 = Chinese, 1 = English.
     pub mode: u32,
+    /// The candidate items are a display-only typing popup (bopomofo while keys are shown as
+    /// letters): no numbers, no selection; stays until the syllable is finished.
+    pub display_only: bool,
 }
 
 fn utf16_offset(s: &str, chars: usize) -> usize {
@@ -163,7 +166,9 @@ impl ZctSession {
                 })
                 .collect();
             out.first_column = c.first_column;
-            out.highlight = c.highlight;
+            out.display_only = c.highlight == zct_core::CandidatePage::DISPLAY_ONLY;
+            // DISPLAY_ONLY is usize::MAX, which would trap when Swift converts it to Int
+            out.highlight = if out.display_only { 0 } else { c.highlight };
             out.page = c.page;
             out.total_pages = c.total_pages;
         }

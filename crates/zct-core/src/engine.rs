@@ -353,6 +353,18 @@ impl Engine {
     /// 語言模型給破音字的單字分數常常偏低（「重（ㄔㄨㄥˊ）」排在罕用字之後），
     /// 因為使用量都記在詞裡（重新、重複…）；改用「含有這個字這個讀音的詞的頻率加總」排序單字候選。
     /// 沒有 tsi.csv 時全部是 0（維持 chewing 原本的順序）。
+    /// 這個注音常用的字（最多 `n` 個）；詞庫統計還在背景載入時是空的，不讓按鍵等待
+    pub fn chars_for_syllable(&self, syllable: &str, n: usize) -> Vec<char> {
+        self.usage.get().map_or_else(Vec::new, |u| {
+            u.chars_for(syllable)
+                .iter()
+                .copied()
+                .filter(|&c| self.simplified_only(c).is_none())
+                .take(n)
+                .collect()
+        })
+    }
+
     pub fn char_usage(&self, c: char, reading: &str) -> u64 {
         self.usage().char_usage(c, reading)
     }

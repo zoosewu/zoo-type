@@ -379,6 +379,7 @@ impl Ui {
             return Ok(());
         };
         let (runs, highlight, dip) = match self.theme.layout {
+            _ if page.is_display_only() => self.layout_plain(page)?,
             _ if !page.columns.is_empty() => self.layout_columns(page)?,
             Layout::Vertical => self.layout_vertical(page)?,
             Layout::Horizontal => self.layout_horizontal(page)?,
@@ -388,6 +389,24 @@ impl Ui {
         cand.highlight = highlight;
         place(cand, anchor, dip)?;
         render(d2d, &colors, cand)
+    }
+
+    /// 只顯示（打字時的注音小視窗）：「ㄒㄟ  誰 雖 …」一列，沒有數字與選擇框
+    fn layout_plain(&self, page: &CandidatePage) -> Result<Laid> {
+        let text = page.items.join("  ");
+        let (layout, w, h) = self.layout(&text, &self.text_fmt)?;
+        let row_h = h + ROW_PAD_Y * 2.0;
+        let runs = vec![Run {
+            layout,
+            x: PAD_X + ROW_PAD_X,
+            y: PAD_Y + ROW_PAD_Y,
+            dim: false,
+        }];
+        Ok((
+            runs,
+            None,
+            (PAD_X * 2.0 + ROW_PAD_X * 2.0 + w, row_h + PAD_Y * 2.0),
+        ))
     }
 
     /// 橫式：「1 天 2 添 …」排成一列，選擇框框住目前項目，最後是頁碼

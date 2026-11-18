@@ -18,6 +18,8 @@ export struct General {
     auto-english: bool,
     english-candidate: bool,
     auto-space: bool,
+    show-keys: bool,
+    typing-candidates: bool,
     auto-update: bool,
     primary: int,           // 主要符號：0 ` + 鍵 1 右 Alt + 鍵 2 兩種都可以
     secondary: int,         // 次要符號：0 Shift + 鍵 1 ` / 右 Alt + Shift + 鍵
@@ -446,6 +448,10 @@ export component SettingsWindow inherits Window {
                     Note { text: "按鍵也是英文單字時，候選窗多一個英文選項：fu → 七、fu。"; }
                     Row { label: "中英之間自動空格"; Switch { checked <=> root.general.auto-space; } }
                     Note { text: "中文與英文、數字之間加一個空格。"; }
+                    Row { label: "組字區顯示按鍵字母"; Switch { checked <=> root.general.show-keys; } }
+                    Note { text: "打字時組字區顯示按下的字母（我 lov），注音顯示在旁邊的小視窗，打完就消失。"; }
+                    Row { label: "列出可能的字"; Switch { checked <=> root.general.typing-candidates; enabled: root.general.show-keys; } }
+                    Note { text: "小視窗除了注音，也列出這個注音常用的字。"; }
                 }
             }
 

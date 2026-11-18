@@ -17,6 +17,8 @@ struct EngineResult {
     let bell: Bool
     let reconvert: Bool
     let mode: UInt32
+    /// 打字時的注音小視窗：只顯示、不能選，打完注音就消失
+    let displayOnly: Bool
 
     init(_ value: ZctResult) throws {
         guard value.ok else { throw EngineError.current }
@@ -40,6 +42,7 @@ struct EngineResult {
         bell = value.bell
         reconvert = value.reconvert
         mode = value.mode
+        displayOnly = value.display_only
     }
 }
 
