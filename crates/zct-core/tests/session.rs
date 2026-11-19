@@ -2718,3 +2718,14 @@ fn new_config_session_keeps_mode_and_shows_keys() {
     assert_eq!(fresh.s.preedit().text, "l");
     assert!(!fresh.s.is_idle());
 }
+
+#[test]
+fn brand_names_become_english() {
+    // 一般字典沒有品牌名：「測試 google」曾變成「測試 高」
+    for word in ["google", "facebook", "github", "iphone"] {
+        let mut h = Harness::new();
+        h.type_str(&format!("hk4g4 {word} "));
+        let text = h.s.preedit().text;
+        assert!(text.ends_with(&format!("{word} ")), "{word}: {text}");
+    }
+}
