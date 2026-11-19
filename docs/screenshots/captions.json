@@ -1,0 +1,6 @@
+{
+  "01-candidates": { "zh-TW": "打字時的候選窗", "en": "Candidate window while typing" },
+  "02-typing-popup": { "zh-TW": "組字區顯示按下的字母，注音與常用字顯示在小視窗", "en": "Composition shows the typed keys; bopomofo and common characters appear in a popup" },
+  "03-settings": { "zh-TW": "設定：一般", "en": "Settings: General" },
+  "04-appearance": { "zh-TW": "設定：外觀，候選窗即時預覽", "en": "Settings: Appearance with a live candidate window preview" }
+}
