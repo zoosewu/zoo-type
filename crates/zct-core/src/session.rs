@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::apps::{AppRule, Effective};
 use crate::config::{
-    AfterSelect, Config, GameMode, HotkeyConfig, InputMode, MixedConfig, OnFocus, Output,
-    PunctuationTable, SelectSide, Width,
+    AfterSelect, Config, EnglishWords, GameMode, HotkeyConfig, InputMode, MixedConfig, OnFocus,
+    Output, PunctuationTable, SelectSide, TypingDisplay, Width,
 };
 use crate::engine::Engine;
 use crate::hotkey::Binding;
@@ -274,6 +274,8 @@ pub struct Session {
     raw: String,
     /// 目前這段按鍵的位置可能是英文：組字開頭，或緊接在空白之後（「我 love」可以，「我love」不行）
     raw_english_ok: bool,
+    /// 英文優先：組不成注音而轉成英文的單字還在打（按鍵都是字元本身，空白結束）
+    english_word: bool,
     /// B：剛完成的音節按鍵也是英文單字 → 候選窗附上的英文
     english_alt: Option<String>,
     /// E：游標前最後一個字（本輸入法送出的，或交給 App 的按鍵）；未知時為 None
@@ -346,6 +348,7 @@ impl Session {
             mixed: opts.config.mixed.clone(),
             raw: String::new(),
             raw_english_ok: false,
+            english_word: false,
             english_alt: None,
             last_char: None,
             emoji: None,
@@ -682,11 +685,11 @@ impl Session {
 
     /// C：按空白時，剛打的按鍵是英文 → 回傳該單字
     ///
-    /// 只在空白鍵判斷，而且必須是單字表中的單字、組不成注音；
-    /// 亂打或打錯的注音一律當中文（組不成字就保留並提示），不會自動變英文。
+    /// 只在空白鍵判斷，而且必須是單字表中的單字、組不成注音。
+    /// 中文優先時亂打或打錯的注音一律當中文（組不成字就保留並提示）；英文優先另見 `english_first_start`。
     fn auto_english(&self, ev: &KeyEvent) -> Option<String> {
         let raw = &self.raw;
-        let ok = self.mixed.auto_english
+        let ok = self.mixed.english != EnglishWords::Off
             && ev.key == Key::Space
             && !ev.mods.shift
             && !self.editor.is_selecting()
@@ -694,6 +697,80 @@ impl Session {
             && self.raw_english_ok
             && self.engine.auto_english(raw);
         ok.then(|| raw.clone())
+    }
+
+    /// 英文優先：這個鍵讓目前的音節組不成注音（`l` `o` → ㄠ 後面不能再接韻母）
+    fn english_first_start(&self, ev: &KeyEvent, was_selecting: bool) -> bool {
+        let Key::Char(c) = ev.key else { return false };
+        self.mixed.english == EnglishWords::EnglishFirst
+            && self.mode == InputMode::Chinese
+            && !was_selecting
+            && !ev.mods.shift
+            && !ev.mods.has_command_modifier()
+            && self.editor.entering_syllable()
+            && !self.raw.is_empty()
+            && crate::mixed::is_bopomofo_key(c)
+            && !crate::mixed::is_syllable(&format!("{}{}", self.raw, c as char))
+    }
+
+    /// 英文優先：把這個音節的按鍵換成英文字母放進組字區，接著打的鍵都是字元本身
+    fn start_english_word(&mut self, keys: &str, ended: bool) {
+        self.editor.cancel_entering_syllable();
+        self.raw.clear();
+        self.english_alt = None;
+        self.insert_latin(keys);
+        self.english_word = !ended;
+    }
+
+    /// 英文優先轉出的單字打到一半：字母、數字、`, . / ; -`、聲調鍵都是字元本身；
+    /// 空白結束這個單字，Backspace 退一個字元，其他鍵結束單字後照常處理（回傳 false）
+    fn english_word_key(&mut self, ev: &KeyEvent) -> bool {
+        if !self.english_word {
+            return false;
+        }
+        if ev.mods.has_command_modifier()
+            || self.mode != InputMode::Chinese
+            || self.editor.is_selecting()
+            || self.editor.entering_syllable()
+        {
+            self.english_word = false;
+            return false;
+        }
+        match ev.key {
+            Key::Char(c) => {
+                let c = if c.is_ascii_alphabetic() {
+                    if ev.mods.shift ^ ev.mods.caps_lock {
+                        c.to_ascii_uppercase()
+                    } else {
+                        c
+                    }
+                } else if ev.mods.shift {
+                    shifted(c)
+                } else {
+                    c
+                };
+                self.insert_latin(&(c as char).to_string());
+            }
+            Key::Numpad(c) => self.insert_latin(&(c as char).to_string()),
+            Key::Space => {
+                self.insert_latin(" ");
+                self.english_word = false;
+            }
+            Key::Backspace => {
+                self.chewing_key(Key::Backspace);
+                let c = self.editor.cursor();
+                let in_word = c > 0
+                    && self.editor.symbols()[c - 1]
+                        .to_char()
+                        .is_some_and(|s| s.len() == 1 && s.as_bytes()[0].is_ascii_graphic());
+                self.english_word = in_word;
+            }
+            _ => {
+                self.english_word = false;
+                return false;
+            }
+        }
+        true
     }
 
     /// 自訂縮寫：按空白時，剛打的縮寫換成詞（回傳要刪掉的字母數與詞）
@@ -1373,6 +1450,7 @@ impl Session {
             } else {
                 // 組字中只切換中英、不送出：英文與數字接著放進組字區（「第」Shift「6」Shift「章」）
                 self.end_latin_word();
+                self.english_word = false;
                 if self.editor.is_selecting() {
                     let _ = self.editor.cancel_selecting();
                 }
@@ -1433,7 +1511,7 @@ impl Session {
                     return self.finish(r, commit);
                 }
             }
-            if self.ai_key(ev, &mut commit) {
+            if self.english_word_key(ev) || self.ai_key(ev, &mut commit) {
             } else if self.emoji.is_some() {
                 self.emoji_key(ev, &mut commit);
             } else if self.symbol_prefix_key(ev, &mut r) {
@@ -1534,6 +1612,16 @@ impl Session {
                 let len_before = self.editor.len();
                 let was_entering = self.editor.entering_syllable();
                 let raw_before = self.raw.clone();
+                if self.english_first_start(ev, was_selecting) {
+                    let mut keys = std::mem::take(&mut self.raw);
+                    if let Key::Char(c) = key {
+                        keys.push(c as char);
+                    }
+                    self.start_english_word(&keys, false);
+                    let text = self.take_commit();
+                    self.join(&mut commit, &text);
+                    return self.finish(r, commit);
+                }
                 let completed = self.track_raw(ev, was_selecting);
                 match to_chewing(key, ev.mods) {
                     Some(chewing_ev) => {
@@ -1548,6 +1636,23 @@ impl Session {
                             && self.editor.len() == len_before
                             && self.editor.display_commit().is_empty()
                         {
+                            if self.mixed.english == EnglishWords::EnglishFirst
+                                && self.mode == InputMode::Chinese
+                            {
+                                // 英文優先：組不成字（ㄍㄧˇ）就是英文，聲調鍵是字元本身；空白結束這個單字
+                                let mut keys = raw_before;
+                                let ended = key == Key::Space;
+                                match key {
+                                    Key::Char(c) => keys.push(c as char),
+                                    Key::Space => keys.push(' '),
+                                    _ => {}
+                                }
+                                self.start_english_word(&keys, ended);
+                                r.eaten = true;
+                                let text = self.take_commit();
+                                self.join(&mut commit, &text);
+                                return self.finish(r, commit);
+                            }
                             // 原始按鍵維持和畫面上的注音一致（聲調鍵也留著）
                             self.raw = raw_before;
                             if let Key::Char(c) = key {
@@ -1570,6 +1675,7 @@ impl Session {
             if !self.is_composing() {
                 self.raw.clear();
                 self.english_alt = None;
+                self.english_word = false;
             }
         }
         if !r.eaten {
@@ -2107,6 +2213,7 @@ impl Session {
 
     /// 丟棄組字內容與 Shift 狀態（App 中止組字時）
     pub fn reset(&mut self) {
+        self.english_word = false;
         self.editor.clear();
         self.shift.reset();
         self.highlight = 0;
@@ -2147,7 +2254,7 @@ impl Session {
 
     /// 顯示按鍵字母：打字中的音節在組字區顯示成按下的字母，注音移到小視窗
     fn showing_keys(&self) -> bool {
-        self.mixed.show_keys
+        self.mixed.typing != TypingDisplay::Bopomofo
             && self.editor.entering_syllable()
             && !self.editor.is_selecting()
             && !self.raw.is_empty()
@@ -2160,7 +2267,7 @@ impl Session {
         }
         let bopomofo = self.editor.syllable_buffer_display();
         let mut items = vec![bopomofo.clone()];
-        if self.mixed.typing_candidates {
+        if self.mixed.typing == TypingDisplay::KeysAndChars {
             let n = self.per_page.saturating_sub(1).max(1);
             items.extend(
                 self.engine

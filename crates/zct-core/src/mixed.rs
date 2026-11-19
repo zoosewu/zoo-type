@@ -33,6 +33,11 @@ fn kind(c: u8) -> Option<Kind> {
     })
 }
 
+/// 大千排列的注音鍵（聲調以外）
+pub fn is_bopomofo_key(c: u8) -> bool {
+    kind(c).is_some_and(|k| k != Kind::Tone)
+}
+
 /// 這串按鍵（不含聲調）能不能組成「一個」合法結構的注音音節：聲母? 介音? 韻母?，依序且各至多一個
 pub fn is_syllable(keys: &str) -> bool {
     let mut last: Option<Kind> = None;

@@ -18,10 +18,13 @@ struct PreferenceField {
     let integer: Bool
     let help: String
     let feature: String?
-    /// 另一個欄位（操作習慣）選了特定值時，這個欄位固定成對應的值、不能編輯
+    /// 另一個欄位（操作習慣）選了特定值時，這個欄位固定成對應的值、不顯示
     let lockBy: String?
     let lockValues: [String: Any]
+    /// 少用的設定：收在頁面最後預設收合的「進階」
+    let advanced: Bool
     init(_ value: [String: Any]) {
+        advanced = value["advanced"] as? Bool ?? false
         let lock = value["lock"] as? [String: Any]
         lockBy = lock?["by"] as? String
         lockValues = lock?["values"] as? [String: Any] ?? [:]

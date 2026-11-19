@@ -1422,7 +1422,7 @@ fn c_does_not_trigger_on_valid_syllable_or_non_word() {
 #[test]
 fn c_can_be_disabled() {
     let mut c = no_auto_space();
-    c.mixed.auto_english = false;
+    c.mixed.english = zct_core::config::EnglishWords::Off;
     let mut h = Harness::with_config(c);
     assert_eq!(english_commit(&mut h, "hello "), None);
 }
@@ -2636,8 +2636,11 @@ fn habit_overrides_selection_settings() {
 
 fn show_keys_config(typing_candidates: bool) -> Config {
     let mut c = Config::default();
-    c.mixed.show_keys = true;
-    c.mixed.typing_candidates = typing_candidates;
+    c.mixed.typing = if typing_candidates {
+        zct_core::config::TypingDisplay::KeysAndChars
+    } else {
+        zct_core::config::TypingDisplay::Keys
+    };
     c
 }
 
@@ -2728,4 +2731,73 @@ fn brand_names_become_english() {
         let text = h.s.preedit().text;
         assert!(text.ends_with(&format!("{word} ")), "{word}: {text}");
     }
+}
+
+fn english_first() -> Harness {
+    let mut c = Config::default();
+    c.mixed.english = zct_core::config::EnglishWords::EnglishFirst;
+    Harness::with_config(c)
+}
+
+/// 英文優先：組不成注音就轉英文，之後的按鍵都是字元本身，空白結束單字；輸入法維持中文模式
+#[test]
+fn english_first_switches_on_invalid_bopomofo() {
+    // （按鍵, 組字區）
+    let cases = [
+        ("love ", "love "),               // ㄠ 後面接 ㄟ：結構不可能
+        ("lovr ", "lovr "),               // 打錯的字照打
+        ("lo,./;-3467 ", "lo,./;-3467 "), // 注音與聲調鍵是字元本身
+        ("eu3", "eu3"),                   // ㄍㄧˇ 沒有字
+        ("eu3x ", "eu3x "),
+        ("eu ", "eu "),    // ㄍㄧ 一聲也沒有字：空白結束單字
+        ("hk4g4", "測試"), // 合法注音照常
+        ("hk4g4 google ", "測試 google "),
+        ("love su3", "love 你"), // 單字結束後回到注音
+    ];
+    for (keys, want) in cases {
+        let mut h = english_first();
+        h.type_str(keys);
+        assert_eq!(h.s.preedit().text, want, "{keys}");
+        assert_eq!(h.s.mode(), InputMode::Chinese, "{keys}");
+    }
+}
+
+#[test]
+fn english_first_backspace_removes_one_char_while_typing() {
+    let mut h = english_first();
+    h.type_str("lov");
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "lo");
+    h.type_str("ve ");
+    assert_eq!(h.s.preedit().text, "love ");
+
+    // 單字整個退掉後回到注音
+    let mut h = english_first();
+    h.type_str("lo");
+    h.press(Key::Backspace, Mods::NONE);
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "");
+    h.type_str("su3");
+    assert_eq!(h.s.preedit().text, "你");
+}
+
+#[test]
+fn english_first_word_keeps_shift_case_and_ends_on_other_keys() {
+    let mut h = english_first();
+    h.type_str("lo");
+    h.press(Key::Char(b'v'), Mods::shift());
+    assert_eq!(h.s.preedit().text, "loV");
+    // Enter 送出整句
+    let r = h.press(Key::Enter, Mods::NONE);
+    assert_eq!(r.commit.as_deref(), Some("loV"));
+    assert_eq!(h.s.mode(), InputMode::Chinese);
+}
+
+#[test]
+fn chinese_first_keeps_invalid_bopomofo() {
+    let mut h = Harness::new();
+    h.type_str("lo");
+    assert_ne!(h.s.preedit().text, "lo");
+    h.type_str("vr ");
+    assert!(!h.s.preedit().text.contains("lovr"));
 }

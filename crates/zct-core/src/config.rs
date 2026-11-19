@@ -188,19 +188,32 @@ impl Default for HotkeyConfig {
 ///
 /// 系統明確告知的情況（焦點不在輸入欄位、App 停用輸入法）一律偵測，不受這裡的開關影響。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(from = "DetectFile")]
 pub struct DetectConfig {
-    /// 不支援 TSF 的舊式程式 + 沒有系統游標 + 視窗蓋滿螢幕（無邊框全螢幕的 DirectX 遊戲）
-    pub legacy_fullscreen: bool,
-    /// 有程式獨佔全螢幕（老式全螢幕遊戲）
-    pub exclusive_fullscreen: bool,
+    /// 全螢幕遊戲：有程式獨佔全螢幕，或不支援 TSF 的舊式程式沒有系統游標又蓋滿螢幕（DirectX 遊戲）
+    pub fullscreen: bool,
 }
 
 impl Default for DetectConfig {
     fn default() -> Self {
+        DetectConfig { fullscreen: true }
+    }
+}
+
+/// 檔案中的 `[detect]`：0.1.4 以前分成兩個開關，任一關掉就關
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct DetectFile {
+    fullscreen: Option<bool>,
+    legacy_fullscreen: Option<bool>,
+    exclusive_fullscreen: Option<bool>,
+}
+
+impl From<DetectFile> for DetectConfig {
+    fn from(f: DetectFile) -> Self {
+        let old = f.legacy_fullscreen.unwrap_or(true) && f.exclusive_fullscreen.unwrap_or(true);
         DetectConfig {
-            legacy_fullscreen: true,
-            exclusive_fullscreen: true,
+            fullscreen: f.fullscreen.unwrap_or(old),
         }
     }
 }
@@ -263,31 +276,81 @@ impl Default for UpdateConfig {
 
 /// 中英混打（需求 4.5：B + C + E）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(from = "MixedFile")]
 pub struct MixedConfig {
-    /// C：按空白時，剛打的按鍵是英文單字且不是合法注音 → 送出英文
-    pub auto_english: bool,
+    /// C：中文模式下打的英文單字怎麼判斷
+    pub english: EnglishWords,
     /// B：剛完成的音節按鍵也是英文單字時，候選窗附上英文
     pub english_candidate: bool,
     /// E：中英文之間自動加空格（盤古之白）
     pub auto_space: bool,
-    /// 打字中組字區顯示按下的字母（`我 lov`），注音另外顯示在旁邊的小視窗，打完就消失
-    pub show_keys: bool,
-    /// 顯示按鍵字母時，小視窗除了注音也列出這個注音常用的字
-    pub typing_candidates: bool,
+    /// 打字中（注音還沒完成）組字區與小視窗顯示什麼
+    pub typing: TypingDisplay,
 }
 
 impl Default for MixedConfig {
     fn default() -> Self {
         MixedConfig {
-            auto_english: true,
+            english: EnglishWords::default(),
             english_candidate: true,
             // 空白由使用者自己輸入（使用者回饋）
             auto_space: false,
-            show_keys: false,
-            typing_candidates: false,
+            typing: TypingDisplay::default(),
         }
     }
+}
+
+/// 檔案中的 `[mixed]`：0.1.4 以前的 `auto_english = false` 轉成「關」
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct MixedFile {
+    english: Option<EnglishWords>,
+    auto_english: Option<bool>,
+    english_candidate: Option<bool>,
+    auto_space: Option<bool>,
+    typing: Option<TypingDisplay>,
+}
+
+impl From<MixedFile> for MixedConfig {
+    fn from(f: MixedFile) -> Self {
+        let d = MixedConfig::default();
+        let old = match f.auto_english {
+            Some(false) => EnglishWords::Off,
+            _ => d.english,
+        };
+        MixedConfig {
+            english: f.english.unwrap_or(old),
+            english_candidate: f.english_candidate.unwrap_or(d.english_candidate),
+            auto_space: f.auto_space.unwrap_or(d.auto_space),
+            typing: f.typing.unwrap_or(d.typing),
+        }
+    }
+}
+
+/// 中文模式下打的英文單字
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EnglishWords {
+    /// 一律當注音
+    Off,
+    /// 單字表裡有、又組不成注音，按空白才變英文
+    #[default]
+    ChineseFirst,
+    /// 組不成注音（`lo`、ㄍㄧˇ）就轉英文，之後的按鍵都是字元本身，空白結束這個單字
+    EnglishFirst,
+}
+
+/// 打字中（注音還沒完成）的顯示
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TypingDisplay {
+    /// 組字區顯示注音
+    #[default]
+    Bopomofo,
+    /// 組字區顯示按下的字母（`我 lov`），注音顯示在旁邊的小視窗，打完就消失
+    Keys,
+    /// 同上，小視窗也列出這個注音常用的字
+    KeysAndChars,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -632,6 +695,39 @@ mod tests {
         assert_eq!(c.input.output, Output::Simplified);
         assert_eq!(c.toggle.shift, ShiftToggle::Left);
         assert_eq!(c.toggle.shift_tap_max_ms, 300);
+    }
+
+    #[test]
+    fn old_fields_are_converted() {
+        let c = Config::parse(
+            "[mixed]
+auto_english = false
+[detect]
+legacy_fullscreen = false",
+        )
+        .unwrap();
+        assert_eq!(c.mixed.english, EnglishWords::Off);
+        assert!(!c.detect.fullscreen);
+        let c = Config::parse(
+            "[mixed]
+auto_english = true
+[detect]
+exclusive_fullscreen = true",
+        )
+        .unwrap();
+        assert_eq!(c.mixed.english, EnglishWords::ChineseFirst);
+        assert!(c.detect.fullscreen);
+        // 存回去只有新欄位
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert!(!text.contains("auto_english") && !text.contains("exclusive_fullscreen"));
+        assert_eq!(Config::parse(&text).unwrap(), c);
+        assert!(
+            Config::parse(
+                "[mixed]
+auto_englsh = true"
+            )
+            .is_err()
+        );
     }
 
     #[test]

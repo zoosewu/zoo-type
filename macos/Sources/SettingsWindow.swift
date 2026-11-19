@@ -11,6 +11,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     private var bindings: [() -> Void] = []
     private var jsonDrafts: [String: String] = [:]
     private var page = 0
+    private var showAdvanced = false
     private var selectedApp = 0
     private var nav: [NSButton] = []
     private let body = FlippedStackView()
@@ -112,7 +113,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         collect(); status.stringValue = "尚未儲存"
         let id = model.pages[page]["id"] as? String
         if id == "appearance" { updatePreview() }
-        // 換了選項（例如操作習慣）：重畫這一頁，套用鎖定（文字欄位打字時不重畫，免得失去焦點）
+        // 換了選項（例如操作習慣）：重畫這一頁，顯示或隱藏被鎖定的欄位（文字欄位打字時不重畫，免得失去焦點）
         if sender is NSPopUpButton, model.fields.contains(where: { $0.page == id && $0.lockBy != nil }) {
             showPage(); status.stringValue = "尚未儲存"
         }
@@ -128,18 +129,18 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         body.addArrangedSubview(row)
     }
     private func render(_ field: PreferenceField, appIndex: Int? = nil) {
-        // 被操作習慣鎖定：顯示固定值、不能編輯，也不寫回（自己的設定保留著）
-        let locked = appIndex == nil ? model.lockedValue(field) : nil
-        let current = locked ?? appIndex.map { model.apps[$0][field.path] ?? NSNull() } ?? model.value(field.path) ?? field.defaultValue
+        // 被操作習慣鎖定：不顯示，也不寫回（自己的設定保留著）
+        if appIndex == nil && model.lockedValue(field) != nil { return }
+        let current = appIndex.map { model.apps[$0][field.path] ?? NSNull() } ?? model.value(field.path) ?? field.defaultValue
         let set: (Any) -> Void = { [weak self] value in
-            guard let self, locked == nil else { return }
+            guard let self else { return }
             if let index = appIndex {
                 var apps = self.model.apps
                 guard apps.indices.contains(index) else { return }
                 apps[index][field.path] = value; self.model.apps = apps
             } else { self.model.set(field.path, value) }
         }
-        let enabled = locked == nil && (field.feature.map(model.supports) ?? true)
+        let enabled = field.feature.map(model.supports) ?? true
         let title = field.label
         switch field.kind {
         case "bool":
@@ -186,6 +187,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         if !field.help.isEmpty && field.kind != "hotkey" { note(field.help) }
     }
     @objc private func selectPage(_ sender: NSButton) { collect(); page = sender.tag; showPage() }
+    @objc private func toggleAdvanced(_ sender: Any?) { collect(); showAdvanced.toggle(); showPage() }
     private func showPage() {
         bindings = []; phraseTable = nil
         for view in body.arrangedSubviews { body.removeArrangedSubview(view); view.removeFromSuperview() }
@@ -199,7 +201,11 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         if fields.contains(where: { $0.feature.map { !model.supports($0) } ?? false }) {
             note("灰色欄位的功能尚未在此平台提供；既有值會保留，與其他平台共用設定時不會被清除。")
         }
-        for field in fields { render(field) }
+        for field in fields where !field.advanced { render(field) }
+        if fields.contains(where: { $0.advanced }) {
+            body.addArrangedSubview(button(showAdvanced ? "▾ 進階" : "▸ 進階", #selector(toggleAdvanced(_:))))
+            if showAdvanced { for field in fields where field.advanced { render(field) } }
+        }
         switch id {
         case "appearance": body.addArrangedSubview(preview); updatePreview()
         case "apps": appEditor()

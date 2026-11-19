@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use slint::{Model, ModelRc, SharedString, StandardListViewItem, VecModel};
 use zct_core::config::{
-    AfterSelect, Color, GameMode, Habit, InputMode, Layout, OnFocus, Output, SelectSide,
-    ShiftToggle, Width,
+    AfterSelect, Color, EnglishWords, GameMode, Habit, InputMode, Layout, OnFocus, Output,
+    SelectSide, ShiftToggle, TypingDisplay, Width,
 };
 use zct_core::hotkey::{Binding, Hotkey};
 use zct_core::paths::DataRoot;
@@ -45,13 +45,19 @@ fn general_from(c: &Config) -> General {
         habit: habit_index(c.candidates.habit),
         select: select_index(c.candidates.select),
         after_select: after_select_index(c.candidates.after_select),
-        detect_legacy: c.detect.legacy_fullscreen,
-        detect_fullscreen: c.detect.exclusive_fullscreen,
-        auto_english: c.mixed.auto_english,
+        detect: c.detect.fullscreen,
+        english: match c.mixed.english {
+            EnglishWords::Off => 0,
+            EnglishWords::ChineseFirst => 1,
+            EnglishWords::EnglishFirst => 2,
+        },
         english_candidate: c.mixed.english_candidate,
         auto_space: c.mixed.auto_space,
-        show_keys: c.mixed.show_keys,
-        typing_candidates: c.mixed.typing_candidates,
+        typing: match c.mixed.typing {
+            TypingDisplay::Bopomofo => 0,
+            TypingDisplay::Keys => 1,
+            TypingDisplay::KeysAndChars => 2,
+        },
         auto_update: c.update.auto_check,
         primary: match c.punctuation.effective().0 {
             PrimarySymbols::Backtick => 0,
@@ -80,18 +86,6 @@ fn after_select_index(a: AfterSelect) -> i32 {
         AfterSelect::Stay => 1,
         AfterSelect::Backward => 2,
     }
-}
-
-/// 各操作習慣固定的（選字對象, 選字後游標）索引，依 `habit_index` 排列
-fn habit_presets() -> (Vec<i32>, Vec<i32>) {
-    [Habit::Custom, Habit::Windows, Habit::Macos]
-        .into_iter()
-        .map(|h| {
-            h.selection().map_or((0, 0), |(side, after)| {
-                (select_index(side), after_select_index(after))
-            })
-        })
-        .unzip()
 }
 
 fn apply_general(c: &mut Config, g: &General) {
@@ -130,7 +124,7 @@ fn apply_general(c: &mut Config, g: &General) {
         2 => Habit::Macos,
         _ => Habit::Custom,
     };
-    // 操作習慣不是自訂時畫面上的兩項是固定值，不寫回（自己的設定保留著）
+    // 操作習慣不是自訂時一般頁不顯示這兩項，不寫回（自己的設定保留著）
     if c.candidates.habit == Habit::Custom {
         c.candidates.select = if g.select == 1 {
             SelectSide::Before
@@ -143,13 +137,19 @@ fn apply_general(c: &mut Config, g: &General) {
             _ => AfterSelect::Forward,
         };
     }
-    c.detect.legacy_fullscreen = g.detect_legacy;
-    c.detect.exclusive_fullscreen = g.detect_fullscreen;
-    c.mixed.auto_english = g.auto_english;
+    c.detect.fullscreen = g.detect;
+    c.mixed.english = match g.english {
+        0 => EnglishWords::Off,
+        2 => EnglishWords::EnglishFirst,
+        _ => EnglishWords::ChineseFirst,
+    };
     c.mixed.english_candidate = g.english_candidate;
     c.mixed.auto_space = g.auto_space;
-    c.mixed.show_keys = g.show_keys;
-    c.mixed.typing_candidates = g.typing_candidates;
+    c.mixed.typing = match g.typing {
+        1 => TypingDisplay::Keys,
+        2 => TypingDisplay::KeysAndChars,
+        _ => TypingDisplay::Bopomofo,
+    };
     c.update.auto_check = g.auto_update;
     c.punctuation.primary = match g.primary {
         1 => PrimarySymbols::RightAlt,
@@ -753,9 +753,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_window_title(zct_core::channel::settings_title().into());
     ui.set_app_name(zct_core::channel::CURRENT.name.into());
     ui.set_official(zct_core::channel::CURRENT.id == zct_core::channel::OFFICIAL.id);
-    let (habit_select, habit_after) = habit_presets();
-    ui.set_habit_select(ModelRc::new(VecModel::from(habit_select)));
-    ui.set_habit_after_select(ModelRc::new(VecModel::from(habit_after)));
     // --page N：直接開啟某一頁（系統匣與開發截圖用）
     // --notice 文字：開啟後在狀態列顯示（變更資料位置後重新開啟時用）
     let mut notice: Option<String> = None;
@@ -1422,10 +1419,6 @@ mod tests {
         let select = row(&rows, "candidates.select");
         assert!(!select.locked && select.enabled);
         assert_eq!(select.selected, 0, "自己的「游標後的詞」");
-        // 一般頁顯示的固定值來自核心的操作習慣定義
-        let (sel, after) = habit_presets();
-        assert_eq!((sel[1], after[1]), (1, 0), "Windows");
-        assert_eq!((sel[2], after[2]), (0, 1), "macOS");
     }
 
     #[test]
@@ -1434,7 +1427,9 @@ mod tests {
         c.input.default_mode = InputMode::English;
         c.input.output = Output::Simplified;
         c.toggle.shift = ShiftToggle::Right;
-        c.detect.legacy_fullscreen = false;
+        c.detect.fullscreen = false;
+        c.mixed.english = EnglishWords::EnglishFirst;
+        c.mixed.typing = TypingDisplay::KeysAndChars;
         c.hotkeys.output = Binding(Some("ctrl+alt+s".parse().unwrap()));
         c.hotkeys.pin = Binding(None);
         c.theme.layout = Layout::Horizontal;

@@ -45,6 +45,8 @@ func selfTest(dictionary: String) throws {
     try check(!preferences.fields.isEmpty && !preferences.appFields.isEmpty
         && preferences.fields.allSatisfy { pageIDs.contains($0.page) && ($0.nullable || preferences.value($0.path) != nil) },
         "共用設定欄位完整性")
+    try check(preferences.fields.contains { $0.advanced } && preferences.fields.contains { !$0.advanced && $0.page == "general" },
+        "一般頁有進階欄位")
     if let select = preferences.fields.first(where: { $0.path == "candidates.select" }) {
         preferences.set("candidates.habit", "windows")
         try check(preferences.lockedValue(select) as? String == "before", "操作習慣鎖定選字對象")

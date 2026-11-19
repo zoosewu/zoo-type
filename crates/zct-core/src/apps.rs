@@ -106,8 +106,8 @@ impl Effective {
             output: r.output.unwrap_or(base.output),
             on_focus: r.on_focus.unwrap_or(base.on_focus),
             game_mode: r.game_mode.unwrap_or(GameMode::Off),
-            detect_legacy: r.detect.unwrap_or(true) && config.detect.legacy_fullscreen,
-            detect_fullscreen: r.detect.unwrap_or(true) && config.detect.exclusive_fullscreen,
+            detect_legacy: r.detect.unwrap_or(true) && config.detect.fullscreen,
+            detect_fullscreen: r.detect.unwrap_or(true) && config.detect.fullscreen,
         }
     }
 }
@@ -165,9 +165,9 @@ detect = false",
         let e = Effective::resolve(&config, rules.find("chat.exe"));
         assert!(!e.detect_legacy && !e.detect_fullscreen);
         let mut off = Config::default();
-        off.detect.exclusive_fullscreen = false;
+        off.detect.fullscreen = false;
         let e = Effective::resolve(&off, None);
-        assert!(e.detect_legacy && !e.detect_fullscreen);
+        assert!(!e.detect_legacy && !e.detect_fullscreen);
     }
 
     #[test]

@@ -42,15 +42,18 @@ symbols = ""               # chewing 的符號選單（…、※、希臘字母�
 reconvert = "ctrl+shift+/" # 重新選字：App 中選取的文字回到組字區（改選字、加詞；Esc 放棄）
 
 [detect]                   # 自動偵測「不在輸入狀態」，見下方說明
-legacy_fullscreen = true   # 舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
-exclusive_fullscreen = true  # 有程式獨佔全螢幕
+fullscreen = true          # 全螢幕遊戲：有程式獨佔全螢幕，或舊式程式 + 沒有游標 + 無邊框全螢幕（DirectX 遊戲）
 
 [mixed]                    # 中英混打（組字中單按 Shift 切英文不會送出，英文與數字會放進組字區）
-auto_english = true        # 按空白時，剛打的按鍵是英文單字且不是合法注音 → 放進組字區當英文（例：hello）
+english = "chinese_first"  # 英文單字判斷："off" 一律當注音
+                           # "chinese_first" 按空白時，剛打的按鍵是單字表裡的英文且不是合法注音 → 放進組字區當英文（例：hello）
+                           # "english_first" 組不成注音（lo、ㄍㄧˇ）就轉英文，之後的按鍵（含 , . / ; - 與 3 4 6 7）都是字元本身，空白結束這個單字
 english_candidate = true   # 剛完成的音節也是英文單字時，候選窗附上英文（例：fu → 七 / fu）
-                           # 以上兩項只在組字開頭，或「中文 + 空白」之後判斷（「我 love」會、「我love」不會）
+                           # 中文優先與這一項只在組字開頭，或「中文 + 空白」之後判斷（「我 love」會、「我love」不會）
                            # 單字表：一般英文字典 + 內建技術用語（repo、config、api…）+ 自訂的 dict/english.txt（一行一個）
 auto_space = false         # 中英文之間自動加空格（盤古之白）
+typing = "bopomofo"        # 注音還沒打完時："bopomofo" 組字區顯示注音；"keys" 組字區顯示按下的字母、注音在旁邊的小視窗；
+                           # "keys_and_chars" 小視窗也列出這個注音常用的字
 
 [sync]                     # git 同步，見下方說明
 enabled = false
@@ -170,8 +173,7 @@ App 的執行檔名稱可以在工作管理員的「詳細資料」分頁查到�
 | 偵測 | 情況 | 能否關閉 |
 |------|------|---------|
 | 系統訊號 | 焦點不在輸入欄位（桌面、按鈕、清單）、App 主動停用輸入法（很多遊戲會這樣做） | 不能，這是系統明確告知的狀態 |
-| `legacy_fullscreen` | 不支援 TSF 的舊式程式 + 畫面上沒有系統游標 + 視窗蓋滿整個螢幕：無邊框全螢幕的 DirectX 遊戲 | 可以 |
-| `exclusive_fullscreen` | 有程式獨佔全螢幕：老式全螢幕遊戲 | 可以 |
+| `fullscreen` | 有程式獨佔全螢幕（老式全螢幕遊戲）；不支援 TSF 的舊式程式 + 畫面上沒有系統游標 + 視窗蓋滿整個螢幕（無邊框全螢幕的 DirectX 遊戲） | 可以 |
 
 偵測不到的情況：視窗模式的遊戲，而且沒有停用輸入法。這時請用 `apps.toml` 的 `game_mode` 或遊戲模式快捷鍵。
 

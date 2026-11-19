@@ -42,8 +42,10 @@ pub struct Field {
     pub help: String,
     /// Runtime capability, independent of whether a portable setting may be edited.
     pub feature: Option<String>,
-    /// 另一個欄位選了特定值時，這個欄位固定成對應的值、不能編輯（自己設定的值保留著）
+    /// 另一個欄位選了特定值時，這個欄位固定成對應的值、不顯示（自己設定的值保留著）
     pub lock: Option<Lock>,
+    /// 少用的設定：收在頁面最後預設收合的「進階」
+    pub advanced: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lock {
@@ -110,6 +112,7 @@ fn field(
         help: String::new(),
         feature: None,
         lock: None,
+        advanced: false,
     }
 }
 pub fn catalog(platform: Platform) -> Catalog {
@@ -218,11 +221,15 @@ pub fn catalog(platform: Platform) -> Catalog {
         ],
     );
     add(
-        "mixed.auto_english",
-        "自動辨識英文單字",
+        "mixed.english",
+        "英文單字判斷",
         "general",
-        Bool,
-        &[],
+        Choice,
+        &[
+            ("關", "off"),
+            ("中文優先", "chinese_first"),
+            ("英文優先", "english_first"),
+        ],
     );
     add(
         "mixed.english_candidate",
@@ -239,29 +246,19 @@ pub fn catalog(platform: Platform) -> Catalog {
         &[],
     );
     add(
-        "mixed.show_keys",
-        "組字區顯示按鍵字母",
+        "mixed.typing",
+        "打字時顯示",
         "general",
-        Bool,
-        &[],
+        Choice,
+        &[
+            ("注音", "bopomofo"),
+            ("字母＋注音小視窗", "keys"),
+            ("字母＋注音與常用字", "keys_and_chars"),
+        ],
     );
     add(
-        "mixed.typing_candidates",
-        "打字時列出可能的字",
-        "general",
-        Bool,
-        &[],
-    );
-    add(
-        "detect.legacy_fullscreen",
-        "偵測舊式全螢幕程式",
-        "general",
-        Bool,
-        &[],
-    );
-    add(
-        "detect.exclusive_fullscreen",
-        "偵測獨佔全螢幕",
+        "detect.fullscreen",
+        "全螢幕遊戲時不處理按鍵",
         "general",
         Bool,
         &[],
@@ -350,7 +347,20 @@ pub fn catalog(platform: Platform) -> Catalog {
     add("ai.model", "模型", "ai", Text, &[]);
     add("ai.timeout_seconds", "逾時（秒）", "ai", Number, &[]);
     add("update.auto_check", "自動檢查更新", "about", Bool, &[]);
+    const ADVANCED: &[&str] = &[
+        "input.output",
+        "input.on_focus",
+        "toggle.shift_tap_max_ms",
+        "candidates.sort_by_frequency",
+        "detect.fullscreen",
+        "punctuation.primary",
+        "punctuation.secondary",
+        "punctuation.full",
+        "punctuation.half",
+    ];
+    debug_assert!(ADVANCED.iter().all(|p| fields.iter().any(|f| f.path == *p)));
     for field in &mut fields {
+        field.advanced = ADVANCED.contains(&field.path.as_str());
         if field.path == "hotkeys.composition_bar" {
             field.feature = Some("composition_bar_hotkey".into());
         }

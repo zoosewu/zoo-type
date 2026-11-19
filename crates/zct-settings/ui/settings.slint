@@ -13,13 +13,11 @@ export struct General {
     habit: int,             // 0 自訂 1 Windows 2 macOS
     select: int,            // 0 游標後的詞 1 游標前的詞
     after-select: int,      // 0 移到詞後面 1 不動 2 移到詞前面
-    detect-legacy: bool,
-    detect-fullscreen: bool,
-    auto-english: bool,
+    detect: bool,
+    english: int,           // 0 關 1 中文優先 2 英文優先
     english-candidate: bool,
     auto-space: bool,
-    show-keys: bool,
-    typing-candidates: bool,
+    typing: int,            // 0 注音 1 字母＋注音小視窗 2 字母＋注音與常用字
     auto-update: bool,
     primary: int,           // 主要符號：0 ` + 鍵 1 右 Alt + 鍵 2 兩種都可以
     secondary: int,         // 次要符號：0 Shift + 鍵 1 ` / 右 Alt + Shift + 鍵
@@ -303,8 +301,7 @@ export component SettingsWindow inherits Window {
     // 正式版才有自動更新
     in property <bool> official: true;
     // 各操作習慣固定的選字對象、選字後游標（以 general.habit 為索引，自訂那格不用）
-    in property <[int]> habit-select;
-    in property <[int]> habit-after-select;
+    in-out property <bool> show-advanced: false;
     // 檢查更新：已下載、可以安裝的新版版號（空字串是沒有）
     in property <string> update-version;
     in property <string> update-status;
@@ -406,52 +403,45 @@ export component SettingsWindow inherits Window {
                     Note { text: "新開 App 時的中英狀態。"; }
                     Row { label: "標點"; ComboBox { width: 160px; model: ["全形", "半形"]; current-index <=> root.general.punctuation; } }
                     Note { text: "全形（，。？）或半形（,.?），所有 App 共用。"; }
-                    Row { label: "主要符號"; ComboBox { width: 280px; model: ["` + 鍵", "右 Alt + 鍵", "` + 鍵 或 右 Alt + 鍵"]; current-index <=> root.general.primary; } }
-                    Note { text: "鍵帽下排的字元：` 再按 , → ，、` 再按 1 → １、` 按兩下 → `。用右 Alt 時，App 收不到右 Alt 組合鍵。"; }
-                    Row { label: "次要符號"; ComboBox { width: 280px; model: ["Shift + 鍵", "` 或 右 Alt + Shift + 鍵"]; current-index <=> root.general.secondary; } }
-                    Note { text: "鍵帽上排的符號：Shift + , → ＜、Shift + ' → ＂。選第二種時，Shift + 鍵改打中文標點（，。；「」）。"; }
-                    Row { label: "輸出"; ComboBox { width: 160px; model: ["繁體", "簡體"]; current-index <=> root.general.output; } }
-                    Note { text: "組字區與候選窗一律顯示繁體，送出時才轉成簡體。"; }
-                    Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設模式"]; current-index <=> root.general.on-focus; } }
-                    Section { text: "Shift 切換中英"; }
-                    Help { text: "單按 Shift 切換中英。組字中切換不會送出，接著打的英文和數字加進組字區：第 Shift 6 Shift 章 → 第6章。"; }
-                    Row { label: "使用的 Shift"; ComboBox { width: 160px; model: ["左右都可", "左 Shift", "右 Shift", "不使用"]; current-index <=> root.general.shift; } }
-                    Row { label: "按住上限（毫秒）"; SpinBox { width: 160px; minimum: 100; maximum: 1000; step-size: 50; value <=> root.general.tap-ms; } }
-                    Note { text: "按住超過這個時間才放開，不算切換。"; }
+                    Row { label: "Shift 切換中英"; ComboBox { width: 160px; model: ["左右都可", "左 Shift", "右 Shift", "不使用"]; current-index <=> root.general.shift; } }
+                    Note { text: "單按 Shift 切換。組字中切換不會送出，接著打的英文和數字加進組字區：第 Shift 6 Shift 章 → 第6章。"; }
                     Section { text: "候選字"; }
                     Row { label: "每頁字數"; SpinBox { width: 160px; minimum: 1; maximum: 10; value <=> root.general.per-page; } }
-                    Row { label: "依常用程度排序"; Switch { checked <=> root.general.sort-freq; } }
-                    Note { text: "常用字在前，並參考你的選字紀錄。"; }
                     Row { label: "智慧選字"; Switch { checked <=> root.general.language-model; } }
                     Note { text: "用內建的語言模型判斷整句哪個同音字最通順（例如「下次再說」「在家」），在電腦上執行，不連網路。"; }
                     Row { label: "操作習慣"; ComboBox { width: 160px; model: ["自訂", "Windows", "macOS"]; current-index <=> root.general.habit; } }
-                    Row {
-                        label: "選字對象";
-                        if root.general.habit == 0: ComboBox { width: 160px; model: ["游標後的詞", "游標前的詞"]; current-index <=> root.general.select; }
-                        if root.general.habit != 0: ComboBox { width: 160px; enabled: false; model: ["游標後的詞", "游標前的詞"]; current-index: root.habit-select[root.general.habit]; }
-                    }
-                    Row {
-                        label: "選字後游標";
-                        if root.general.habit == 0: ComboBox { width: 160px; model: ["移到詞後面", "不動", "移到詞前面"]; current-index <=> root.general.after-select; }
-                        if root.general.habit != 0: ComboBox { width: 160px; enabled: false; model: ["移到詞後面", "不動", "移到詞前面"]; current-index: root.habit-after-select[root.general.habit]; }
-                    }
-                    Section { text: "不在打字時不處理按鍵"; }
-                    Help { text: "偵測到不是在打字（遊戲、全螢幕影片）時，按鍵直接交給 App，Shift 也不切換中英。下面兩項判斷誤判時可以關掉。"; }
-                    Row { label: "舊式程式全螢幕"; Switch { checked <=> root.general.detect-legacy; } }
-                    Note { text: "沒有文字游標、又蓋滿整個螢幕的舊式程式，例如 DirectX 遊戲。"; }
-                    Row { label: "獨佔全螢幕"; Switch { checked <=> root.general.detect-fullscreen; } }
-                    Note { text: "全螢幕遊戲、簡報播放。視窗模式的遊戲偵測不到，請用遊戲模式。"; }
+                    Note { text: "Windows：選游標前的詞，選完游標移到詞後面。macOS：選游標後的詞，選完游標不動。"; }
+                    if root.general.habit == 0: Row { label: "選字對象"; ComboBox { width: 160px; model: ["游標後的詞", "游標前的詞"]; current-index <=> root.general.select; } }
+                    if root.general.habit == 0: Row { label: "選字後游標"; ComboBox { width: 160px; model: ["移到詞後面", "不動", "移到詞前面"]; current-index <=> root.general.after-select; } }
                     Section { text: "中英混打"; }
-                    Row { label: "自動判斷英文單字"; Switch { checked <=> root.general.auto-english; } }
-                    Note { text: "句首或空白後打英文單字再按空白，就當作英文（hello、repo）。用 Shift 打過的英文會記住。"; }
+                    Row { label: "英文單字判斷"; ComboBox { width: 160px; model: ["關", "中文優先", "英文優先"]; current-index <=> root.general.english; } }
+                    Note { text: "中文優先：句首或空白後打單字表裡的英文再按空白，才當作英文（hello、repo）。英文優先：組不成注音就轉成英文（lo → love），之後的按鍵都是字元本身，空白結束這個單字。用 Shift 打過的英文會記住。"; }
                     Row { label: "候選窗附上英文"; Switch { checked <=> root.general.english-candidate; } }
                     Note { text: "按鍵也是英文單字時，候選窗多一個英文選項：fu → 七、fu。"; }
                     Row { label: "中英之間自動空格"; Switch { checked <=> root.general.auto-space; } }
                     Note { text: "中文與英文、數字之間加一個空格。"; }
-                    Row { label: "組字區顯示按鍵字母"; Switch { checked <=> root.general.show-keys; } }
-                    Note { text: "打字時組字區顯示按下的字母（我 lov），注音顯示在旁邊的小視窗，打完就消失。"; }
-                    Row { label: "列出可能的字"; Switch { checked <=> root.general.typing-candidates; enabled: root.general.show-keys; } }
-                    Note { text: "小視窗除了注音，也列出這個注音常用的字。"; }
+                    Row { label: "打字時顯示"; ComboBox { width: 200px; model: ["注音", "字母＋注音小視窗", "字母＋注音與常用字"]; current-index <=> root.general.typing; } }
+                    Note { text: "注音還沒打完時的顯示。字母：組字區顯示按下的字母（我 lov），注音顯示在旁邊的小視窗，打完就消失。"; }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button { text: root.show-advanced ? "▾ 進階" : "▸ 進階"; clicked => { root.show-advanced = !root.show-advanced; } }
+                    }
+                    if root.show-advanced: VerticalLayout {
+                        spacing: 10px;
+                        Row { label: "輸出"; ComboBox { width: 160px; model: ["繁體", "簡體"]; current-index <=> root.general.output; } }
+                        Note { text: "組字區與候選窗一律顯示繁體，送出時才轉成簡體。"; }
+                        Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設模式"]; current-index <=> root.general.on-focus; } }
+                        Row { label: "Shift 按住上限（毫秒）"; SpinBox { width: 160px; minimum: 100; maximum: 1000; step-size: 50; value <=> root.general.tap-ms; } }
+                        Note { text: "按住 Shift 超過這個時間才放開，不算切換。"; }
+                        Row { label: "主要符號"; ComboBox { width: 280px; model: ["` + 鍵", "右 Alt + 鍵", "` + 鍵 或 右 Alt + 鍵"]; current-index <=> root.general.primary; } }
+                        Note { text: "鍵帽下排的字元：` 再按 , → ，、` 再按 1 → １、` 按兩下 → `。用右 Alt 時，App 收不到右 Alt 組合鍵。"; }
+                        Row { label: "次要符號"; ComboBox { width: 280px; model: ["Shift + 鍵", "` 或 右 Alt + Shift + 鍵"]; current-index <=> root.general.secondary; } }
+                        Note { text: "鍵帽上排的符號：Shift + , → ＜、Shift + ' → ＂。選第二種時，Shift + 鍵改打中文標點（，。；「」）。"; }
+                        Row { label: "依常用程度排序"; Switch { checked <=> root.general.sort-freq; } }
+                        Note { text: "常用字在前，並參考你的選字紀錄。"; }
+                        Row { label: "全螢幕遊戲時不處理按鍵"; Switch { checked <=> root.general.detect; } }
+                        Note { text: "全螢幕遊戲、簡報播放時，按鍵直接交給 App，Shift 也不切換中英。視窗模式的遊戲偵測不到，請用遊戲模式。"; }
+                    }
                 }
             }
 
