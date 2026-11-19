@@ -207,6 +207,8 @@ fn run_command(cmd: Command, shared: &Shared) {
 pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let _active = crate::version::ActiveGuard::new();
     let mut session: Option<Session> = None;
+    // session 建立時的設定版本；設定變更後在沒有組字時換成新的 session
+    let mut session_rev = 0;
     let mailbox: AiMailbox = Arc::new(Mutex::new(None));
     // 最近一次按鍵結果與狀態提示，等 DLL 回報游標位置後再決定候選窗怎麼顯示
     let mut last: Option<(KeyResult, Option<String>)> = None;
@@ -228,6 +230,25 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 break;
             }
         };
+        let rev = shared.settings.revision();
+        if rev != session_rev
+            && let Some(old) = session.as_ref().filter(|s| s.is_idle())
+        {
+            match open_session(id, &app, shared) {
+                Ok(mut s) => {
+                    s.keep_state_of(old);
+                    bar = composition_bar_for(&app, shared);
+                    session = Some(s);
+                    session_rev = rev;
+                    log::info!("[{id}] 套用新設定");
+                }
+                Err(e) => {
+                    // 沿用舊 session，不每次按鍵重試
+                    session_rev = rev;
+                    log::error!("[{id}] {e}");
+                }
+            }
+        }
         if let Some(s) = session.as_mut() {
             s.set_global_game(shared.game.load(Ordering::Relaxed));
             // AI 結果回來了：交給 session，接下來的 Enter / 1 就能採用
@@ -245,6 +266,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     bar = composition_bar_for(&exe, shared);
                     app = exe.clone();
                     app_pid = Some(pid);
+                    session_rev = shared.settings.revision();
                     match open_session(id, &exe, shared) {
                         Ok(mut s) => {
                             let saved = shared

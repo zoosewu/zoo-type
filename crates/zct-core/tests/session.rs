@@ -2701,3 +2701,20 @@ fn show_keys_off_keeps_bopomofo_in_preedit() {
     assert_eq!(h.s.preedit().text, "ㄋㄧ");
     assert!(h.s.candidates().is_none());
 }
+
+#[test]
+fn new_config_session_keeps_mode_and_shows_keys() {
+    let mut h = Harness::new();
+    h.tap_shift();
+    assert_eq!(h.s.mode(), InputMode::English);
+    assert!(h.s.is_idle());
+
+    // 設定變更：換成新設定的 session，沿用中英狀態
+    let mut fresh = Harness::with_config(show_keys_config(false));
+    fresh.s.keep_state_of(&h.s);
+    assert_eq!(fresh.s.mode(), InputMode::English);
+    fresh.tap_shift();
+    fresh.type_str("l");
+    assert_eq!(fresh.s.preedit().text, "l");
+    assert!(!fresh.s.is_idle());
+}

@@ -1,9 +1,10 @@
-//! `config.toml` 與 `apps.toml`：新連線時若檔案有變更就重新載入
+//! `config.toml` 與 `apps.toml`：檔案有變更就重新載入（服務每秒檢查一次）
 //!
-//! 已建立的 session 沿用舊設定；切換到 App（建立新連線）或重開 App 後生效。
+//! 每次重新載入 `revision` 加一；連線在沒有組字時換成新設定的 session。
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use zct_core::paths::DataRoot;
@@ -25,6 +26,7 @@ pub struct Settings {
     config_path: PathBuf,
     apps_path: PathBuf,
     loaded: Mutex<Option<Loaded>>,
+    revision: AtomicU64,
 }
 
 fn mtime(p: &Path) -> Option<SystemTime> {
@@ -37,7 +39,13 @@ impl Settings {
             config_path: data.config(),
             apps_path: data.root().join("apps.toml"),
             loaded: Mutex::new(None),
+            revision: AtomicU64::new(0),
         }
+    }
+
+    /// 設定重新載入的次數
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
     }
 
     /// 目前的設定；檔案變更時重新讀取。格式錯誤時沿用上一份正確的設定（第一次則用預設值）
@@ -86,6 +94,9 @@ impl Settings {
                 }
             };
             log::info!("載入設定：{} 條 App 規則", apps.apps.len());
+            if prev.is_some() {
+                self.revision.fetch_add(1, Ordering::AcqRel);
+            }
             *guard = Some(Loaded {
                 config,
                 apps,

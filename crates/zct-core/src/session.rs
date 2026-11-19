@@ -391,6 +391,19 @@ impl Session {
         (self.eff.detect_legacy, self.eff.detect_fullscreen)
     }
 
+    /// 設定變更後換成新的 session：沿用中英、全半形、輸出字形與遊戲模式
+    /// 沒有組字、也沒有待採用的 AI 結果：可以安全地換掉這個 session
+    pub fn is_idle(&self) -> bool {
+        !self.is_composing() && self.ai_suggestion().is_none()
+    }
+
+    pub fn keep_state_of(&mut self, old: &Session) {
+        self.mode = old.mode;
+        self.width = old.width;
+        self.output = old.output;
+        self.global_game = old.global_game;
+    }
+
     /// 點輸入法圖示切換中英（組字中先送出）
     pub fn toggle_mode(&mut self) -> KeyResult {
         let mut commit = String::new();

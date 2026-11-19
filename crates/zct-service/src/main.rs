@@ -114,7 +114,7 @@ mod app {
             .map(|_| ())
     }
 
-    /// 每秒檢查設定檔；主題變更立即套用到候選窗（其他設定在 App 重新連線時生效）
+    /// 每秒檢查設定檔；主題變更立即套用到候選窗，其他設定由各連線在沒有組字時換上
     fn spawn_watcher(
         shared: Arc<Shared>,
         mut theme: zct_core::config::ThemeConfig,

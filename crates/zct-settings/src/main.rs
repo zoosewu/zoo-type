@@ -1,6 +1,6 @@
 //! ZCT 設定程式（Slint）
 //!
-//! - `config.toml`、`apps.toml`：直接讀寫檔案，服務程序在 1 秒內（主題）或 App 重新連線時（其他）套用
+//! - `config.toml`、`apps.toml`：直接讀寫檔案，服務程序在 1 秒內套用（組字中的 App 等組字結束）
 //! - 詞庫、統計、備份：透過 IPC 交給服務程序處理（服務程序是學習資料唯一的擁有者，避免互相覆蓋）
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
