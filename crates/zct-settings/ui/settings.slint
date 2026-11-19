@@ -759,7 +759,7 @@ export component SettingsWindow inherits Window {
                     if root.update-version != "": Button { text: "更新到 " + root.update-version; primary: true; clicked => { root.install-update(); } }
                     Text { text: root.update-status; vertical-alignment: center; }
                 }
-                Help { text: "注音輸入法，以 MIT 或 Apache-2.0 授權。\n原始碼與問題回報：https://github.com/zoosewu/zoo-type"; }
+                Help { text: "注音輸入法，以 GNU AGPL-3.0 授權。\n原始碼與問題回報：https://github.com/zoosewu/zoo-type"; }
                 Section { text: "第三方元件"; }
                 Help { text: "libchewing：注音轉換引擎（LGPL-2.1-or-later）\nlibchewing-data：詞庫（LGPL-2.1-or-later）與語言模型（CC-BY-4.0）\nOpenCC：繁簡轉換字表（Apache-2.0）\nUnicode CLDR：Emoji 中文關鍵字（Unicode-3.0）\ndwyl/english-words：英文單字表（Unlicense）\nSlint：設定程式介面\n完整清單見安裝資料夾中的 THIRD-PARTY-NOTICES.txt"; }
                 // Slint 授權（Royalty-free 2.0）要求在「關於」畫面顯示；限制大小，不要佔滿畫面

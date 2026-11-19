@@ -96,7 +96,7 @@ scripts/uninstall-dev.ps1         # 移除開發版（資料保留）
 
 ## 授權
 
-程式碼採用 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE) 雙授權，任選其一。
+程式碼以 [GNU AGPL-3.0](LICENSE) 授權。下列第三方元件與資料依其各自的授權。
 
 第三方元件：
 - [libchewing](https://codeberg.org/chewing/libchewing)：LGPL-2.1-or-later

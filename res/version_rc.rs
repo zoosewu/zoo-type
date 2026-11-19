@@ -38,7 +38,7 @@ BEGIN
             VALUE "OriginalFilename", "{file_name}"
             VALUE "ProductName", "動物園輸入法"
             VALUE "ProductVersion", "{version}"
-            VALUE "LegalCopyright", "MIT OR Apache-2.0"
+            VALUE "LegalCopyright", "GNU AGPL-3.0"
         END
     END
     BLOCK "VarFileInfo"

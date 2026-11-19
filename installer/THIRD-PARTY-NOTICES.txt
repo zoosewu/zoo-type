@@ -1,7 +1,7 @@
 ﻿動物園輸入法（ZCT）第三方元件與資料授權聲明
 =============================================
 
-本程式本身以 MIT 或 Apache-2.0 授權（擇一），見 LICENSE-MIT、LICENSE-APACHE。
+本程式本身以 GNU AGPL-3.0 授權，見 LICENSE。
 原始碼：https://github.com/zoosewu/zoo-type
 
 以下為隨附或內含的第三方元件與資料。

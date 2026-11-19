@@ -76,7 +76,7 @@ if [ ! -f assets/dict/ngram.bin ]; then
     exit 1
 fi
 ditto assets/dict "$APP/Contents/Resources/dict"
-cp LICENSE-MIT LICENSE-APACHE Cargo.lock macos/THIRD-PARTY-NOTICES.txt "$APP/Contents/Resources/"
+cp LICENSE Cargo.lock macos/THIRD-PARTY-NOTICES.txt "$APP/Contents/Resources/"
 xcrun swift -module-cache-path "$ROOT/$OUTPUT/swift-module-cache" scripts/macos-icons.swift "$APP/Contents/Resources"
 ICONSET="$ROOT/$OUTPUT/AppIcon.iconset"
 mkdir -p "$ICONSET"

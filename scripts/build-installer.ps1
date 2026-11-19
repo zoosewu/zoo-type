@@ -41,7 +41,7 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage, "$stage\dict" | Out-Null
 Copy-Item "$release\zoo_type.dll", "$release\zoo-type-service.exe", "$release\zoo-type-settings.exe", "$release\zoo-type-updater.exe" $stage
 Copy-Item "$dict\*" "$stage\dict"
-Copy-Item (Join-Path $root 'LICENSE-MIT'), (Join-Path $root 'LICENSE-APACHE') $stage
+Copy-Item (Join-Path $root 'LICENSE') $stage
 Copy-Item (Join-Path $root 'installer\THIRD-PARTY-NOTICES.txt') $stage
 
 Write-Host "建置安裝檔：版本 $version"

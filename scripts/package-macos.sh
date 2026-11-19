@@ -22,7 +22,7 @@ cp target/macos/release/examples/sim "$PACKAGE/bin/zoo-type-sim"
 cp target/macos/release/zct-eval "$PACKAGE/bin/zct-eval"
 cp -R assets/dict "$PACKAGE/assets/dict"
 cp tests/eval/corpus.txt "$PACKAGE/tests/eval/"
-cp LICENSE-MIT LICENSE-APACHE Cargo.lock "$PACKAGE/"
+cp LICENSE Cargo.lock "$PACKAGE/"
 cp macos/THIRD-PARTY-NOTICES.txt "$PACKAGE/"
 cat > "$PACKAGE/README.txt" <<EOF
 動物園輸入法 $VERSION — macOS $ARCH 命令列工具
@@ -60,7 +60,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 exec "$ROOT/動物園輸入法.app/Contents/MacOS/zoo-type" --settings
 SETTINGS
 chmod +x "$APP_PACKAGE/開啟設定.command"
-cp LICENSE-MIT LICENSE-APACHE "$APP_PACKAGE/"
+cp LICENSE "$APP_PACKAGE/"
 cat > "$APP_PACKAGE/README.txt" <<EOF
 動物園輸入法 $VERSION — macOS ${ARCH}（macOS 15 以上）
 

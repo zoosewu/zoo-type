@@ -1,6 +1,6 @@
 動物園輸入法 macOS 第三方元件與資料
 
-程式碼採 MIT 或 Apache-2.0（擇一），見 LICENSE-MIT 與 LICENSE-APACHE。
+程式碼以 GNU AGPL-3.0 授權，見 LICENSE。
 完整原始碼、Cargo.lock 與重新建置方式：https://github.com/zoosewu/zoo-type
 可替換為修改過的 libchewing，依 docs/macos.md 重新建置完整 .app。
 
