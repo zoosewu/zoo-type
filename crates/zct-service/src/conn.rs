@@ -271,15 +271,11 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     .as_ref()
                     .is_some_and(|s| s.session().right_alt_enabled()),
                 // 新版已經裝好、這是還在服務舊 App 的舊版：選單不再出現「更新到 vX」
-                update: (!crate::version::stale())
-                    .then(|| {
-                        shared
-                            .update
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .clone()
-                    })
-                    .flatten(),
+                update: shared
+                    .update
+                    .as_ref()
+                    .filter(|_| !crate::version::stale())
+                    .and_then(|u| u.status().available),
                 passthrough: session
                     .as_ref()
                     .and_then(|s| s.session().passthrough_keys()),
@@ -303,12 +299,10 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     Response::Error(e)
                 }
             },
-            Request::CheckUpdate => match crate::update::check_now(&shared.update) {
-                Ok(version) => Response::Update(version),
-                Err(e) => {
-                    log::warn!("檢查更新失敗：{e}");
-                    Response::Error(e)
-                }
+            Request::CheckUpdate => match shared.update.as_ref().map(|u| u.check()) {
+                Some(Ok(version)) => Response::Update(version),
+                Some(Err(e)) => Response::Error(e),
+                None => Response::Error("只有正式版會檢查更新".into()),
             },
             Request::Reset | Request::Focus => {
                 if shared.debug_keys {

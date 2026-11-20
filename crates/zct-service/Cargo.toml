@@ -20,8 +20,6 @@ zct-preferences.workspace = true
 zct-ipc.workspace = true
 zct-host.workspace = true
 zct-update = { path = "../zct-update" }
-serde.workspace = true
-ureq = { version = "3", features = ["json"] }
 log.workspace = true
 
 [target.'cfg(windows)'.dependencies]

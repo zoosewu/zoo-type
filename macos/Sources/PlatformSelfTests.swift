@@ -34,9 +34,7 @@ func platformSelfTests() throws {
     }
     _ = view.update(CandidateDisplay(items: [], labels: [], highlight: 0, page: 0, totalPages: 0), notice: "ㄋㄧ", theme: theme)
     try check(view.hits.isEmpty, "注音提示不能被滑鼠選取")
-    try check(UpdateFiles.newer("0.1.5", than: "0.1.4") && !UpdateFiles.newer("0.1.3", than: "0.1.4"), "更新不降版")
-    do { _ = try UpdateFiles.assetURL("https://example.com/installer.zip", tag: "v0.1.5", name: "installer.zip"); throw EngineError(description: "非官方來源未拒絕") }
-    catch let error as EngineError where error.description == "更新來源不符官方 Release" { }
+    // 更新不降版、只接受官方來源：在共用層（zct-host update 測試）
 
     let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)

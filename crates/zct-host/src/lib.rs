@@ -10,6 +10,7 @@ pub mod notice;
 mod runtime;
 mod session;
 pub mod settings;
+pub mod update;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

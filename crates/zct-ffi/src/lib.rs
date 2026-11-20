@@ -48,6 +48,11 @@ pub struct ZctRuntime {
     next_session: u64,
     config_path: CString,
     settings_buffer: CString,
+    /// 自動更新：查、下載、驗證、排程（共用）；只有正式版
+    updater: Option<Arc<zct_host::update::Updater>>,
+    update_available: CString,
+    update_message: CString,
+    update_file: CString,
 }
 
 impl ZctRuntime {
@@ -58,6 +63,10 @@ impl ZctRuntime {
             next_session: 1,
             config_path,
             settings_buffer: CString::default(),
+            updater: None,
+            update_available: CString::default(),
+            update_message: CString::default(),
+            update_file: CString::default(),
         }
     }
 
@@ -221,8 +230,17 @@ pub unsafe extern "C" fn zct_runtime_new(dict: *const c_char) -> *mut ZctRuntime
     guard(|| {
         let dict = unsafe { text(dict)? };
         let (data, _) = zct_core::paths::prepare_data()?;
+        let target = zct_host::update::Target::macos(&data);
         let host = Host::open(zct_host::Platform::Macos, data, dict.into())?;
-        Ok(Box::into_raw(Box::new(ZctRuntime::new(host))))
+        let mut runtime = ZctRuntime::new(host);
+        if zct_host::update::manages_updates() {
+            let updater = zct_host::update::Updater::new(target);
+            updater
+                .spawn_schedule(runtime.host.clone())
+                .map_err(|e| e.to_string())?;
+            runtime.updater = Some(updater);
+        }
+        Ok(Box::into_raw(Box::new(runtime)))
     })
 }
 
@@ -610,39 +628,68 @@ pub unsafe extern "C" fn zct_runtime_recover(runtime: *mut ZctRuntime) -> bool {
 pub unsafe extern "C" fn zct_is_terminal(app: *const c_char) -> bool {
     guard(|| Ok(zct_host::is_terminal(unsafe { text(app)? })))
 }
-/// Shared version ordering for the native updater.
+/// 自動更新的狀態；字串借用到下一次更新相關呼叫
+#[repr(C)]
+pub struct ZctUpdateStatus {
+    /// 正式版才管更新（開發版、ZCT_HOME 隔離測試不管）
+    pub supported: bool,
+    pub checking: bool,
+    /// 已下載驗證、等使用者按更新的版本；沒有是空字串
+    pub available: *const c_char,
+    pub message: *const c_char,
+}
+
 /// # Safety
-/// Arguments are NUL-terminated UTF-8.
+/// `runtime` is live; call on the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zct_version_newer(version: *const c_char, current: *const c_char) -> bool {
+pub unsafe extern "C" fn zct_update_status(runtime: *mut ZctRuntime) -> ZctUpdateStatus {
+    let empty = c"".as_ptr();
+    let mut out = ZctUpdateStatus {
+        supported: false,
+        checking: false,
+        available: empty,
+        message: empty,
+    };
+    let Some(runtime) = (unsafe { runtime.as_mut() }) else {
+        return out;
+    };
+    let Some(updater) = &runtime.updater else {
+        return out;
+    };
+    let status = updater.status();
+    runtime.update_available = string(status.available.as_deref().unwrap_or_default());
+    runtime.update_message = string(&status.message);
+    out.supported = true;
+    out.checking = status.checking;
+    out.available = runtime.update_available.as_ptr();
+    out.message = runtime.update_message.as_ptr();
+    out
+}
+
+/// 在背景立刻檢查更新；結果看 `zct_update_status`
+/// # Safety
+/// `runtime` is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_update_check(runtime: *mut ZctRuntime) -> bool {
     guard(|| {
-        let version = zct_update::Version::parse(unsafe { text(version)? }).ok_or("版號錯誤")?;
-        let current =
-            zct_update::Version::parse(unsafe { text(current)? }).ok_or("目前版號錯誤")?;
-        Ok(version.is_newer_than(&current))
+        let runtime = unsafe { runtime.as_ref() }.ok_or("空 runtime")?;
+        let updater = runtime.updater.as_ref().ok_or("只有正式版會檢查更新")?;
+        updater.check_in_background();
+        Ok(true)
     })
 }
 
-/// Verify an official download's signature, version, and rollback protection.
+/// 要安裝的檔案（重新驗證過簽章與版號）；沒有可安裝的版本是 NULL 並設定錯誤
 /// # Safety
-/// Paths and expected version are NUL-terminated UTF-8.
+/// `runtime` is live; the path is borrowed until the next update call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zct_update_verify(
-    file: *const c_char,
-    signature: *const c_char,
-    expected: *const c_char,
-) -> bool {
+pub unsafe extern "C" fn zct_update_pending(runtime: *mut ZctRuntime) -> *const c_char {
     guard(|| {
-        let bytes = std::fs::read(unsafe { text(file)? }).map_err(|e| e.to_string())?;
-        let signature =
-            std::fs::read_to_string(unsafe { text(signature)? }).map_err(|e| e.to_string())?;
-        let version = zct_update::verify(&zct_update::PUBLIC_KEY, &bytes, &signature)?;
-        if version.to_string() != unsafe { text(expected)? }
-            || !version.is_newer_than(&zct_update::Version::current())
-        {
-            return Err("更新版號不符或不是較新版本".into());
-        }
-        Ok(true)
+        let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
+        let updater = runtime.updater.as_ref().ok_or("只有正式版會更新")?;
+        let (_, file) = updater.pending_file().ok_or("沒有驗證過的更新檔")?;
+        runtime.update_file = string(&file.to_string_lossy());
+        Ok(runtime.update_file.as_ptr())
     })
 }
 /// Stateless AI connection test, safe on a background thread. Caller frees result.

@@ -6605,7 +6605,6 @@ dependencies = [
  "zct-core",
  "zct-host",
  "zct-preferences",
- "zct-update",
 ]
 
 [[package]]
@@ -6613,11 +6612,14 @@ name = "zct-host"
 version = "0.1.4"
 dependencies = [
  "log",
+ "serde",
  "serde_json",
  "tempfile",
+ "ureq",
  "zct-ai",
  "zct-core",
  "zct-preferences",
+ "zct-update",
 ]
 
 [[package]]
@@ -6647,8 +6649,6 @@ version = "0.1.4"
 dependencies = [
  "embed-resource",
  "log",
- "serde",
- "ureq",
  "windows",
  "windows-numerics",
  "zct-core",

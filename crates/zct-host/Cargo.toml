@@ -13,8 +13,11 @@ dev = ["zct-core/dev"]
 zct-core.workspace = true
 zct-preferences.workspace = true
 zct-ai = { path = "../zct-ai" }
+zct-update = { path = "../zct-update" }
 log.workspace = true
+serde.workspace = true
+serde_json = "1.0.154"
+ureq = "3"
 
 [dev-dependencies]
 tempfile = "3.27.0"
-serde_json = "1.0.154"

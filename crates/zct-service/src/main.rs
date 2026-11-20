@@ -64,7 +64,8 @@ mod app {
         /// 字母、數字、符號一律不記，避免記下使用者打的內容
         pub debug_keys: bool,
         /// 已下載、可以安裝的新版
-        pub update: crate::update::Available,
+        /// 自動更新（只有正式版，而且不是用 ZCT_HOME 另開的服務程序）
+        pub update: Option<Arc<zct_host::update::Updater>>,
     }
 
     /// 系統詞庫：正式安裝放在執行檔旁的 `dict/`；開發時可用 `ZCT_DICT` 指定
@@ -241,10 +242,14 @@ mod app {
         spawn_version_watch(host.clone())?;
 
         crate::update::fix_autostart();
-        let update = crate::update::Available::default();
-        if !version::read_only() {
-            crate::update::spawn(host.clone(), update.clone())?;
-        }
+        let update = match zct_host::update::Target::windows() {
+            Some(target) if zct_host::update::manages_updates() && !version::read_only() => {
+                let updater = zct_host::update::Updater::new(target);
+                updater.spawn_schedule(host.clone())?;
+                Some(updater)
+            }
+            _ => None,
+        };
         let shared = Arc::new(Shared {
             host,
             ui,
