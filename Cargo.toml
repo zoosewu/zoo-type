@@ -18,6 +18,7 @@ log = "0.4"
 zct-core = { path = "crates/zct-core" }
 zct-ipc = { path = "crates/zct-ipc" }
 zct-preferences = { path = "crates/zct-preferences" }
+zct-host = { path = "crates/zct-host" }
 
 [profile.release]
 lto = "thin"

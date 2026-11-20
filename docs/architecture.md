@@ -26,13 +26,16 @@ macOS：動物園輸入法.app（IMK 程序）直接內嵌 zct-core，不需要 
 | crate | 類型 | 平台 | 職責 |
 |-------|------|------|------|
 | `zct-core` | lib | 全部 | 引擎包裝、輸入狀態機、Shift 判定、按鍵放行規則、設定、資料路徑、簡繁輸出 |
+| `zct-host` | lib | 全部 | 主機層：session 生命週期、設定熱載入、AI 背景請求、遊戲模式、組字提示列、中英狀態記憶、提示文字 |
 | `zct-ipc` | lib | Windows | DLL ↔ 服務程序的訊息格式與編解碼（固定長度二進位，無配置） |
 | `zct-service` | bin | Windows | 常駐服務：session 管理、候選窗繪製、系統匣 |
 | `zct-tsf` | cdylib | Windows | TSF 文字服務（x86 / x64 / ARM64） |
 | `zct-ffi` | staticlib | macOS | C ABI（cbindgen）給 Swift 前端 |
 | `zct-settings` | bin | 全部 | Slint 設定 GUI |
 
-**原則**：所有「判斷」都在 `zct-core`（可單元測試、兩平台共用）；平台層只做轉譯。
+**原則**：所有「判斷」都在 `zct-core`（輸入法本身）與 `zct-host`（主機：一個程序、多個輸入 context 怎麼管理），
+兩平台共用、可單元測試；平台層（`zct-service` + `zct-tsf`、`zct-ffi` + Swift）只負責 UI 與 IO：
+收按鍵、畫候選窗、讀寫系統憑證、播放提示音、IPC / C ABI 轉換。
 
 ## 3. 核心介面（`zct-core`）
 

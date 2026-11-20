@@ -28,6 +28,8 @@ struct EngineResult {
     let mode: UInt32
     let aiPending: Bool
     let toggleCompositionBar: Bool
+    /// 這個 App 目前要不要顯示組字提示列（共用層依 App 規則、終端機、全域設定決定；快捷鍵已寫回 apps.toml）
+    let compositionBar: Bool
     let game: Bool
     let simplified: Bool
 
@@ -54,6 +56,7 @@ struct EngineResult {
         mode = value.mode
         aiPending = value.ai_pending
         toggleCompositionBar = value.toggle_composition_bar
+        compositionBar = value.composition_bar
         game = value.game
         simplified = value.simplified
     }
@@ -114,11 +117,11 @@ final class EngineRuntime: PreferencesClient {
 final class EngineSession {
     let runtime: EngineRuntime
     let handle: OpaquePointer
-    init(runtime: EngineRuntime, app: String, previousMode: UInt32? = nil) throws {
+    /// 同一個 App 再次啟用時，共用層會沿用上次的中英狀態
+    init(runtime: EngineRuntime, app: String) throws {
         self.runtime = runtime
         guard let handle = app.withCString({ zct_session_new(runtime.handle, $0) }) else { throw EngineError.current }
         self.handle = handle
-        if let mode = previousMode { zct_session_restore_mode(handle, mode) }
         guard zct_session_ai_enabled(handle) else { return }
         do {
             let key = try Credentials.read() ?? ""
@@ -133,7 +136,8 @@ final class EngineSession {
         try text.withCString { try EngineResult(zct_session_reconvert(handle, $0)) }
     }
     var isIdle: Bool { zct_session_is_idle(handle) }
-    func keepState(of old: EngineSession) { _ = zct_session_keep_state(handle, old.handle) }
+    /// 設定變了而且沒有組字：共用層換成新設定（沿用中英等狀態）。回傳有沒有換
+    func refresh() -> Bool { zct_session_refresh(handle) }
     func command(_ code: UInt32) throws -> EngineResult { try EngineResult(zct_session_command(handle, code)) }
     func choose(page: Int, row: Int) throws -> EngineResult { try EngineResult(zct_session_choose(handle, UInt(max(0, page)), UInt(max(0, row)))) }
     func poll() throws -> EngineResult? {

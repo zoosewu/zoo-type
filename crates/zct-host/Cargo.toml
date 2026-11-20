@@ -1,0 +1,19 @@
+[package]
+name = "zct-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Windows 服務程序與 macOS 共用的主機層：session 生命週期、設定熱載入、AI、提示文字"
+
+[features]
+dev = ["zct-core/dev"]
+
+[dependencies]
+zct-core.workspace = true
+zct-ai = { path = "../zct-ai" }
+log.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
+serde_json = "1.0.154"

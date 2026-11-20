@@ -58,13 +58,14 @@ private func settingsAcceptanceTest(runtime: EngineRuntime, capture: (NSView, St
     }
     func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     let initial = try PreferencesModel(client: runtime)
-    initial.apps = [["name": "Editor", "macos": "test.Editor", "windows": "editor.exe", "detect": false]]
-    try initial.saveCompositionBar(true, for: "test.Editor")
-    try initial.saveCompositionBar(false, for: "test.Terminal")
+    // 組字提示列快捷鍵寫回 apps.toml 的行為在共用層（zct-host 測試）；這裡只驗設定畫面保留跨平台欄位
+    initial.apps = [["name": "Editor", "macos": "test.Editor", "windows": "editor.exe", "detect": false, "composition_bar": true],
+                    ["name": "test.Terminal", "macos": "test.Terminal", "composition_bar": false]]
+    try initial.save()
     try initial.reload()
     try check(initial.apps.count == 2 && initial.apps[0]["windows"] as? String == "editor.exe" &&
               initial.apps[0]["detect"] as? Bool == false && initial.apps[0]["composition_bar"] as? Bool == true &&
-              initial.apps[1]["composition_bar"] as? Bool == false, "組字列快捷鍵保留跨平台 App 規則")
+              initial.apps[1]["composition_bar"] as? Bool == false, "App 規則保留跨平台欄位")
     let original: [String: Any] = [
         "candidates.habit": "custom", "candidates.select": "before", "candidates.after_select": "backward",
         "input.output": "simplified", "input.on_focus": "reset", "toggle.shift_tap_max_ms": 321,

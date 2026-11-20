@@ -1,48 +1,13 @@
 //! 一條 DLL 連線 = 一個 App 執行緒 = 一個輸入 session
 
-use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use zct_core::CandidatePage;
-
-use zct_core::{InputMode, KeyResult, Output, Session, SessionOptions, Width};
+use zct_core::{InputMode, KeyResult, Output};
+use zct_host::HostSession;
 use zct_ipc::pipe::ServerConn;
 use zct_ipc::{Command, PROTOCOL_VERSION, Request, Response};
 use zct_preferences::{Action, Backend, EngineBackend, Reply};
 
 use crate::app::Shared;
 use crate::ui::UiCmd;
-
-/// 狀態提示文字；同時發生多個變化時，只顯示最重要的一個
-fn hint(r: &KeyResult, game: Option<bool>) -> Option<String> {
-    if let Some(on) = game {
-        return Some(if on { "遊戲模式" } else { "一般模式" }.into());
-    }
-    if let Some(n) = &r.notice {
-        return Some(n.clone());
-    }
-    static_hint(r).map(str::to_owned)
-}
-
-fn static_hint(r: &KeyResult) -> Option<&'static str> {
-    if let Some(m) = r.mode_changed {
-        return Some(match m {
-            InputMode::Chinese => "中",
-            InputMode::English => "A",
-        });
-    }
-    if let Some(w) = r.width_changed {
-        return Some(match w {
-            Width::Full => "全形",
-            Width::Half => "半形",
-        });
-    }
-    r.output_changed.map(|o| match o {
-        Output::Traditional => "動",
-        Output::Simplified => "动",
-    })
-}
 
 /// 按鍵診斷：只記錄非字元鍵，絕不記錄字母、數字與符號
 fn debug_key(shared: &Shared, id: u64, stage: &str, ev: &zct_core::KeyEvent, result: &str) {
@@ -69,99 +34,6 @@ fn debug_key(shared: &Shared, id: u64, stage: &str, ev: &zct_core::KeyEvent, res
     );
 }
 
-/// 預設開啟組字提示列的純終端機（App 自己不顯示或常被 TUI 藏起組字）
-const TERMINALS: &[&str] = &[
-    "WindowsTerminal.exe",
-    "OpenConsole.exe",
-    "conhost.exe",
-    "wezterm-gui.exe",
-    "alacritty.exe",
-    "mintty.exe",
-];
-
-/// 這個 App 要不要顯示組字提示列：App 規則 > 純終端機 > 全域設定
-fn composition_bar_for(exe: &str, shared: &Shared) -> bool {
-    let (config, apps) = shared.settings.current();
-    apps.find(exe)
-        .and_then(|r| r.composition_bar)
-        .unwrap_or_else(|| {
-            TERMINALS.iter().any(|t| t.eq_ignore_ascii_case(exe)) || config.theme.composition_bar
-        })
-}
-
-fn open_session(id: u64, exe: &str, shared: &Shared) -> Result<Session, String> {
-    let (config, apps) = shared.settings.current();
-    let rule = apps.find(exe).cloned();
-    if let Some(r) = &rule {
-        log::info!(
-            "[{id}] 套用 App 規則「{}」",
-            if r.name.is_empty() { exe } else { &r.name }
-        );
-    }
-    Session::new(&SessionOptions {
-        engine: shared.engine.clone(),
-        config,
-        rule,
-    })
-    .map_err(|e| e.to_string())
-}
-
-/// 背景 AI 請求的結果：（原文, 修正結果或錯誤）
-type AiMailbox = Arc<Mutex<Option<(String, Result<String, String>)>>>;
-
-/// 在背景呼叫 AI；結果放進信箱，並直接更新候選窗（不必等下一次按鍵）
-/// `syllables`：組字區每個字的讀音；AI 結果只接受讀音相同的字，顯示的就是按 Enter 會採用的
-fn spawn_ai(
-    id: u64,
-    original: String,
-    syllables: Vec<Option<String>>,
-    shared: &Shared,
-    mailbox: AiMailbox,
-) {
-    let cfg = shared.settings.current().0.ai;
-    let ui = shared.ui.clone();
-    let engine = shared.engine.clone();
-    let endpoint = zct_ai::Endpoint {
-        base_url: cfg.endpoint.clone(),
-        model: cfg.model.clone(),
-        api_key: zct_ipc::secret::read_ai_key(),
-        timeout: Duration::from_secs(cfg.timeout_seconds.max(1)),
-    };
-    std::thread::spawn(move || {
-        let result = zct_ai::correct(&endpoint, &original)
-            .map(|fixed| engine.keep_same_reading(&original, &syllables, &fixed))
-            .map_err(|e| e.to_string());
-        match &result {
-            Ok(fixed) if *fixed != original => ui.send(UiCmd::Show {
-                owner: id,
-                page: CandidatePage {
-                    items: vec![fixed.clone()],
-                    page: 0,
-                    total_pages: 1,
-                    highlight: 0,
-                    pinned: vec![false],
-                    ..Default::default()
-                },
-                anchor: None,
-            }),
-            Ok(_) => ui.send(UiCmd::Hint {
-                text: "AI：沒有發現錯字".into(),
-                anchor: None,
-            }),
-            Err(e) => {
-                log::warn!("[{id}] {e}");
-                ui.send(UiCmd::Hint {
-                    text: "AI 修正失敗".into(),
-                    anchor: None,
-                });
-            }
-        }
-        if let Ok(mut m) = mailbox.lock() {
-            *m = Some((original, result));
-        }
-    });
-}
-
 /// 輸入法圖示右鍵選單
 fn run_command(cmd: Command, shared: &Shared) {
     match cmd {
@@ -179,8 +51,7 @@ fn run_command(cmd: Command, shared: &Shared) {
             }
         }
         Command::ToggleGame => {
-            let on = !shared.game.fetch_xor(true, Ordering::Relaxed);
-            log::info!("輸入法圖示：遊戲模式{}", if on { "開" } else { "關" });
+            shared.host.toggle_game();
         }
         Command::InstallUpdate => {
             log::info!("輸入法圖示：安裝更新");
@@ -190,32 +61,27 @@ fn run_command(cmd: Command, shared: &Shared) {
         }
         Command::Restart => {
             log::info!("重新啟動");
-            let _ = shared.engine.save();
+            let _ = shared.host.engine().save();
             shared.ui.send(UiCmd::Exit);
         }
         Command::PrepareMove => {
             log::info!("變更資料位置：存檔並停止寫入");
-            if let Err(e) = shared.engine.save() {
+            let engine = shared.host.engine();
+            if let Err(e) = engine.save() {
                 log::warn!("存檔失敗：{e}");
             }
-            shared.engine.freeze();
+            engine.freeze();
             crate::version::set_read_only();
+            shared.host.settings().set_read_only();
         }
     }
 }
 
 pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let _active = crate::version::ActiveGuard::new();
-    let mut session: Option<Session> = None;
-    // session 建立時的設定版本；設定變更後在沒有組字時換成新的 session
-    let mut session_rev = 0;
-    let mailbox: AiMailbox = Arc::new(Mutex::new(None));
-    // 最近一次按鍵結果與狀態提示，等 DLL 回報游標位置後再決定候選窗怎麼顯示
-    let mut last: Option<(KeyResult, Option<String>)> = None;
-    // 這個連線的 App 與組字提示列設定（連線時決定，快捷鍵切換）
-    let mut app = String::new();
-    let mut app_pid: Option<u32> = None;
-    let mut bar = false;
+    let mut session: Option<HostSession> = None;
+    // 最近一次按鍵結果（提示文字在 notice），等 DLL 回報游標位置後再決定候選窗怎麼顯示
+    let mut last: Option<KeyResult> = None;
     // 組字提示列的位置：組字開始時的游標位置，組字結束前不跟著游標移動
     let mut bar_anchor: Option<zct_ipc::Rect> = None;
     // 提示列的位置是 App 回報的（不是沿用舊位置）；沿用的話，App 回報後改用新位置
@@ -230,31 +96,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 break;
             }
         };
-        let rev = shared.settings.revision();
-        if rev != session_rev
-            && let Some(old) = session.as_ref().filter(|s| s.is_idle())
-        {
-            match open_session(id, &app, shared) {
-                Ok(mut s) => {
-                    s.keep_state_of(old);
-                    bar = composition_bar_for(&app, shared);
-                    session = Some(s);
-                    session_rev = rev;
-                    log::info!("[{id}] 套用新設定");
-                }
-                Err(e) => {
-                    // 沿用舊 session，不每次按鍵重試
-                    session_rev = rev;
-                    log::error!("[{id}] {e}");
-                }
-            }
-        }
+        // 套用新設定、同步遊戲模式、收下回來的 AI 結果（只查詢狀態的請求也要最新）
         if let Some(s) = session.as_mut() {
-            s.set_global_game(shared.game.load(Ordering::Relaxed));
-            // AI 結果回來了：交給 session，接下來的 Enter / 1 就能採用
-            if let Some((original, Ok(fixed))) = mailbox.lock().ok().and_then(|mut m| m.take()) {
-                s.set_ai_suggestion(&original, fixed);
-            }
+            s.sync();
         }
         let resp = match req {
             Request::Hello { version, pid, exe } => {
@@ -263,21 +107,10 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     Response::Error(format!("protocol {PROTOCOL_VERSION} expected"))
                 } else {
                     log::info!("[{id}] 連線：{exe}（pid {pid}）");
-                    bar = composition_bar_for(&exe, shared);
-                    app = exe.clone();
-                    app_pid = Some(pid);
-                    session_rev = shared.settings.revision();
-                    match open_session(id, &exe, shared) {
-                        Ok(mut s) => {
-                            let saved = shared
-                                .last_mode
-                                .lock()
-                                .ok()
-                                .and_then(|m| m.get(&pid).copied());
-                            if let Some(mode) = saved {
-                                s.restore_mode(mode);
-                            }
-                            let (detect_legacy, detect_fullscreen) = s.detection();
+                    // 切到別的輸入法時連線會斷：同一個程序再連回來沿用中英狀態
+                    match HostSession::open(&shared.host, id, &exe, &format!("pid:{pid}")) {
+                        Ok(s) => {
+                            let (detect_legacy, detect_fullscreen) = s.session().detection();
                             session = Some(s);
                             Response::Welcome {
                                 detect_legacy,
@@ -301,7 +134,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             },
             Request::Key(ev) => match session.as_mut() {
                 Some(s) => {
-                    let r = s.process_key(&ev);
+                    let r = s.key(&ev);
                     debug_key(
                         shared,
                         id,
@@ -322,28 +155,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                             );
                         }
                     }
-                    if let Some(text) = &r.ai_request {
-                        spawn_ai(id, text.clone(), s.syllables(), shared, mailbox.clone());
-                    }
-                    let game = r.toggle_game.then(|| {
-                        let on = !shared.game.fetch_xor(true, Ordering::Relaxed);
-                        s.set_global_game(on);
-                        log::info!("[{id}] 遊戲模式：{}", if on { "開" } else { "關" });
-                        on
-                    });
-                    let mut tip = hint(&r, game);
-                    if r.toggle_composition_bar {
-                        bar = !bar;
-                        if let Err(e) = shared.settings.set_composition_bar(&app, bar) {
-                            log::warn!("[{id}] 寫入 App 規則失敗：{e}");
-                        }
-                        log::info!(
-                            "[{id}] 組字提示列：{}（{app}）",
-                            if bar { "開" } else { "關" }
-                        );
-                        tip = Some(format!("組字提示列：{}", if bar { "開" } else { "關" }));
-                    }
-                    last = Some((r.clone(), tip));
+                    last = Some(r.clone());
                     Response::Key(r)
                 }
                 None => Response::Key(KeyResult::default()),
@@ -358,7 +170,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                         text.chars().count(),
                         start.elapsed().as_millis()
                     );
-                    last = Some((r.clone(), hint(&r, None)));
+                    last = Some(r.clone());
                     Response::Key(r)
                 }
                 None => Response::Key(KeyResult::default()),
@@ -367,7 +179,8 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 if shared.debug_keys {
                     log::info!("[{id}] 游標位置 {rect:?} fresh={fresh}");
                 }
-                if let Some((r, hint)) = last.take() {
+                if let Some(r) = last.take() {
+                    let bar = session.as_ref().is_some_and(|s| s.composition_bar());
                     if r.preedit.text.is_empty() {
                         bar_anchor = None;
                         anchor_fresh = false;
@@ -389,7 +202,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                         }),
                         None => shared.ui.send(UiCmd::HideCandidates { owner: id }),
                     }
-                    if let Some(text) = hint {
+                    if let Some(text) = r.notice {
                         shared.ui.send(UiCmd::Hint { text, anchor: rect });
                     }
                 }
@@ -416,7 +229,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     Request::Backups => Action::Backups,
                     _ => unreachable!(),
                 };
-                match EngineBackend::new(&shared.engine, &shared.backup).execute(action) {
+                match EngineBackend::new(&shared.host.engine(), &shared.backup).execute(action) {
                     Ok(Reply::Done { .. }) => Response::Ok,
                     Ok(Reply::Phrases { items }) => {
                         Response::Phrases(items.into_iter().map(|row| row.entry).collect())
@@ -430,7 +243,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
             }
             Request::Restore { day } => {
-                let result = EngineBackend::new(&shared.engine, &shared.backup)
+                let result = EngineBackend::new(&shared.host.engine(), &shared.backup)
                     .execute(Action::Restore { day });
                 // Reload even after a copy error: restore may already have frozen
                 // the old engine. Reconnection creates fresh sessions.
@@ -447,12 +260,14 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
             Request::Status => Response::Status {
                 chinese: session
                     .as_ref()
-                    .is_none_or(|s| s.mode() == InputMode::Chinese),
+                    .is_none_or(|s| s.session().mode() == InputMode::Chinese),
                 simplified: session
                     .as_ref()
-                    .is_some_and(|s| s.output() == Output::Simplified),
-                game: shared.game.load(Ordering::Relaxed),
-                right_alt: session.as_ref().is_some_and(|s| s.right_alt_enabled()),
+                    .is_some_and(|s| s.session().output() == Output::Simplified),
+                game: shared.host.game(),
+                right_alt: session
+                    .as_ref()
+                    .is_some_and(|s| s.session().right_alt_enabled()),
                 // 新版已經裝好、這是還在服務舊 App 的舊版：選單不再出現「更新到 vX」
                 update: (!crate::version::stale())
                     .then(|| {
@@ -463,12 +278,14 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                             .clone()
                     })
                     .flatten(),
-                passthrough: session.as_ref().and_then(|s| s.passthrough_keys()),
+                passthrough: session
+                    .as_ref()
+                    .and_then(|s| s.session().passthrough_keys()),
             },
             Request::ToggleMode => match session.as_mut() {
                 Some(s) => {
                     let r = s.toggle_mode();
-                    last = Some((r.clone(), hint(&r, None)));
+                    last = Some(r.clone());
                     Response::Key(r)
                 }
                 None => Response::Key(KeyResult::default()),
@@ -512,15 +329,10 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
         }
     }
     shared.ui.send(UiCmd::Hide { owner: id });
-    if let (Some(pid), Some(s), Ok(mut m)) = (app_pid, &session, shared.last_mode.lock()) {
-        // 已經結束的程序不會再用到；數量多了就整個清掉（只是少了沿用，不影響功能）
-        if m.len() > 256 {
-            m.clear();
-        }
-        m.insert(pid, s.mode());
-    }
+    // 中英狀態由 HostSession 記住
+    drop(session);
     // App 關閉時順便存檔，縮短當機時遺失學習的時間窗
-    if let Err(e) = shared.engine.save() {
+    if let Err(e) = shared.host.engine().save() {
         log::error!("學習紀錄存檔失敗：{e}");
     }
     log::debug!("[{id}] 斷線");

@@ -14,14 +14,12 @@ struct CandidateTheme {
     var text = NSColor(calibratedWhite: 0.102, alpha: 1)
     var number = NSColor(calibratedWhite: 0.478, alpha: 1)
     var highlight = NSColor(calibratedRed: 0.8, green: 0.894, blue: 0.969, alpha: 1)
-    var compositionBar = false
 
     init(config: [String: Any] = [:]) {
         guard let theme = config["theme"] as? [String: Any] else { return }
         horizontal = theme["layout"] as? String == "horizontal"
         fontName = theme["font"] as? String ?? fontName
         fontSize = max(8, min(48, CGFloat((theme["font_size"] as? NSNumber)?.doubleValue ?? 16)))
-        compositionBar = theme["composition_bar"] as? Bool ?? false
         background = Self.color(theme["background"] as? String) ?? background
         text = Self.color(theme["text"] as? String) ?? text
         number = Self.color(theme["number"] as? String) ?? number

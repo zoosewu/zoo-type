@@ -9,8 +9,6 @@ mod conn;
 #[cfg(windows)]
 mod logger;
 #[cfg(windows)]
-mod settings;
-#[cfg(windows)]
 mod sync;
 #[cfg(windows)]
 mod ui;
@@ -46,7 +44,6 @@ fn main() {
 mod app {
     use std::path::PathBuf;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
 
     use windows::core::HSTRING;
 
@@ -58,24 +55,22 @@ mod app {
     use zct_core::Engine;
     use zct_core::paths::DataRoot;
 
-    use crate::{conn, logger, settings, sync, ui, version};
+    use zct_core::CandidatePage;
+    use zct_host::{AiDisplay, Host, Platform};
+
+    use crate::{conn, logger, sync, ui, version};
 
     pub struct Shared {
-        pub settings: Arc<settings::Settings>,
+        /// 所有連線共用的引擎、設定、遊戲模式與中英狀態記憶
+        pub host: Arc<Host>,
         /// 觸發「立即同步」
         pub sync: std::sync::mpsc::Sender<()>,
-        /// 所有連線共用的詞庫與學習紀錄
-        pub engine: Arc<Engine>,
         /// 每日備份資料夾
         pub backup: PathBuf,
-        /// 手動快捷鍵或系統匣開啟的全域遊戲模式
-        pub game: Arc<AtomicBool>,
         pub ui: ui::UiHandle,
         /// 診斷用：資料夾 local/ 下有 `debug-keys` 檔案時，記錄非字元鍵（Shift、Delete…）的事件；
         /// 字母、數字、符號一律不記，避免記下使用者打的內容
         pub debug_keys: bool,
-        /// 每個 App（程序 ID）最後的中英狀態：切到別的輸入法時連線會斷，切回來時沿用
-        pub last_mode: std::sync::Mutex<std::collections::HashMap<u32, zct_core::InputMode>>,
         /// 已下載、可以安裝的新版
         pub update: crate::update::Available,
     }
@@ -95,13 +90,14 @@ mod app {
     }
 
     /// 背景存檔：學習紀錄只在記憶體中更新，這裡定期寫檔並每日備份
-    fn spawn_saver(engine: Arc<Engine>, backup: PathBuf) -> std::io::Result<()> {
+    fn spawn_saver(host: Arc<Host>, backup: PathBuf) -> std::io::Result<()> {
         const INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
         const KEEP_DAYS: usize = 7;
         std::thread::Builder::new()
             .name("saver".into())
             .spawn(move || {
                 loop {
+                    let engine = host.engine();
                     if let Err(e) = engine.save() {
                         log::error!("學習紀錄存檔失敗：{e}");
                     }
@@ -124,7 +120,7 @@ mod app {
             .spawn(move || {
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(1));
-                    let current = shared.settings.current().0.theme;
+                    let current = shared.host.settings().current().0.theme;
                     if current != theme {
                         theme = current;
                         shared.ui.send(ui::UiCmd::Theme(theme.clone()));
@@ -135,7 +131,7 @@ mod app {
     }
 
     /// 已有更新的版本：協定相同就讓位給新版；不同就改為唯讀，定期檢查時沒有連線就結束
-    fn handle_stale(engine: Option<&Engine>) {
+    fn handle_stale(host: Option<&Host>) {
         match version::state() {
             version::State::Current => {}
             version::State::Stale {
@@ -159,12 +155,13 @@ mod app {
                     log::info!("已有新版（協定不同），繼續服務舊 App，但不再寫入使用者資料");
                     version::set_read_only();
                 }
-                if let Some(engine) = engine {
-                    engine.freeze();
+                if let Some(host) = host {
+                    host.engine().freeze();
+                    host.settings().set_read_only();
                 }
-                // 剛啟動（`engine` 是 None）多半是舊 DLL 叫起這個舊版、正要連線：先服務，
+                // 剛啟動（`host` 是 None）多半是舊 DLL 叫起這個舊版、正要連線：先服務，
                 // 由之後每 30 秒的檢查判斷要不要結束；啟動時就結束會讓舊 App 一直連不上（只能打英文）
-                if engine.is_some() && version::active() == 0 {
+                if host.is_some() && version::active() == 0 {
                     log::info!("舊版沒有連線，結束");
                     std::process::exit(0);
                 }
@@ -173,13 +170,13 @@ mod app {
     }
 
     /// 每 30 秒檢查是否已安裝新版本
-    fn spawn_version_watch(engine: Arc<Engine>) -> std::io::Result<()> {
+    fn spawn_version_watch(host: Arc<Host>) -> std::io::Result<()> {
         std::thread::Builder::new()
             .name("version".into())
             .spawn(move || {
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(30));
-                    handle_stale(Some(&engine));
+                    handle_stale(Some(&host));
                 }
             })
             .map(|_| ())
@@ -228,9 +225,10 @@ mod app {
         }
         handle_stale(None);
 
-        // 設定檔寫錯時仍要能打字：settings 會記錄錯誤並改用上一份正確的設定或預設值
-        let settings = Arc::new(settings::Settings::new(&data));
-        let theme = settings.current().0.theme;
+        // 設定檔寫錯時仍要能打字：主機的設定會記錄錯誤並改用上一份正確的設定或預設值
+        let theme = zct_core::Config::load(&data.config())
+            .map(|c| c.theme)
+            .unwrap_or_default();
         let sys_dict_dir = find_sys_dict()?;
         log::info!("系統詞庫：{}", sys_dict_dir.display());
 
@@ -244,27 +242,45 @@ mod app {
         if version::read_only() {
             engine.freeze();
         }
-        let engine = Arc::new(engine);
-        spawn_saver(engine.clone(), data.backup())?;
-        spawn_version_watch(engine.clone())?;
-        let sync = sync::spawn(data.clone(), settings.clone(), engine.clone())?;
-
-        let game = Arc::new(AtomicBool::new(false));
         let ui = ui::spawn(theme.clone())?;
+        // AI 結果回來時直接更新候選窗，不必等下一次按鍵
+        let notify_ui = ui.clone();
+        let host = Host::new(Platform::Windows, &data, Arc::new(engine))
+            .with_ai_key_source(Box::new(zct_ipc::secret::read_ai_key))
+            .with_ai_notify(Box::new(move |owner, display| match display {
+                AiDisplay::Suggestion(text) => notify_ui.send(ui::UiCmd::Show {
+                    owner,
+                    page: CandidatePage {
+                        items: vec![text],
+                        page: 0,
+                        total_pages: 1,
+                        highlight: 0,
+                        pinned: vec![false],
+                        ..Default::default()
+                    },
+                    anchor: None,
+                }),
+                AiDisplay::Notice(text) => notify_ui.send(ui::UiCmd::Hint { text, anchor: None }),
+            }));
+        if version::read_only() {
+            host.settings().set_read_only();
+        }
+        let host = Arc::new(host);
+        spawn_saver(host.clone(), data.backup())?;
+        spawn_version_watch(host.clone())?;
+        let sync = sync::spawn(data.clone(), host.clone())?;
+
         crate::update::fix_autostart();
         let update = crate::update::Available::default();
         if !version::read_only() {
-            crate::update::spawn(settings.clone(), update.clone())?;
+            crate::update::spawn(host.clone(), update.clone())?;
         }
         let shared = Arc::new(Shared {
-            settings,
+            host,
             sync,
-            engine,
             backup: data.backup(),
-            game,
             ui,
             debug_keys: data.local().join("debug-keys").exists(),
-            last_mode: Default::default(),
             update,
         });
         if shared.debug_keys {

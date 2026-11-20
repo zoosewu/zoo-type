@@ -16,13 +16,11 @@ final class InputController: IMKInputController {
     private var showComposition = false
     private var aiTimer: Timer?
     private var settingsTimer: Timer?
-    private var settingsRevision = ""
     private var detectFullscreen = true
     private var compositionAnchor: NSRect?
     private var game = false
     private var simplified = false
     private var replacement = NSRange(location: NSNotFound, length: 0)
-    private static var modes: [String: UInt32] = [:]
 
     override func recognizedEvents(_ sender: Any!) -> Int {
         Int(NSEvent.EventTypeMask.keyDown.rawValue | NSEvent.EventTypeMask.keyUp.rawValue |
@@ -32,10 +30,7 @@ final class InputController: IMKInputController {
 
     override func activateServer(_ sender: Any!) {
         guard let client = (sender as? IMKTextInput) ?? client() else { return }
-        if engine != nil {
-            commitComposition(sender)
-            Self.modes[appID] = mode
-        }
+        if engine != nil { commitComposition(sender) }
         let clientID = client.bundleIdentifier() ?? ""
         appID = clientID.isEmpty ? (NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") : clientID
         NotificationCenter.default.removeObserver(self, name: .zctSettingsChanged, object: nil)
@@ -46,11 +41,12 @@ final class InputController: IMKInputController {
         replacement = NSRange(location: NSNotFound, length: 0)
         do {
             guard let runtime = appRuntime else { throw EngineError(description: "輸入引擎未啟動，請查看 Console 的 ZooType 記錄") }
-            engine = try EngineSession(runtime: runtime, app: appID, previousMode: Self.modes[appID])
+            engine = try EngineSession(runtime: runtime, app: appID)
             let state = try engine!.command(5)
             mode = state.mode
             simplified = state.simplified
             game = state.game
+            showComposition = state.compositionBar
             let snapshot = try runtime.preferences(["op": "load"])["snapshot"] as? [String: Any] ?? [:]
             applySettings(snapshot)
             settingsTimer?.invalidate()
@@ -60,7 +56,6 @@ final class InputController: IMKInputController {
 
     override func deactivateServer(_ sender: Any!) {
         commitComposition(sender)
-        Self.modes[appID] = mode
         aiTimer?.invalidate(); settingsTimer?.invalidate()
         compositionAnchor = nil
         engine = nil
@@ -107,13 +102,8 @@ final class InputController: IMKInputController {
         }
         if modifiersDown.contains(61) { mods |= 32 }
         do {
-            var result = try engine.key(code: event.keyCode, modifiers: mods, released: released,
+            let result = try engine.key(code: event.keyCode, modifiers: mods, released: released,
                                         time: UInt64(max(0, event.timestamp * 1000)))
-            if result.toggleCompositionBar {
-                showComposition.toggle()
-                do { try persistCompositionBar(); result.notice = "組字提示列：" + (showComposition ? "開" : "關") }
-                catch { showComposition.toggle(); result.notice = "無法儲存組字提示列：" + String(describing: error) }
-            }
             render(result, client: client, handledKeyDown: event.type == .keyDown && result.eaten)
             if result.aiPending { pollAI(engine) }
             if result.reconvert { reconvert(client: client) }
@@ -159,7 +149,7 @@ final class InputController: IMKInputController {
 
     private func render(_ result: EngineResult, client: IMKTextInput, handledKeyDown: Bool = false) {
         if !result.aiPending { aiTimer?.invalidate() }
-        mode = result.mode; game = result.game; simplified = result.simplified
+        mode = result.mode; game = result.game; simplified = result.simplified; showComposition = result.compositionBar
         if !result.commit.isEmpty {
             client.insertText(result.commit, replacementRange: replacement)
             replacement = NSRange(location: NSNotFound, length: 0)
@@ -209,14 +199,8 @@ final class InputController: IMKInputController {
             catch { timer.invalidate(); NSLog("ZooType AI: %@", String(describing: error)) }
         }
     }
-    private func persistCompositionBar() throws {
-        guard let runtime = appRuntime, !appID.isEmpty else { throw EngineError(description: "無法辨識目前 App") }
-        try PreferencesModel(client: runtime).saveCompositionBar(showComposition, for: appID)
-    }
-    static func isTerminal(_ bundleID: String) -> Bool {
-        ["com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "com.github.wez.wezterm"]
-            .contains { $0.caseInsensitiveCompare(bundleID) == .orderedSame }
-    }
+    /// 終端機清單在共用層（與 Windows 同一份）
+    static func isTerminal(_ bundleID: String) -> Bool { bundleID.withCString { zct_is_terminal($0) } }
 
     private func applySettings(_ snapshot: [String: Any]) {
         let document = snapshot["document"] as? [String: Any]
@@ -226,20 +210,14 @@ final class InputController: IMKInputController {
         theme = CandidateTheme(config: config)
         let fullscreen = (config["detect"] as? [String: Any])?["fullscreen"] as? Bool ?? true
         detectFullscreen = fullscreen && (rule?["detect"] as? Bool ?? true)
-        showComposition = rule?["composition_bar"] as? Bool ?? (theme.compositionBar || Self.isTerminal(appID))
-        settingsRevision = snapshot["revision"] as? String ?? ""
     }
     private func refreshIdleSettings() {
-        guard let engine, engine.isIdle, let runtime = appRuntime, let client = client() else { return }
+        // 共用層判斷設定有沒有變、能不能換（組字中等組字結束）；換了才重新讀外觀
+        guard let engine, let runtime = appRuntime, let client = client(), engine.refresh() else { return }
         do {
             let snapshot = try runtime.preferences(["op": "load"])["snapshot"] as? [String: Any] ?? [:]
-            if snapshot["revision"] as? String != settingsRevision {
-                let fresh = try EngineSession(runtime: runtime, app: appID)
-                fresh.keepState(of: engine)
-                self.engine = fresh
-                applySettings(snapshot)
-                render(try fresh.command(5), client: client)
-            }
+            applySettings(snapshot)
+            render(try engine.command(5), client: client)
         } catch { NSLog("ZooType settings reload: %@", String(describing: error)) }
     }
     private func performCommand(_ code: UInt32) {
@@ -294,7 +272,7 @@ final class InputController: IMKInputController {
         return menu
     }
 
-    @objc private func settingsDidChange(_ sender: Any?) { settingsRevision = ""; refreshIdleSettings() }
+    @objc private func settingsDidChange(_ sender: Any?) { refreshIdleSettings() }
     @objc private func prepareUpdate(_ sender: Any?) { commitComposition(client()); aiTimer?.invalidate() }
     @objc private func installUpdate(_ sender: Any?) { UpdateManager.shared.install() }
     @objc private func toggleMode(_ sender: Any?) { performCommand(0) }

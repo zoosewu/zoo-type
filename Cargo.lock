@@ -6603,8 +6603,20 @@ dependencies = [
  "toml 1.2.0+spec-1.1.0",
  "zct-ai",
  "zct-core",
+ "zct-host",
  "zct-preferences",
  "zct-update",
+]
+
+[[package]]
+name = "zct-host"
+version = "0.1.4"
+dependencies = [
+ "log",
+ "serde_json",
+ "tempfile",
+ "zct-ai",
+ "zct-core",
 ]
 
 [[package]]
@@ -6638,8 +6650,8 @@ dependencies = [
  "ureq",
  "windows",
  "windows-numerics",
- "zct-ai",
  "zct-core",
+ "zct-host",
  "zct-ipc",
  "zct-preferences",
  "zct-update",

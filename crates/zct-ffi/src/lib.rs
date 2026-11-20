@@ -1,18 +1,16 @@
 //! macOS 的 C ABI。所有呼叫在 IMK 主執行緒；handle 不可跨執行緒並行使用。
 //! 結果字串由 session 擁有，僅保證在該 session 下一次呼叫前有效。
 
+#[cfg(test)]
 mod ai;
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use zct_core::paths::DataRoot;
-use zct_core::{
-    AppRules, Config, Engine, InputMode, Key, KeyEvent, KeyResult, Mods, Session, SessionOptions,
-    Side,
-};
+use zct_core::{AppRules, Config, Engine, InputMode, Key, KeyEvent, KeyResult, Mods, Side};
+use zct_host::{Host, HostSession};
 
 thread_local! {
     static ERROR: RefCell<CString> = RefCell::new(CString::default());
@@ -46,14 +44,15 @@ unsafe fn text<'a>(p: *const c_char) -> Result<&'a str, String> {
 }
 
 pub struct ZctRuntime {
-    engine: Arc<Engine>,
+    /// 引擎、設定熱載入、遊戲模式、中英狀態記憶（與 Windows 服務程序共用）
+    host: Arc<Host>,
+    next_session: u64,
     sync: zct_preferences::SyncWorker,
     data: DataRoot,
     dictionary: std::path::PathBuf,
     config_path: CString,
     settings_buffer: CString,
     read_only: bool,
-    game: Arc<AtomicBool>,
 }
 
 fn open_engine(dictionary: &std::path::Path, data: &DataRoot) -> Result<Arc<Engine>, String> {
@@ -63,12 +62,8 @@ fn open_engine(dictionary: &std::path::Path, data: &DataRoot) -> Result<Arc<Engi
 }
 
 pub struct ZctSession {
-    inner: Session,
+    inner: HostSession,
     snapshot: Snapshot,
-    game: Arc<AtomicBool>,
-    ai_config: zct_core::config::AiConfig,
-    ai_key: Option<String>,
-    ai_reply: Option<std::sync::mpsc::Receiver<ai::Reply>>,
 }
 
 #[derive(Default)]
@@ -126,6 +121,8 @@ pub struct ZctResult {
     pub toggle_composition_bar: bool,
     pub game: bool,
     pub simplified: bool,
+    /// 這個 App 目前要不要顯示組字提示列（App 規則 > 終端機 > 全域；快捷鍵切換後已寫回 apps.toml）
+    pub composition_bar: bool,
 }
 
 impl ZctSession {
@@ -134,17 +131,18 @@ impl ZctSession {
         let (start, length) = display.target_utf16().unwrap_or_default();
         let mut out = ZctResult {
             ok: true,
-            ai_pending: self.ai_reply.is_some(),
+            ai_pending: self.inner.ai_pending(),
             toggle_composition_bar: r.toggle_composition_bar,
-            game: self.game.load(Ordering::Relaxed),
-            simplified: self.inner.output() == zct_core::Output::Simplified,
+            composition_bar: self.inner.composition_bar(),
+            game: self.inner.game(),
+            simplified: self.inner.simplified(),
             eaten: r.eaten,
             cursor: display.cursor_utf16(),
             target_start: start,
             target_length: length,
             bell: r.bell,
             reconvert: r.reconvert,
-            mode: u32::from(self.inner.mode() == InputMode::English),
+            mode: u32::from(self.inner.session().mode() == InputMode::English),
             ..ZctResult::default()
         };
         self.snapshot = Snapshot {
@@ -231,14 +229,14 @@ pub unsafe extern "C" fn zct_runtime_new(dict: *const c_char) -> *mut ZctRuntime
         let engine = open_engine(std::path::Path::new(dict), &data)?;
         let config_path = string(&data.config().to_string_lossy());
         Ok(Box::into_raw(Box::new(ZctRuntime {
-            engine,
+            host: Arc::new(Host::new(zct_host::Platform::Macos, &data, engine)),
+            next_session: 1,
             sync: zct_preferences::SyncWorker::default(),
             data,
             dictionary: dict.into(),
             config_path,
             settings_buffer: CString::default(),
             read_only: false,
-            game: Arc::new(AtomicBool::new(false)),
         })))
     })
 }
@@ -252,12 +250,12 @@ pub unsafe extern "C" fn zct_runtime_save(runtime: *mut ZctRuntime) -> bool {
         if runtime.read_only {
             return Ok(true);
         }
-        runtime
-            .engine
+        let engine = runtime.host.engine();
+        engine
             .save()
-            .and_then(|_| runtime.engine.backup(&runtime.data.backup(), 7))
+            .and_then(|_| engine.backup(&runtime.data.backup(), 7))
             .map_err(|e| e.to_string())?;
-        runtime.sync.tick(&runtime.data, &runtime.engine);
+        runtime.sync.tick(&runtime.data, &engine);
         Ok(true)
     })
 }
@@ -336,7 +334,9 @@ pub unsafe extern "C" fn zct_runtime_preferences(
             Request::Manage {
                 action: Action::SyncNow,
             } => {
-                let reply = runtime.sync.request(&runtime.data, &runtime.engine)?;
+                let reply = runtime
+                    .sync
+                    .request(&runtime.data, &runtime.host.engine())?;
                 runtime.settings_buffer = string(
                     &serde_json::to_string(&zct_preferences::Response::Management { reply })
                         .map_err(|e| e.to_string())?,
@@ -369,15 +369,14 @@ pub unsafe extern "C" fn zct_runtime_preferences(
         );
         let store = zct_preferences::SettingsStore::new(runtime.data.clone());
         let backup = runtime.data.backup();
-        let result = Manager::new(
-            store,
-            EngineBackend::new(&runtime.engine, &backup),
-            Platform::Macos,
-        )
-        .execute(request);
+        let engine = runtime.host.engine();
+        let result = Manager::new(store, EngineBackend::new(&engine, &backup), Platform::Macos)
+            .execute(request);
         // restore freezes the old engine; never leave the UI editing that instance.
         if restore {
-            runtime.engine = open_engine(&runtime.dictionary, &runtime.data)?;
+            runtime
+                .host
+                .replace_engine(open_engine(&runtime.dictionary, &runtime.data)?);
         }
         runtime.settings_buffer =
             string(&serde_json::to_string(&result?).map_err(|e| e.to_string())?);
@@ -403,15 +402,17 @@ pub unsafe extern "C" fn zct_runtime_relocate(
         }
         let destination = std::path::PathBuf::from(unsafe { text(destination)? });
         let pointer = zct_core::paths::pointer_dir().ok_or("找不到資料位置指標")?;
-        runtime.engine.save().map_err(|e| e.to_string())?;
-        runtime.engine.freeze();
+        let engine = runtime.host.engine();
+        engine.save().map_err(|e| e.to_string())?;
+        engine.freeze();
         let result =
             zct_preferences::relocate_directory(&pointer, runtime.data.root(), &destination);
         if result.is_ok() {
             runtime.data = DataRoot::new(destination);
         }
         // Also recover a frozen engine when relocation failed.
-        runtime.engine = open_engine(&runtime.dictionary, &runtime.data)?;
+        let engine = open_engine(&runtime.dictionary, &runtime.data)?;
+        runtime.host.relocate(&runtime.data, engine);
         runtime.config_path = string(&runtime.data.config().to_string_lossy());
         result?;
         let snapshot = zct_preferences::SettingsStore::new(runtime.data.clone()).load()?;
@@ -428,7 +429,7 @@ pub unsafe extern "C" fn zct_runtime_free(runtime: *mut ZctRuntime) {
     guard(|| {
         if !runtime.is_null() {
             let runtime = unsafe { Box::from_raw(runtime) };
-            runtime.engine.save().map_err(|e| e.to_string())?;
+            runtime.host.engine().save().map_err(|e| e.to_string())?;
         }
         Ok(())
     });
@@ -442,25 +443,15 @@ pub unsafe extern "C" fn zct_session_new(
     app: *const c_char,
 ) -> *mut ZctSession {
     guard(|| {
-        let runtime = unsafe { runtime.as_ref() }.ok_or("空 runtime")?;
+        let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
         let app = unsafe { text(app)? };
-        let config = Config::load(&runtime.data.config()).map_err(|e| e.to_string())?;
-        let ai_config = config.ai.clone();
-        let rules =
-            AppRules::load(&runtime.data.root().join("apps.toml")).map_err(|e| e.to_string())?;
-        let inner = Session::new(&SessionOptions {
-            engine: runtime.engine.clone(),
-            config,
-            rule: rules.find(app).cloned(),
-        })
-        .map_err(|e| e.to_string())?;
+        let id = runtime.next_session;
+        runtime.next_session += 1;
+        // 同一個 App 再次啟用時沿用中英狀態（記在共用主機層）
+        let inner = HostSession::open(&runtime.host, id, app, app)?;
         Ok(Box::into_raw(Box::new(ZctSession {
             inner,
             snapshot: Snapshot::default(),
-            game: runtime.game.clone(),
-            ai_config,
-            ai_key: None,
-            ai_reply: None,
         })))
     })
 }
@@ -473,21 +464,6 @@ pub unsafe extern "C" fn zct_session_free(session: *mut ZctSession) {
         if !session.is_null() {
             drop(unsafe { Box::from_raw(session) });
         }
-        Ok(())
-    });
-}
-
-/// # Safety
-/// `session` is live and exclusively accessed. Mode: 0 = Chinese, 1 = English.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn zct_session_restore_mode(session: *mut ZctSession, mode: u32) {
-    guard(|| {
-        let session = unsafe { session.as_mut() }.ok_or("空 session")?;
-        session.inner.restore_mode(if mode == 1 {
-            InputMode::English
-        } else {
-            InputMode::Chinese
-        });
         Ok(())
     });
 }
@@ -519,76 +495,7 @@ pub unsafe extern "C" fn zct_session_key(
             released,
             time_ms,
         };
-        session
-            .inner
-            .set_global_game(session.game.load(Ordering::Relaxed));
-        // A different key invalidates an outstanding request, even if the user
-        // later types the identical text. Old workers own no session pointer.
-        if !released {
-            session.ai_reply = None;
-        }
-        let mut r = session.inner.process_key(&ev);
-        if let Some(original) = r.ai_request.clone() {
-            let endpoint = zct_ai::Endpoint {
-                base_url: session.ai_config.endpoint.clone(),
-                model: session.ai_config.model.clone(),
-                api_key: session.ai_key.clone(),
-                timeout: std::time::Duration::from_secs(session.ai_config.timeout_seconds.max(1)),
-            };
-            match ai::request(
-                endpoint,
-                session.inner.engine().clone(),
-                original,
-                session.inner.syllables(),
-            ) {
-                Ok(reply) => session.ai_reply = Some(reply),
-                Err(_) => r.notice = Some("無法啟動 AI 修正".into()),
-            }
-        }
-        if r.toggle_game {
-            let on = !session.game.fetch_xor(true, Ordering::Relaxed);
-            session.inner.set_global_game(on);
-            r.notice = Some(
-                if on {
-                    "遊戲模式：開"
-                } else {
-                    "遊戲模式：關"
-                }
-                .into(),
-            );
-        }
-        if r.notice.is_none() {
-            r.notice = r
-                .mode_changed
-                .map(|m| {
-                    if m == InputMode::Chinese {
-                        "中文"
-                    } else {
-                        "英文"
-                    }
-                    .into()
-                })
-                .or_else(|| {
-                    r.width_changed.map(|w| {
-                        if w == zct_core::Width::Full {
-                            "全形"
-                        } else {
-                            "半形"
-                        }
-                        .into()
-                    })
-                })
-                .or_else(|| {
-                    r.output_changed.map(|o| {
-                        if o == zct_core::Output::Traditional {
-                            "繁體"
-                        } else {
-                            "簡體"
-                        }
-                        .into()
-                    })
-                });
-        }
+        let r = session.inner.key(&ev);
         Ok(session.result(r))
     })
 }
@@ -599,13 +506,8 @@ pub unsafe extern "C" fn zct_session_key(
 pub unsafe extern "C" fn zct_session_flush(session: *mut ZctSession) -> ZctResult {
     guard(|| {
         let session = unsafe { session.as_mut() }.ok_or("空 session")?;
-        session.ai_reply = None;
-        let commit = session.inner.flush_output();
-        session.inner.reset();
-        Ok(session.result(KeyResult {
-            commit: Some(commit),
-            ..KeyResult::default()
-        }))
+        let r = session.inner.flush();
+        Ok(session.result(r))
     })
 }
 
@@ -628,7 +530,8 @@ pub unsafe extern "C" fn zct_session_reconvert(
 /// Session is live and exclusively owned by the caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zct_session_ai_enabled(session: *const ZctSession) -> bool {
-    unsafe { session.as_ref() }.is_some_and(|session| session.ai_config.enabled)
+    unsafe { session.as_ref() }
+        .is_some_and(|session| session.inner.host().settings().current().0.ai.enabled)
 }
 /// Set a session credential from the platform keychain; never persisted in config.
 /// # Safety
@@ -637,7 +540,11 @@ pub unsafe extern "C" fn zct_session_ai_enabled(session: *const ZctSession) -> b
 pub unsafe extern "C" fn zct_session_ai_key(session: *mut ZctSession, key: *const c_char) -> bool {
     guard(|| {
         let session = unsafe { session.as_mut() }.ok_or("空 session")?;
-        session.ai_key = Some(unsafe { text(key)? }.to_owned()).filter(|key| !key.is_empty());
+        // 金鑰由 Keychain 提供，所有 session 共用；不寫進設定檔
+        session
+            .inner
+            .host()
+            .set_ai_key(Some(unsafe { text(key)? }.to_owned()));
         Ok(true)
     })
 }
@@ -652,34 +559,13 @@ pub unsafe extern "C" fn zct_session_poll(
     guard(|| {
         let session = unsafe { session.as_mut() }.ok_or("空 session")?;
         let result = unsafe { result.as_mut() }.ok_or("空結果")?;
-        let Some(receiver) = &session.ai_reply else {
-            return Ok(false);
-        };
-        let (original, fixed) = match receiver.try_recv() {
-            Ok(reply) => reply,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(false),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => (
-                session.inner.preedit().text,
-                Err("AI worker stopped".into()),
-            ),
-        };
-        session.ai_reply = None;
-        let notice = match fixed {
-            Ok(fixed) => (!session.inner.set_ai_suggestion(&original, fixed))
-                .then(|| "AI：沒有發現錯字".into()),
-            Err(_) => {
-                session.inner.set_ai_suggestion(&original, original.clone());
-                Some("AI 修正失敗，請檢查連線設定".into())
+        match session.inner.poll_ai() {
+            Some(r) => {
+                *result = session.result(r);
+                Ok(true)
             }
-        };
-        let r = KeyResult {
-            preedit: session.inner.preedit(),
-            candidates: session.inner.candidates(),
-            notice,
-            ..Default::default()
-        };
-        *result = session.result(r);
-        Ok(true)
+            None => Ok(false),
+        }
     })
 }
 /// Native menu/mouse actions: 0 mode, 1 output, 2 global game, 3 next page, 4 previous page.
@@ -689,38 +575,13 @@ pub unsafe extern "C" fn zct_session_poll(
 pub unsafe extern "C" fn zct_session_command(session: *mut ZctSession, command: u32) -> ZctResult {
     guard(|| {
         let session = unsafe { session.as_mut() }.ok_or("空 session")?;
-        if command != 5 {
-            session.ai_reply = None;
-        }
         let r = match command {
             0 => session.inner.toggle_mode(),
             1 => session.inner.toggle_output(),
-            2 => {
-                let on = !session.game.fetch_xor(true, Ordering::Relaxed);
-                session.inner.set_global_game(on);
-                let commit = session.inner.flush_output();
-                session.inner.reset();
-                KeyResult {
-                    eaten: true,
-                    commit: Some(commit),
-                    notice: Some(format!("遊戲模式：{}", if on { "開" } else { "關" })),
-                    ..Default::default()
-                }
-            }
-            5 => KeyResult {
-                preedit: session.inner.preedit(),
-                candidates: session.inner.candidates(),
-                ..Default::default()
-            },
-            3 | 4 => session.inner.process_key(&KeyEvent::down(
-                if command == 3 {
-                    Key::PageDown
-                } else {
-                    Key::PageUp
-                },
-                Mods::NONE,
-                0,
-            )),
+            2 => session.inner.toggle_game(),
+            3 => session.inner.page(true),
+            4 => session.inner.page(false),
+            5 => session.inner.current(),
             _ => return Err("未知選單命令".into()),
         };
         Ok(session.result(r))
@@ -736,28 +597,23 @@ pub unsafe extern "C" fn zct_session_choose(
 ) -> ZctResult {
     guard(|| {
         let session = unsafe { session.as_mut() }.ok_or("空 session")?;
-        let r = session.inner.choose_candidate(page, row);
+        let r = session.inner.choose(page, row);
         if !r.eaten {
             return Err("候選已改變或不可選取".into());
         }
         Ok(session.result(r))
     })
 }
+/// 設定或引擎變了、而且沒有組字：換成新設定（沿用中英等狀態）。回傳有沒有換，換了就重新讀外觀與畫面
 /// # Safety
-/// Both sessions are live and exclusive; they may not be the same handle.
+/// Session is live and exclusive.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zct_session_keep_state(
-    session: *mut ZctSession,
-    old: *const ZctSession,
-) -> bool {
+pub unsafe extern "C" fn zct_session_refresh(session: *mut ZctSession) -> bool {
     guard(|| {
-        if std::ptr::eq(session, old) {
-            return Err("session 不可相同".into());
-        }
-        let session = unsafe { session.as_mut() }.ok_or("空 session")?;
-        let old = unsafe { old.as_ref() }.ok_or("空舊 session")?;
-        session.inner.keep_state_of(&old.inner);
-        Ok(true)
+        Ok(unsafe { session.as_mut() }
+            .ok_or("空 session")?
+            .inner
+            .refresh())
     })
 }
 /// # Safety
@@ -781,8 +637,9 @@ pub unsafe extern "C" fn zct_runtime_freeze(runtime: *mut ZctRuntime) -> bool {
         if runtime.sync.running() {
             return Err("git 同步進行中，完成後再更新".into());
         }
-        runtime.engine.save().map_err(|e| e.to_string())?;
-        runtime.engine.freeze();
+        let engine = runtime.host.engine();
+        engine.save().map_err(|e| e.to_string())?;
+        engine.freeze();
         runtime.read_only = true;
         Ok(true)
     })
@@ -794,10 +651,19 @@ pub unsafe extern "C" fn zct_runtime_freeze(runtime: *mut ZctRuntime) -> bool {
 pub unsafe extern "C" fn zct_runtime_recover(runtime: *mut ZctRuntime) -> bool {
     guard(|| {
         let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
-        runtime.engine = open_engine(&runtime.dictionary, &runtime.data)?;
+        runtime
+            .host
+            .replace_engine(open_engine(&runtime.dictionary, &runtime.data)?);
         runtime.read_only = false;
         Ok(true)
     })
+}
+/// 這個 App 是不是純終端機（預設顯示組字提示列；清單與 Windows 共用）
+/// # Safety
+/// `app` is a NUL-terminated UTF-8 bundle identifier.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_is_terminal(app: *const c_char) -> bool {
+    guard(|| Ok(zct_host::is_terminal(unsafe { text(app)? })))
 }
 /// Shared version ordering for the native updater.
 /// # Safety
@@ -985,14 +851,14 @@ mod tests {
         (
             temp,
             Box::new(ZctRuntime {
-                engine,
+                host: Arc::new(Host::new(zct_host::Platform::Macos, &data, engine)),
+                next_session: 1,
                 sync: zct_preferences::SyncWorker::default(),
                 data,
                 dictionary: dict,
                 config_path,
                 settings_buffer: CString::default(),
                 read_only: false,
-                game: Arc::new(AtomicBool::new(false)),
             }),
         )
     }
@@ -1210,7 +1076,7 @@ mod tests {
             unsafe {
                 let native = zct_session_key(keys.session, code, 0, false, keys.time);
                 assert!(native.ok && native.eaten);
-                let session = &(*keys.session).inner;
+                let session = (*keys.session).inner.session();
                 let preedit = session.preedit();
                 let display = preedit.display();
                 assert_eq!(text(native.preedit).unwrap(), "天氣");
@@ -1287,7 +1153,11 @@ mod tests {
             let mut keys = AcceptanceKeys::new(config);
             // Ensure dictionary statistics have finished loading before asserting common characters.
             unsafe {
-                (*keys.session).inner.engine().char_usage('一', "ㄧ");
+                (*keys.session)
+                    .inner
+                    .session()
+                    .engine()
+                    .char_usage('一', "ㄧ");
             }
             let result = keys.type_codes(&[1, 32]);
             assert_eq!(result.preedit, "su");
@@ -1348,7 +1218,7 @@ mod tests {
     #[test]
     fn macos_ai_runs_in_background_and_rejects_stale_results() {
         for cancel in [false, true] {
-            let (endpoint, server) = crate::ai::tests::server("天氣");
+            let (endpoint, server) = crate::ai::server("天氣");
             let mut config = Config::default();
             config.ai.enabled = true;
             config.ai.endpoint = endpoint;
@@ -1400,16 +1270,14 @@ mod tests {
             let _ = keys.press(36);
             let changed = zct_session_command(keys.session, 1);
             assert!(changed.ok && changed.simplified);
-            let app = string("com.apple.TextEdit");
-            let fresh = zct_session_new(&mut *keys._runtime, app.as_ptr());
-            assert!(zct_session_keep_state(fresh, keys.session));
-            assert!(zct_session_command(fresh, 5).simplified);
-            assert!(zct_session_is_idle(fresh));
-            zct_session_free(fresh);
+            assert!(zct_session_is_idle(keys.session));
             assert!(zct_runtime_freeze(&mut *keys._runtime));
             assert!(keys._runtime.read_only);
             assert!(zct_runtime_recover(&mut *keys._runtime));
             assert!(!keys._runtime.read_only);
+            // 換了引擎：沒有組字的 session 換新，沿用繁簡
+            assert!(zct_session_refresh(keys.session));
+            assert!(zct_session_command(keys.session, 5).simplified);
         }
     }
 }

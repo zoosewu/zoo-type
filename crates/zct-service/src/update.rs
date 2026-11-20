@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use zct_update::{INBOX_SETUP, INBOX_SIG, PUBLIC_KEY, TASK_NAME, Version, verify};
 
-use crate::settings::Settings;
+use zct_host::Host;
 
 const LATEST: &str = "https://api.github.com/repos/zoosewu/zoo-type/releases/latest";
 const FIRST_CHECK: Duration = Duration::from_secs(5 * 60);
@@ -30,7 +30,7 @@ fn manages_updates() -> bool {
         && zct_core::paths::instance_suffix().is_empty()
 }
 
-pub fn spawn(settings: Arc<Settings>, available: Available) -> std::io::Result<()> {
+pub fn spawn(host: Arc<Host>, available: Available) -> std::io::Result<()> {
     if !manages_updates() {
         return Ok(());
     }
@@ -40,7 +40,7 @@ pub fn spawn(settings: Arc<Settings>, available: Available) -> std::io::Result<(
             clean_inbox(&available);
             std::thread::sleep(FIRST_CHECK);
             loop {
-                if settings.current().0.update.auto_check {
+                if host.settings().current().0.update.auto_check {
                     match check() {
                         Ok(Some(v)) => {
                             log::info!("有新版：{v}");

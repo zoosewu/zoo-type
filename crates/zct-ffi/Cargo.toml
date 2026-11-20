@@ -9,11 +9,12 @@ rust-version.workspace = true
 crate-type = ["staticlib", "rlib"]
 
 [features]
-dev = ["zct-core/dev"]
+dev = ["zct-core/dev", "zct-host/dev"]
 
 [dependencies]
 zct-core.workspace = true
 zct-preferences.workspace = true
+zct-host.workspace = true
 zct-ai = { path = "../zct-ai" }
 zct-update = { path = "../zct-update" }
 serde_json = "1.0.154"
