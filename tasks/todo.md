@@ -172,3 +172,40 @@ T0 用自己訓練的字 n-gram 語言模型重新打分、選最通順的當首
 - [ ] 打字時的注音小視窗（FFI `display_only`，面板 notice 列）
 - [ ] 設定視窗：「▸ 進階」收合、操作習慣非自訂時隱藏選字對象與選字後游標、儲存後收合的值不被改掉
 - [ ] 英文優先、打字時顯示三種模式、舊設定（auto_english、legacy_fullscreen）轉換
+
+## 共用主機層：平台只負責 UI 與 IO（規劃 2026-11-20，待使用者確認）
+
+現況：Windows 的 `zct-service/conn.rs` 與 macOS 的 `zct-ffi` + Swift 各自實作同一套「主機」邏輯，已經出現分歧
+（例：切換提示 Windows 是「中／A／動／动／遊戲模式／一般模式」，macOS 是「中文／英文／繁體／簡體／遊戲模式：開／關」；
+終端機清單 Windows 在 Rust、macOS 在 Swift；Windows 同步自己一套迴圈，macOS 用 SyncWorker）。
+
+新 crate `zct-host`（zct-service 與 zct-ffi 共用，依賴 core / ai / preferences / update）：
+
+### 1. HostSession（一個輸入 context）
+- [ ] 狀態提示文字（中英、全半形、繁簡、遊戲模式、組字提示列）統一一套
+- [ ] AI 請求：背景執行、結果信箱、按鍵後丟棄舊結果、失敗與「沒有錯字」提示
+- [ ] 設定變更後在沒有組字時換 session（設定版本號），沿用中英等狀態
+- [ ] 遊戲模式全域切換
+- [ ] 組字提示列：App 規則 > 終端機清單（兩平台合併）> 全域；快捷鍵寫回 apps.toml
+- [ ] 切回 App 沿用中英（依程序記住）
+- [ ] Windows conn.rs 只剩 IPC 轉送與候選窗指令；FFI 只剩 C ABI 轉換；Swift 刪掉對應邏輯
+
+### 2. HostRuntime（每個程序一個）
+- [ ] 資料目錄探索與舊資料搬移、建立預設設定、開啟引擎（含自訂英文單字）
+- [ ] 設定檔監看與重新載入（取代 service/settings.rs；macOS 改成同一套，不再每個 session 讀檔）
+- [ ] 存檔、備份、同步排程（Windows 改用共用 SyncWorker）
+- [ ] 凍結／恢復（更新、還原、搬移資料）
+
+### 3. 更新
+- [ ] 共用：查 GitHub 最新版、挑平台與架構對應的檔案、限制大小下載、簽章與版本驗證、自動檢查排程
+- [ ] 平台只留安裝（Windows 執行安裝程式、macOS 替換 .app）
+
+### 4. 不在輸入狀態的偵測
+- [ ] 判斷規則放共用層（安全輸入、全螢幕、沒有游標、沒有文字 context），平台只收集訊號
+
+### 5. 設定畫面
+- [ ] 分區標題、說明文字、進階、鎖定都放進共用目錄（唯一來源）
+- [ ] Windows「一般」頁改由目錄產生（目前手寫對應，新設定要兩邊各寫一次）
+
+### 共通
+- [ ] 每一步：先把現有 conn.rs / FFI 測試搬到 zct-host，行為不變再刪舊碼；Windows 實測、macOS 靠 CI 並記入待驗證
