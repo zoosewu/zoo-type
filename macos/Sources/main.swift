@@ -15,6 +15,7 @@ func selfTest(dictionary: String) throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
+    setenv("ZCT_SELF_TEST", "1", 1)
     setenv("ZCT_HOME", directory.path, 1)
     let runtime = try EngineRuntime(dictionary: dictionary)
     let session = try EngineSession(runtime: runtime, app: "com.apple.TextEdit")
@@ -28,7 +29,7 @@ func selfTest(dictionary: String) throws {
     }
     for code in [13, 32, 29, 49, 3, 32, 21] as [UInt16] { _ = try press(code) }
     let chosen = try press(125)
-    try check(!chosen.candidates.isEmpty, "候選窗")
+    try check(!chosen.candidatePage.items.isEmpty, "候選窗")
     _ = try press(53)
     let committed = try press(36)
     try check(committed.commit == "天氣", "中文送出：\(committed.commit)")
@@ -36,7 +37,7 @@ func selfTest(dictionary: String) throws {
     _ = try press(13)
     try check(try session.flush().commit.isEmpty, "未完成注音在失焦時應取消")
     let reconverted = try session.reconvert("天氣")
-    try check(!reconverted.preedit.isEmpty, "重新選字")
+    try check(!reconverted.composition.text.isEmpty, "重新選字")
     try check(try session.flush().commit == "天氣", "失焦送出")
     runtime.save()
     let preferences = try PreferencesModel(client: runtime)
@@ -82,6 +83,8 @@ func selfTest(dictionary: String) throws {
         syncReply = try preferences.manage(["op": "sync_status"])
     }
     try check(syncReply["running"] as? Bool == false && (syncReply["message"] as? String ?? "").contains("成功"), "背景 git 同步與狀態回傳")
+    try compositionCaretSelfTest()
+    try wezTermInlineAcceptance(runtime: runtime)
     print("macOS Swift / Rust bridge self-test passed")
 }
 
@@ -140,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         mainMenu.addItem(withTitle: "編輯", action: nil, keyEquivalent: "").submenu = editMenu
         NSApp.mainMenu = mainMenu
+        if let runtime = appRuntime { UpdateManager.shared.start(runtime: runtime) }
         saveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in appRuntime?.save() }
         if CommandLine.arguments.contains("--settings") { openSettings(nil) }
     }

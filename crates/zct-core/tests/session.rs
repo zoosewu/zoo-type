@@ -1242,6 +1242,18 @@ fn invalid_first_tone_with_space_stays_with_bell() {
 }
 
 #[test]
+fn backspace_discards_only_the_syllable_rejected_by_space() {
+    let mut h = Harness::new();
+    h.type_str("su3fuk"); // 你ㄑㄧㄜ
+    let rejected = h.press(Key::Space, Mods::NONE);
+    assert!(rejected.bell);
+    assert_eq!(rejected.preedit.text, "你ㄑㄧㄜ");
+    assert_eq!(h.press(Key::Backspace, Mods::NONE).preedit.text, "你");
+    h.type_str("fu");
+    assert_eq!(h.press(Key::Backspace, Mods::NONE).preedit.text, "你ㄑ");
+}
+
+#[test]
 fn backspace_removes_last_key_of_half_typed_syllable() {
     // 相ㄑㄧㄣ：Backspace 一次退一個按鍵
     let mut h = Harness::new();
@@ -1380,6 +1392,21 @@ fn tab_switches_to_extras_page_of_emoji_and_bopomofo() {
     assert_eq!(
         h.press(Key::Char(digit), Mods::NONE).commit.as_deref(),
         Some("ㄎㄞ ㄒㄧㄣ")
+    );
+}
+
+#[test]
+fn mouse_selects_the_visible_extra_instead_of_the_underlying_word() {
+    let mut h = Harness::new();
+    h.type_str("d9 vup ");
+    h.press(Key::Home, Mods::NONE);
+    h.press(Key::Down, Mods::NONE);
+    let extras = h.press(Key::Tab, Mods::NONE).candidates.unwrap();
+    let last = extras.items.len() - 1;
+    assert!(!h.s.choose_candidate(1, last).eaten);
+    assert_eq!(
+        h.s.choose_candidate(0, last).commit.as_ref(),
+        extras.items.last()
     );
 }
 
@@ -2800,4 +2827,26 @@ fn chinese_first_keeps_invalid_bopomofo() {
     assert_ne!(h.s.preedit().text, "lo");
     h.type_str("vr ");
     assert!(!h.s.preedit().text.contains("lovr"));
+}
+
+#[test]
+fn candidate_display_labels_pins_and_the_active_column() {
+    let items: Vec<_> = (0..10).map(|i| format!("候選{i}")).collect();
+    let page = zct_core::CandidatePage {
+        items: items.clone(),
+        pinned: vec![true],
+        page: 7,
+        first_column: 6,
+        columns: vec![vec!["上一欄".into()], vec!["舊內容".into()]],
+        highlight: 9,
+        total_pages: 8,
+    };
+    assert_eq!(page.selected_row(), Some(9));
+    assert_eq!(page.row_label(0), "1★");
+    assert_eq!(page.row_label(9), "0");
+    assert_eq!(page.row_label(10), "");
+    assert_eq!(page.visible_columns().nth(1), Some(items.as_slice()));
+    let hint = zct_core::CandidatePage::display_only(vec!["ㄋㄧ".into()]);
+    assert_eq!(hint.selected_row(), None);
+    assert_eq!(hint.row_label(0), "");
 }

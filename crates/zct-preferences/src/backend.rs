@@ -20,19 +20,18 @@ pub struct Capabilities {
     pub data_location: bool,
 }
 impl Capabilities {
-    pub fn for_platform(platform: Platform) -> Self {
-        let windows = platform == Platform::Windows;
+    pub fn for_platform(_platform: Platform) -> Self {
         Self {
             dictionary: true,
             learning: true,
             backups: true,
             restore: true,
             sync: true,
-            ai: windows,
-            api_key: windows,
-            auto_update: windows && zct_core::channel::CURRENT.id == "official",
-            game_detection: windows,
-            composition_bar_hotkey: windows,
+            ai: true,
+            api_key: true,
+            auto_update: zct_core::channel::CURRENT.id == "official",
+            game_detection: true,
+            composition_bar_hotkey: true,
             data_location: true,
         }
     }
@@ -224,7 +223,7 @@ impl Backend for EngineBackend<'_> {
                 })
             }
             Action::ApiKeyStatus | Action::WriteApiKey { .. } | Action::TestAi { .. } => {
-                Err("此平台尚未提供 AI 與憑證儲存功能".into())
+                Err("AI 與憑證儲存操作需交由平台主機處理".into())
             }
             Action::SyncNow | Action::SyncStatus => Err("此主機尚未提供 git 同步執行器".into()),
         }

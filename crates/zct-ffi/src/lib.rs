@@ -1,6 +1,8 @@
 //! macOS 的 C ABI。所有呼叫在 IMK 主執行緒；handle 不可跨執行緒並行使用。
 //! 結果字串由 session 擁有，僅保證在該 session 下一次呼叫前有效。
 
+mod ai;
+
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -50,6 +52,7 @@ pub struct ZctRuntime {
     dictionary: std::path::PathBuf,
     config_path: CString,
     settings_buffer: CString,
+    read_only: bool,
     game: Arc<AtomicBool>,
 }
 
@@ -63,6 +66,9 @@ pub struct ZctSession {
     inner: Session,
     snapshot: Snapshot,
     game: Arc<AtomicBool>,
+    ai_config: zct_core::config::AiConfig,
+    ai_key: Option<String>,
+    ai_reply: Option<std::sync::mpsc::Receiver<ai::Reply>>,
 }
 
 #[derive(Default)]
@@ -72,6 +78,8 @@ struct Snapshot {
     notice: CString,
     items: Vec<CString>,
     pointers: Vec<*const c_char>,
+    labels: Vec<CString>,
+    label_pointers: Vec<*const c_char>,
     pinned: Vec<bool>,
     columns: Vec<Vec<CString>>,
     column_pointers: Vec<Vec<*const c_char>>,
@@ -112,22 +120,28 @@ pub struct ZctResult {
     /// The candidate items are a display-only typing popup (bopomofo while keys are shown as
     /// letters): no numbers, no selection; stays until the syllable is finished.
     pub display_only: bool,
-}
-
-fn utf16_offset(s: &str, chars: usize) -> usize {
-    s.chars().take(chars).map(char::len_utf16).sum()
+    pub has_highlight: bool,
+    pub labels: *const *const c_char,
+    pub ai_pending: bool,
+    pub toggle_composition_bar: bool,
+    pub game: bool,
+    pub simplified: bool,
 }
 
 impl ZctSession {
     fn result(&mut self, r: KeyResult) -> ZctResult {
-        let (start, length) = r.preedit.target.unwrap_or((0, 0));
+        let display = r.preedit.display();
+        let (start, length) = display.target_utf16().unwrap_or_default();
         let mut out = ZctResult {
             ok: true,
+            ai_pending: self.ai_reply.is_some(),
+            toggle_composition_bar: r.toggle_composition_bar,
+            game: self.game.load(Ordering::Relaxed),
+            simplified: self.inner.output() == zct_core::Output::Simplified,
             eaten: r.eaten,
-            cursor: utf16_offset(&r.preedit.text, r.preedit.cursor),
-            target_start: utf16_offset(&r.preedit.text, start),
-            target_length: utf16_offset(&r.preedit.text, start + length)
-                - utf16_offset(&r.preedit.text, start),
+            cursor: display.cursor_utf16(),
+            target_start: start,
+            target_length: length,
             bell: r.bell,
             reconvert: r.reconvert,
             mode: u32::from(self.inner.mode() == InputMode::English),
@@ -141,13 +155,17 @@ impl ZctSession {
         };
         if let Some(c) = r.candidates {
             self.snapshot.items = c.items.iter().map(|s| string(s)).collect();
-            self.snapshot.pinned = c.pinned;
+            self.snapshot.labels = (0..c.items.len())
+                .map(|i| string(&c.row_label(i)))
+                .collect();
+            self.snapshot.label_pointers =
+                self.snapshot.labels.iter().map(|s| s.as_ptr()).collect();
+            self.snapshot.pinned.clone_from(&c.pinned);
             self.snapshot
                 .pinned
                 .resize(self.snapshot.items.len(), false);
             self.snapshot.columns = c
-                .columns
-                .iter()
+                .visible_columns()
                 .map(|column| column.iter().map(|s| string(s)).collect())
                 .collect();
             self.snapshot.column_pointers = self
@@ -166,9 +184,10 @@ impl ZctSession {
                 })
                 .collect();
             out.first_column = c.first_column;
-            out.display_only = c.highlight == zct_core::CandidatePage::DISPLAY_ONLY;
+            out.display_only = c.is_display_only();
             // DISPLAY_ONLY is usize::MAX, which would trap when Swift converts it to Int
-            out.highlight = if out.display_only { 0 } else { c.highlight };
+            out.highlight = c.selected_row().unwrap_or_default();
+            out.has_highlight = c.selected_row().is_some();
             out.page = c.page;
             out.total_pages = c.total_pages;
         }
@@ -178,6 +197,7 @@ impl ZctSession {
         out.notice = self.snapshot.notice.as_ptr();
         out.candidates = self.snapshot.pointers.as_ptr();
         out.candidate_count = self.snapshot.pointers.len();
+        out.labels = self.snapshot.label_pointers.as_ptr();
         out.pinned = self.snapshot.pinned.as_ptr();
         out.columns = self.snapshot.column_views.as_ptr();
         out.column_count = self.snapshot.column_views.len();
@@ -217,6 +237,7 @@ pub unsafe extern "C" fn zct_runtime_new(dict: *const c_char) -> *mut ZctRuntime
             dictionary: dict.into(),
             config_path,
             settings_buffer: CString::default(),
+            read_only: false,
             game: Arc::new(AtomicBool::new(false)),
         })))
     })
@@ -228,6 +249,9 @@ pub unsafe extern "C" fn zct_runtime_new(dict: *const c_char) -> *mut ZctRuntime
 pub unsafe extern "C" fn zct_runtime_save(runtime: *mut ZctRuntime) -> bool {
     guard(|| {
         let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
+        if runtime.read_only {
+            return Ok(true);
+        }
         runtime
             .engine
             .save()
@@ -420,9 +444,8 @@ pub unsafe extern "C" fn zct_session_new(
     guard(|| {
         let runtime = unsafe { runtime.as_ref() }.ok_or("空 runtime")?;
         let app = unsafe { text(app)? };
-        let mut config = Config::load(&runtime.data.config()).map_err(|e| e.to_string())?;
-        // macOS 的 AI 背景調度尚未接入，不讓快捷鍵進入無法完成的等待狀態。
-        config.ai.enabled = false;
+        let config = Config::load(&runtime.data.config()).map_err(|e| e.to_string())?;
+        let ai_config = config.ai.clone();
         let rules =
             AppRules::load(&runtime.data.root().join("apps.toml")).map_err(|e| e.to_string())?;
         let inner = Session::new(&SessionOptions {
@@ -435,6 +458,9 @@ pub unsafe extern "C" fn zct_session_new(
             inner,
             snapshot: Snapshot::default(),
             game: runtime.game.clone(),
+            ai_config,
+            ai_key: None,
+            ai_reply: None,
         })))
     })
 }
@@ -496,7 +522,29 @@ pub unsafe extern "C" fn zct_session_key(
         session
             .inner
             .set_global_game(session.game.load(Ordering::Relaxed));
+        // A different key invalidates an outstanding request, even if the user
+        // later types the identical text. Old workers own no session pointer.
+        if !released {
+            session.ai_reply = None;
+        }
         let mut r = session.inner.process_key(&ev);
+        if let Some(original) = r.ai_request.clone() {
+            let endpoint = zct_ai::Endpoint {
+                base_url: session.ai_config.endpoint.clone(),
+                model: session.ai_config.model.clone(),
+                api_key: session.ai_key.clone(),
+                timeout: std::time::Duration::from_secs(session.ai_config.timeout_seconds.max(1)),
+            };
+            match ai::request(
+                endpoint,
+                session.inner.engine().clone(),
+                original,
+                session.inner.syllables(),
+            ) {
+                Ok(reply) => session.ai_reply = Some(reply),
+                Err(_) => r.notice = Some("無法啟動 AI 修正".into()),
+            }
+        }
         if r.toggle_game {
             let on = !session.game.fetch_xor(true, Ordering::Relaxed);
             session.inner.set_global_game(on);
@@ -508,9 +556,6 @@ pub unsafe extern "C" fn zct_session_key(
                 }
                 .into(),
             );
-        }
-        if r.toggle_composition_bar {
-            r.notice = Some("macOS 使用游標旁的組字提示；目前不支援個別 App 提示列切換".into());
         }
         if r.notice.is_none() {
             r.notice = r
@@ -554,6 +599,7 @@ pub unsafe extern "C" fn zct_session_key(
 pub unsafe extern "C" fn zct_session_flush(session: *mut ZctSession) -> ZctResult {
     guard(|| {
         let session = unsafe { session.as_mut() }.ok_or("空 session")?;
+        session.ai_reply = None;
         let commit = session.inner.flush_output();
         session.inner.reset();
         Ok(session.result(KeyResult {
@@ -576,6 +622,244 @@ pub unsafe extern "C" fn zct_session_reconvert(
         let r = session.inner.reconvert(value);
         Ok(session.result(r))
     })
+}
+
+/// # Safety
+/// Session is live and exclusively owned by the caller.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_ai_enabled(session: *const ZctSession) -> bool {
+    unsafe { session.as_ref() }.is_some_and(|session| session.ai_config.enabled)
+}
+/// Set a session credential from the platform keychain; never persisted in config.
+/// # Safety
+/// Session is exclusive and key is NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_ai_key(session: *mut ZctSession, key: *const c_char) -> bool {
+    guard(|| {
+        let session = unsafe { session.as_mut() }.ok_or("空 session")?;
+        session.ai_key = Some(unsafe { text(key)? }.to_owned()).filter(|key| !key.is_empty());
+        Ok(true)
+    })
+}
+/// Poll an AI mailbox on the IMK thread. False means no completed response.
+/// # Safety
+/// Session is exclusive and result is a valid output pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_poll(
+    session: *mut ZctSession,
+    result: *mut ZctResult,
+) -> bool {
+    guard(|| {
+        let session = unsafe { session.as_mut() }.ok_or("空 session")?;
+        let result = unsafe { result.as_mut() }.ok_or("空結果")?;
+        let Some(receiver) = &session.ai_reply else {
+            return Ok(false);
+        };
+        let (original, fixed) = match receiver.try_recv() {
+            Ok(reply) => reply,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(false),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => (
+                session.inner.preedit().text,
+                Err("AI worker stopped".into()),
+            ),
+        };
+        session.ai_reply = None;
+        let notice = match fixed {
+            Ok(fixed) => (!session.inner.set_ai_suggestion(&original, fixed))
+                .then(|| "AI：沒有發現錯字".into()),
+            Err(_) => {
+                session.inner.set_ai_suggestion(&original, original.clone());
+                Some("AI 修正失敗，請檢查連線設定".into())
+            }
+        };
+        let r = KeyResult {
+            preedit: session.inner.preedit(),
+            candidates: session.inner.candidates(),
+            notice,
+            ..Default::default()
+        };
+        *result = session.result(r);
+        Ok(true)
+    })
+}
+/// Native menu/mouse actions: 0 mode, 1 output, 2 global game, 3 next page, 4 previous page.
+/// # Safety
+/// Session is live and exclusive.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_command(session: *mut ZctSession, command: u32) -> ZctResult {
+    guard(|| {
+        let session = unsafe { session.as_mut() }.ok_or("空 session")?;
+        if command != 5 {
+            session.ai_reply = None;
+        }
+        let r = match command {
+            0 => session.inner.toggle_mode(),
+            1 => session.inner.toggle_output(),
+            2 => {
+                let on = !session.game.fetch_xor(true, Ordering::Relaxed);
+                session.inner.set_global_game(on);
+                let commit = session.inner.flush_output();
+                session.inner.reset();
+                KeyResult {
+                    eaten: true,
+                    commit: Some(commit),
+                    notice: Some(format!("遊戲模式：{}", if on { "開" } else { "關" })),
+                    ..Default::default()
+                }
+            }
+            5 => KeyResult {
+                preedit: session.inner.preedit(),
+                candidates: session.inner.candidates(),
+                ..Default::default()
+            },
+            3 | 4 => session.inner.process_key(&KeyEvent::down(
+                if command == 3 {
+                    Key::PageDown
+                } else {
+                    Key::PageUp
+                },
+                Mods::NONE,
+                0,
+            )),
+            _ => return Err("未知選單命令".into()),
+        };
+        Ok(session.result(r))
+    })
+}
+/// # Safety
+/// Session is live and exclusive.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_choose(
+    session: *mut ZctSession,
+    page: usize,
+    row: usize,
+) -> ZctResult {
+    guard(|| {
+        let session = unsafe { session.as_mut() }.ok_or("空 session")?;
+        let r = session.inner.choose_candidate(page, row);
+        if !r.eaten {
+            return Err("候選已改變或不可選取".into());
+        }
+        Ok(session.result(r))
+    })
+}
+/// # Safety
+/// Both sessions are live and exclusive; they may not be the same handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_keep_state(
+    session: *mut ZctSession,
+    old: *const ZctSession,
+) -> bool {
+    guard(|| {
+        if std::ptr::eq(session, old) {
+            return Err("session 不可相同".into());
+        }
+        let session = unsafe { session.as_mut() }.ok_or("空 session")?;
+        let old = unsafe { old.as_ref() }.ok_or("空舊 session")?;
+        session.inner.keep_state_of(&old.inner);
+        Ok(true)
+    })
+}
+/// # Safety
+/// Session is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_is_idle(session: *const ZctSession) -> bool {
+    guard(|| {
+        Ok(unsafe { session.as_ref() }
+            .ok_or("空 session")?
+            .inner
+            .is_idle())
+    })
+}
+/// Freeze disk writes before replacing the installed app. Caller stops input first.
+/// # Safety
+/// Runtime is live and exclusive.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_runtime_freeze(runtime: *mut ZctRuntime) -> bool {
+    guard(|| {
+        let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
+        if runtime.sync.running() {
+            return Err("git 同步進行中，完成後再更新".into());
+        }
+        runtime.engine.save().map_err(|e| e.to_string())?;
+        runtime.engine.freeze();
+        runtime.read_only = true;
+        Ok(true)
+    })
+}
+/// Recover the live engine after an update transaction was rolled back.
+/// # Safety
+/// Runtime is live and exclusive; host reactivates existing sessions afterwards.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_runtime_recover(runtime: *mut ZctRuntime) -> bool {
+    guard(|| {
+        let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
+        runtime.engine = open_engine(&runtime.dictionary, &runtime.data)?;
+        runtime.read_only = false;
+        Ok(true)
+    })
+}
+/// Shared version ordering for the native updater.
+/// # Safety
+/// Arguments are NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_version_newer(version: *const c_char, current: *const c_char) -> bool {
+    guard(|| {
+        let version = zct_update::Version::parse(unsafe { text(version)? }).ok_or("版號錯誤")?;
+        let current =
+            zct_update::Version::parse(unsafe { text(current)? }).ok_or("目前版號錯誤")?;
+        Ok(version.is_newer_than(&current))
+    })
+}
+
+/// Verify an official download's signature, version, and rollback protection.
+/// # Safety
+/// Paths and expected version are NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_update_verify(
+    file: *const c_char,
+    signature: *const c_char,
+    expected: *const c_char,
+) -> bool {
+    guard(|| {
+        let bytes = std::fs::read(unsafe { text(file)? }).map_err(|e| e.to_string())?;
+        let signature =
+            std::fs::read_to_string(unsafe { text(signature)? }).map_err(|e| e.to_string())?;
+        let version = zct_update::verify(&zct_update::PUBLIC_KEY, &bytes, &signature)?;
+        if version.to_string() != unsafe { text(expected)? }
+            || !version.is_newer_than(&zct_update::Version::current())
+        {
+            return Err("更新版號不符或不是較新版本".into());
+        }
+        Ok(true)
+    })
+}
+/// Stateless AI connection test, safe on a background thread. Caller frees result.
+/// # Safety
+/// JSON and key are NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_ai_test(config: *const c_char, key: *const c_char) -> *mut c_char {
+    guard(|| {
+        let config: zct_core::config::AiConfig =
+            serde_json::from_str(unsafe { text(config)? }).map_err(|e| e.to_string())?;
+        let key = unsafe { text(key)? }.to_owned();
+        let endpoint = zct_ai::Endpoint {
+            base_url: config.endpoint,
+            model: config.model,
+            api_key: Some(key).filter(|k| !k.is_empty()),
+            timeout: std::time::Duration::from_secs(config.timeout_seconds.max(1)),
+        };
+        let reply = zct_ai::ping(&endpoint).map_err(|e| e.to_string())?;
+        Ok(string(&reply).into_raw())
+    })
+}
+/// # Safety
+/// Value was returned by zct_ai_test and freed exactly once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_string_free(value: *mut c_char) {
+    if !value.is_null() {
+        drop(unsafe { CString::from_raw(value) });
+    }
 }
 
 fn mac_key(code: u16) -> Key {
@@ -707,6 +991,7 @@ mod tests {
                 dictionary: dict,
                 config_path,
                 settings_buffer: CString::default(),
+                read_only: false,
                 game: Arc::new(AtomicBool::new(false)),
             }),
         )
@@ -785,8 +1070,21 @@ mod tests {
     }
     #[test]
     fn utf16_ranges_include_surrogate_pairs() {
-        assert_eq!(utf16_offset("中😀文", 2), 3);
-        assert_eq!(utf16_offset("中😀文", 3), 4);
+        let keys = AcceptanceKeys::new(Config::default());
+        let session = unsafe { &mut *keys.session };
+        let result = session.result(KeyResult {
+            preedit: zct_core::Preedit {
+                text: "中😀文".into(),
+                cursor: 2,
+                target: Some((1, 1)),
+                len: 3,
+            },
+            ..Default::default()
+        });
+        assert_eq!(
+            (result.cursor, result.target_start, result.target_length),
+            (3, 1, 2)
+        );
     }
 
     #[test]
@@ -846,5 +1144,272 @@ mod tests {
         assert_eq!(mac_key(83), Key::Numpad(b'1'));
         assert_eq!(mac_key(111), Key::F(12));
         assert_eq!(mac_key(255), Key::Other);
+    }
+    /// Exercise real macOS hardware codes through the C ABI, including key-up.
+    struct AcceptanceKeys {
+        _directory: tempfile::TempDir,
+        _runtime: Box<ZctRuntime>,
+        session: *mut ZctSession,
+        time: u64,
+    }
+    struct AcceptanceResult {
+        preedit: String,
+        commit: String,
+        candidates: Vec<String>,
+        display_only: bool,
+    }
+    impl AcceptanceKeys {
+        fn new(mut config: Config) -> Self {
+            config.candidates.language_model = false;
+            let (directory, mut runtime) = runtime(config);
+            let app = string("com.apple.TextEdit");
+            let session = unsafe { zct_session_new(&mut *runtime, app.as_ptr()) };
+            assert!(!session.is_null());
+            Self {
+                _directory: directory,
+                _runtime: runtime,
+                session,
+                time: 1000,
+            }
+        }
+        fn press(&mut self, code: u16) -> AcceptanceResult {
+            self.time += 30;
+            unsafe {
+                let result = zct_session_key(self.session, code, 0, false, self.time);
+                assert!(result.ok && result.eaten);
+                let owned = AcceptanceResult {
+                    preedit: text(result.preedit).unwrap().to_owned(),
+                    commit: text(result.commit).unwrap().to_owned(),
+                    candidates: (0..result.candidate_count)
+                        .map(|i| text(*result.candidates.add(i)).unwrap().to_owned())
+                        .collect(),
+                    display_only: result.display_only,
+                };
+                self.time += 30;
+                assert!(zct_session_key(self.session, code, 0, true, self.time).ok);
+                owned
+            }
+        }
+        fn type_codes(&mut self, codes: &[u16]) -> AcceptanceResult {
+            codes.iter().map(|code| self.press(*code)).last().unwrap()
+        }
+    }
+    impl Drop for AcceptanceKeys {
+        fn drop(&mut self) {
+            unsafe { zct_session_free(self.session) };
+        }
+    }
+
+    #[test]
+    fn native_display_contract_tracks_the_same_composition_and_selected_row() {
+        let mut keys = AcceptanceKeys::new(Config::default());
+        // 天氣, move left, open the list, move down a row and expand the next column.
+        keys.type_codes(&[13, 32, 29, 49, 3, 32, 21]);
+        for code in [123, 125, 125, 124] {
+            keys.time += 30;
+            unsafe {
+                let native = zct_session_key(keys.session, code, 0, false, keys.time);
+                assert!(native.ok && native.eaten);
+                let session = &(*keys.session).inner;
+                let preedit = session.preedit();
+                let display = preedit.display();
+                assert_eq!(text(native.preedit).unwrap(), "天氣");
+                assert_eq!(native.cursor, display.cursor_utf16());
+                assert!(!display.target.is_empty());
+                assert_eq!(
+                    (native.target_start, native.target_length),
+                    display.target_utf16().unwrap()
+                );
+                if code != 123 {
+                    let page = session.candidates().unwrap();
+                    assert!(native.has_highlight && !native.display_only);
+                    assert_eq!(Some(native.highlight), page.selected_row());
+                    assert_eq!(native.page, page.page);
+                    assert_eq!(native.candidate_count, page.items.len());
+                    for (row, item) in page.items.iter().enumerate() {
+                        assert_eq!(text(*native.candidates.add(row)).unwrap(), item);
+                        assert_eq!(text(*native.labels.add(row)).unwrap(), page.row_label(row));
+                    }
+                    if code == 124 {
+                        assert!(native.column_count > 1);
+                        for (i, column) in page.visible_columns().enumerate() {
+                            let view = &*native.columns.add(i);
+                            assert_eq!(view.count, column.len());
+                            for (row, item) in column.iter().enumerate() {
+                                assert_eq!(text(*view.items.add(row)).unwrap(), item);
+                            }
+                        }
+                    }
+                }
+                keys.time += 30;
+                assert!(zct_session_key(keys.session, code, 0, true, keys.time).ok);
+            }
+        }
+    }
+
+    #[test]
+    fn macos_acceptance_english_detection_and_character_backspace() {
+        let mut chinese = AcceptanceKeys::new(Config::default());
+        // hello + Space
+        assert_eq!(
+            chinese.type_codes(&[4, 14, 37, 37, 31, 49]).preedit,
+            "hello "
+        );
+        assert_eq!(chinese.press(36).commit, "hello ");
+        let mut config = Config::default();
+        config.mixed.english = zct_core::config::EnglishWords::EnglishFirst;
+        let mut english = AcceptanceKeys::new(config.clone());
+        assert_eq!(english.type_codes(&[37, 31, 9, 14, 49]).preedit, "love ");
+        assert_eq!(english.type_codes(&[1, 32, 20]).preedit, "love 你");
+        let mut punctuation = AcceptanceKeys::new(config.clone());
+        assert_eq!(
+            punctuation
+                .type_codes(&[37, 31, 43, 47, 44, 41, 27, 20, 21, 22, 26, 49])
+                .preedit,
+            "lo,./;-3467 "
+        );
+        let mut deletion = AcceptanceKeys::new(config);
+        deletion.type_codes(&[37, 31, 9, 14]);
+        for expected in ["lov", "lo", "l", ""] {
+            assert_eq!(deletion.press(51).preedit, expected);
+        }
+        assert_eq!(deletion.type_codes(&[1, 32, 20]).preedit, "你");
+    }
+
+    #[test]
+    fn macos_acceptance_typing_popup_crosses_abi_and_disappears_on_tone() {
+        for typing in [
+            zct_core::config::TypingDisplay::Keys,
+            zct_core::config::TypingDisplay::KeysAndChars,
+        ] {
+            let mut config = Config::default();
+            config.mixed.typing = typing;
+            let mut keys = AcceptanceKeys::new(config);
+            // Ensure dictionary statistics have finished loading before asserting common characters.
+            unsafe {
+                (*keys.session).inner.engine().char_usage('一', "ㄧ");
+            }
+            let result = keys.type_codes(&[1, 32]);
+            assert_eq!(result.preedit, "su");
+            assert!(result.display_only);
+            assert_eq!(result.candidates[0], "ㄋㄧ");
+            if typing == zct_core::config::TypingDisplay::Keys {
+                assert_eq!(result.candidates, ["ㄋㄧ"]);
+            } else {
+                for common in ["你", "妳", "尼"] {
+                    assert!(
+                        result.candidates.iter().any(|item| item == common),
+                        "{common}: {:?}",
+                        result.candidates
+                    );
+                }
+            }
+            let finished = keys.press(20);
+            assert_eq!(finished.preedit, "你");
+            assert!(!finished.display_only && finished.candidates.is_empty());
+        }
+    }
+
+    #[test]
+    fn macos_acceptance_legacy_settings_load_and_save_as_new_fields() {
+        for enabled in [false, true] {
+            let (_directory, mut runtime) = runtime(Config::default());
+            std::fs::write(runtime.data.config(), format!("[mixed]\nauto_english = {enabled}\n[detect]\nlegacy_fullscreen = {enabled}\nexclusive_fullscreen = true\n[theme]\nfont_size = 19.5\n")).unwrap();
+            unsafe {
+                let load = string(r#"{"op":"load"}"#);
+                let result = zct_runtime_preferences(&mut *runtime, load.as_ptr());
+                assert!(!result.is_null());
+                let value: serde_json::Value = serde_json::from_str(text(result).unwrap()).unwrap();
+                let snapshot = &value["snapshot"];
+                assert_eq!(
+                    snapshot["document"]["config"]["mixed"]["english"],
+                    if enabled { "chinese_first" } else { "off" }
+                );
+                assert_eq!(
+                    snapshot["document"]["config"]["detect"]["fullscreen"],
+                    enabled
+                );
+                let save = string(&serde_json::json!({"op":"save","document":snapshot["document"],"revision":snapshot["revision"]}).to_string());
+                assert!(!zct_runtime_preferences(&mut *runtime, save.as_ptr()).is_null());
+            }
+            let saved = std::fs::read_to_string(runtime.data.config()).unwrap();
+            for legacy in ["auto_english", "legacy_fullscreen", "exclusive_fullscreen"] {
+                assert!(!saved.contains(legacy));
+            }
+            assert_eq!(
+                Config::load(&runtime.data.config())
+                    .unwrap()
+                    .theme
+                    .font_size,
+                19.5
+            );
+        }
+    }
+    #[test]
+    fn macos_ai_runs_in_background_and_rejects_stale_results() {
+        for cancel in [false, true] {
+            let (endpoint, server) = crate::ai::tests::server("天氣");
+            let mut config = Config::default();
+            config.ai.enabled = true;
+            config.ai.endpoint = endpoint;
+            config.ai.model = "fixture".into();
+            let mut keys = AcceptanceKeys::new(config);
+            unsafe {
+                let original = string("天汽");
+                assert!(zct_session_reconvert(keys.session, original.as_ptr()).ok);
+                let secret = string("test-only");
+                assert!(zct_session_ai_key(keys.session, secret.as_ptr()));
+                let request = zct_session_key(keys.session, 39, 3, false, 1000);
+                assert!(request.ai_pending);
+                assert!(zct_session_command(keys.session, 5).ai_pending);
+                if cancel {
+                    keys.press(53);
+                }
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+                let mut result = ZctResult::default();
+                if !cancel {
+                    while !zct_session_poll(keys.session, &mut result) {
+                        assert!(std::time::Instant::now() < deadline);
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    assert_eq!(text(*result.candidates).unwrap(), "天氣");
+                    assert!(!result.ai_pending);
+                    assert_eq!(keys.press(36).commit, "天氣");
+                }
+                let request = server.join().unwrap();
+                assert!(request.contains("Bearer test-only"));
+                if cancel {
+                    assert!(!zct_session_poll(keys.session, &mut result));
+                }
+            }
+        }
+    }
+    #[test]
+    fn macos_mouse_selection_menu_and_session_reload_share_core_behavior() {
+        let mut keys = AcceptanceKeys::new(Config::default());
+        let bar = unsafe { zct_session_key(keys.session, 103, 3, false, 1) };
+        assert!(bar.ok && bar.toggle_composition_bar);
+        keys.type_codes(&[13, 32, 29, 49, 3, 32, 21]);
+        let menu = keys.press(125);
+        let selected = menu.candidates[1].clone();
+        unsafe {
+            let result = zct_session_choose(keys.session, 0, 1);
+            assert!(result.ok && result.eaten);
+            assert!(text(result.preedit).unwrap().contains(&selected));
+            assert!(!zct_session_choose(keys.session, usize::MAX, 0).ok);
+            let _ = keys.press(36);
+            let changed = zct_session_command(keys.session, 1);
+            assert!(changed.ok && changed.simplified);
+            let app = string("com.apple.TextEdit");
+            let fresh = zct_session_new(&mut *keys._runtime, app.as_ptr());
+            assert!(zct_session_keep_state(fresh, keys.session));
+            assert!(zct_session_command(fresh, 5).simplified);
+            assert!(zct_session_is_idle(fresh));
+            zct_session_free(fresh);
+            assert!(zct_runtime_freeze(&mut *keys._runtime));
+            assert!(keys._runtime.read_only);
+            assert!(zct_runtime_recover(&mut *keys._runtime));
+            assert!(!keys._runtime.read_only);
+        }
     }
 }

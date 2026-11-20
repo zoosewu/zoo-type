@@ -14,6 +14,8 @@ dev = ["zct-core/dev"]
 [dependencies]
 zct-core.workspace = true
 zct-preferences.workspace = true
+zct-ai = { path = "../zct-ai" }
+zct-update = { path = "../zct-update" }
 serde_json = "1.0.154"
 toml = "1.2.0"
 

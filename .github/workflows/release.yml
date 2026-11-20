@@ -75,10 +75,25 @@ jobs:
       # 模型換新時下載腳本不變，不能只靠快取
       - name: 智慧選字模型（最新正式版附的）
         run: sh scripts/fetch-model.sh
+      - name: 匯入 Apple 發布憑證（已配置時）
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: sh scripts/import-macos-signing.sh
       - name: 檢查、測試與 Release 建置
         run: sh scripts/build-macos.sh --check
       - name: 打包與 SHA256
         run: sh scripts/package-macos.sh
+      - name: 簽署 macOS 自動更新壓縮包
+        env:
+          ZOO_TYPE_SIGNING_KEY: ${{ secrets.ZOO_TYPE_SIGNING_KEY }}
+          VERSION: ${{ needs.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: cargo run -p zct-update --bin zct-release --release --locked --target-dir target/macos -- sign "target/installer/zoo-type-$VERSION-macos-$ARCH.zip" "$VERSION"
       - name: 設定視窗、候選窗與選單圖示驗證
         run: '"target/macos/動物園輸入法.app/Contents/MacOS/zoo-type" --ui-self-test target/macos/ui-preview'
       - name: 保存 UI 預覽
@@ -94,9 +109,17 @@ jobs:
           path: |
             target/installer/*-macos-${{ matrix.arch }}.zip
             target/installer/*-macos-${{ matrix.arch }}.zip.sha256
+            target/installer/*-macos-${{ matrix.arch }}.zip.sig
             target/installer/*-macos-${{ matrix.arch }}-tools.tar.gz
             target/installer/*-macos-${{ matrix.arch }}-tools.tar.gz.sha256
           if-no-files-found: error
+
+      - name: 清理 Apple 憑證
+        if: always()
+        run: |
+          if [ -n "${MACOS_KEYCHAIN_PATH:-}" ]; then security delete-keychain "$MACOS_KEYCHAIN_PATH"; fi
+          if [ -n "${MACOS_NOTARY_KEY:-}" ]; then rm -f "$MACOS_NOTARY_KEY"; fi
+          rm -f "$RUNNER_TEMP/zoo-type-signing.p12"
 
   windows:
     needs: version
@@ -194,6 +217,8 @@ jobs:
         working-directory: release-assets
         run: |
           test -s "zoo-type-$VERSION-windows-x64-setup.exe.sig"
+          test -s "zoo-type-$VERSION-macos-arm64.zip.sig"
+          test -s "zoo-type-$VERSION-macos-x64.zip.sig"
           sha256sum --check ngram.bin.sha256
           for name in "zoo-type-$VERSION-windows-x64-setup.exe" \
             "zoo-type-$VERSION-macos-arm64.zip" \
@@ -210,12 +235,13 @@ jobs:
           下載 zoo-type-$VERSION-windows-x64-setup.exe 執行（需要系統管理員權限，Windows 10 / 11 64 位元）。
           安裝檔沒有程式碼簽章，Windows 可能顯示「Windows 已保護您的電腦」：按「其他資訊」→「仍要執行」。
 
-          ## macOS 輸入法（macOS 15 以上，初版）
+          ## macOS 輸入法（macOS 15 以上）
           Apple Silicon：zoo-type-$VERSION-macos-arm64.zip
           Intel：zoo-type-$VERSION-macos-x64.zip
           包含 InputMethodKit .app 與詞庫。解壓後執行 sh install.sh，並在系統設定 → 鍵盤 → 輸入方式加入「動物園輸入法」。詳細步驟見 README.txt。
-          尚未做 Developer ID 簽章或公證，macOS 可能要求在「隱私權與安全性」允許開啟。
-          初版支援注音、組字、鍵盤選字、標點、中英切換與學習；包含原生設定視窗（上方「動」圖示 →「設定…」）；AI、git 同步與詞庫管理 GUI 尚未移植。
+          Apple 發行簽章與公證狀態請見壓縮包內的 README.txt。
+          支援注音、組字、鍵盤／滑鼠選字、標點、中英切換、學習、九頁原生設定、詞庫管理、git 同步與 AI 同音字修正。
+          AI 金鑰儲存於 macOS Keychain。正式版支援下載並驗證官方簽章後更新；Mac 上的遊戲偵測依全螢幕與文字輸入狀態判斷。
           另附 -tools.tar.gz 命令列工具包，供模擬打字與評測使用。
 
           ngram.bin 是安裝檔內含的智慧選字模型（CC BY-SA 4.0，由中文維基百科字頻統計而成），供建置與評測使用，一般使用者不需下載。

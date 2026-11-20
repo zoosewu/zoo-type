@@ -87,6 +87,14 @@ final class PreferencesModel {
         document = snapshot["document"] as! [String: Any]
         NotificationCenter.default.post(name: .zctSettingsChanged, object: nil)
     }
+    func saveCompositionBar(_ enabled: Bool, for bundle: String) throws {
+        if let index = apps.firstIndex(where: { $0["macos"] as? String == bundle }) {
+            apps[index]["composition_bar"] = enabled
+        } else {
+            apps.append(["name": bundle, "macos": bundle, "composition_bar": enabled])
+        }
+        try save()
+    }
     func reload() throws {
         snapshot = try client.preferences(["op": "load"])["snapshot"] as! [String: Any]
         document = snapshot["document"] as! [String: Any]

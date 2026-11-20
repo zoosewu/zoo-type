@@ -54,6 +54,10 @@ jobs:
       - name: macOS 開發版檢查、測試與 Release 建置
         run: sh scripts/build-macos.sh --check --dev
 
+      - name: 原生設定、AI／Keychain、滑鼠與更新驗收
+        run: '"target/macos-dev/動物園輸入法 開發版.app/Contents/MacOS/zoo-type" --ui-self-test target/macos-dev/ui-preview'
+
+
   windows:
     runs-on: windows-latest
     timeout-minutes: 60

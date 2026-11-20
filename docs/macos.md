@@ -43,10 +43,11 @@ sh scripts/install-macos.sh --dev
 
 原生設定視窗包含一般、快捷鍵、外觀、App 規則、詞庫、學習、同步、AI 與關於九頁。透過 `zct-preferences` 與 Windows 共用全域設定與 App 規則的欄位、預設值、驗證、儲存及管理操作介面。Windows 的「全部設定」使用相同欄位目錄。
 
-macOS 尚未提供 AI 執行器、遊戲偵測、自動更新及組字提示列快捷鍵，因此相關欄位顯示為灰色並保留既有值。詞庫新增、編輯、讀音查詢、優先／封鎖、統計、備份與還原可直接從設定頁操作。資料位置可在同步頁變更；使用 `ZCT_HOME` 時位置會鎖定。
-
-儲存前會驗證整份設定並比對載入版本；其他程式或視窗修改後，須先按「重新載入」，避免覆寫。備份還原或資料搬移後，請切換輸入法再切回以建立新的輸入 session。
-目前尚未移植 AI 背景請求與 Windows 啟發式遊戲偵測，候選窗以鍵盤操作。git 背景同步與詞庫管理 GUI 已提供。
+- 在「AI」頁設定端點與模型、儲存金鑰及測試連線。金鑰放在目前使用者的 Keychain，正式版和開發版各自儲存。啟用後按 AI 快捷鍵即可在背景修正組字，接受候選才會套用。
+- 候選字支援點選與捲動翻頁。組字提示列快捷鍵預設為 Control + Shift + F11，切換結果寫入目前 App 的規則。
+- 全螢幕偵測結合前景視窗、文字輸入範圍與游標位置。全螢幕編輯器可繼續輸入，遊戲聊天框遇到誤判時可在 App 規則關閉偵測。安全輸入啟用時放行按鍵。
+- 上方輸入法選單可切換中英、繁簡與遊戲模式。有新版可安裝時，選單會顯示版本。
+- 詞庫、學習與同步頁支援讀音查詢、詞條管理、備份還原、git 同步和搬移資料。透過設定頁儲存時會比對載入時的版本；進行中的組字結束後才重新載入設定。
 
 ## 設定入口與圖示更新
 
@@ -85,9 +86,16 @@ Windows、macOS Apple Silicon 和 Intel 分別測試與建置；全部成功後�
 - 另附 `-tools.tar.gz` 命令列工具包；每個壓縮包皆附 `.sha256`。
 
 輸入法壓縮包內包含 .app、`install.sh` 與 README，執行 `sh install.sh` 安裝到目前使用者的 Input Methods。
-建置會使用 ad-hoc 簽章以滿足執行需求，尚未設定 Developer ID 簽章與 Apple 公證。
-下載後若被 Gatekeeper 阻擋，確認來源後至「系統設定 → 隱私權與安全性」允許；腳本不會移除隔離標記或關閉系統安全機制。
-Windows 原有 `ZOO_TYPE_SIGNING_KEY` 仍為必要，目前沒有額外的 Apple Secrets 需求。
+正式版在「設定 → 關於」可檢查更新；啟用自動檢查後，啟動約五分鐘進行第一次檢查，此後每天檢查。安裝前會驗證 ZIP 的 Ed25519 簽章、版本、App 身分、程式碼簽章與架構，再替換使用者 Input Methods 內的 App 並重新啟動。
+
+發布者需配置現有的 `ZOO_TYPE_SIGNING_KEY`，工作流程會為兩種 Mac 架構各產生一份 `.zip.sig`。Apple 的發行簽章另用以下 GitHub Secrets：
+
+| 用途 | GitHub Secrets |
+| --- | --- |
+| Developer ID Application 憑證 | `MACOS_CERTIFICATE_P12`（base64）、`MACOS_CERTIFICATE_PASSWORD`、`MACOS_SIGN_IDENTITY` |
+| Apple 公證與附加票證 | `MACOS_NOTARY_KEY_BASE64`（.p8 的 base64）、`MACOS_NOTARY_KEY_ID`、`MACOS_NOTARY_ISSUER_ID` |
+
+無 Apple 憑證的建置使用 ad-hoc 簽章；只有完成 notarytool 與 stapler 的產物具備 Apple 公證票證。
 
 本機打包：`sh scripts/package-macos.sh`，產物在 `target/installer`。
 工具包內的 `bin/zoo-type-sim`、`bin/zct-eval` 可直接讀取隨附資源，亦可用 `ZCT_RESOURCE_ROOT` 覆寫資源目錄。
@@ -98,7 +106,7 @@ Windows 原有 `ZOO_TYPE_SIGNING_KEY` 仍為必要，目前沒有額外的 Apple
 自我測試在隔離的暫存 `ZCT_HOME` 驗證組字、候選、送字、Command 放行、重新選字與失焦，不註冊輸入法。
 打包也會再次執行此測試。CI 會在 arm64 與 x64 runner 分別執行。
 
-`--ui-self-test <輸出資料夾>` 會離屏繪製設定頁與直式／橫式／多欄候選窗，並驗證選單圖示的邏輯尺寸是 16×16。
+`--ui-self-test <輸出資料夾>` 會離屏繪製設定頁與直式／橫式／多欄候選窗，並驗證 16×16 選單圖示、設定儲存與舊檔轉換、候選窗點選、Keychain 讀寫及隔離目錄中的更新替換。
 
 這些測試不代表已驗證所有真實 App 的 IMK 行為。安裝後應在 TextEdit、Safari、VS Code、Terminal 手動檢查：
 

@@ -106,7 +106,7 @@ impl Session {
 
 `Backend` 以 `Action` / `Reply` 抽象詞庫、讀音、統計、備份、還原、同步與 AI 憑證操作。Windows 設定程式透過 named pipe 轉送引擎操作，Windows 服務與 macOS FFI 共用 `EngineBackend`；憑證與網路工作留在平台實作。macOS Swift `PreferencesClient` 透過 C ABI 的 JSON 請求呼叫共用 `Manager`。UI 不自行解析或寫入 TOML。
 
-macOS 使用 AppKit 九個設定頁；Windows 保留原生 Slint 分頁，增加由同一份目錄產生的「全部設定」。兩邊使用相同設定值、預設值與驗證。macOS 尚無 AI 執行器、遊戲偵測、自動更新及組字提示列快捷鍵；相關欄位停用，但儲存時保留其值，避免跨平台使用資料時遺失設定。一般組字提示列與個別應用程式的提示列選項仍可設定。
+macOS 使用 AppKit 九個設定頁；Windows 保留原生 Slint 分頁，增加由同一份目錄產生的「全部設定」。兩邊使用相同設定值、預設值與驗證。Mac 的 AI 修正由 Rust 背景執行緒呼叫共用的 `zct-ai`，IMK 在主執行緒取得結果，金鑰由 Keychain 管理。AppKit 根據安全輸入、前景視窗與文字游標狀態判斷是否放行按鍵。組字提示列快捷鍵透過共用設定層寫入目前 App 的規則。正式版更新使用 `zct-update` 驗證對應架構的 Release ZIP 與簽章，再替換使用者安裝的 .app。
 
 還原會凍結舊引擎；主機須重新開啟引擎，現有輸入 session 須重新啟用，避免舊學習資料覆寫還原結果。
 
@@ -129,3 +129,9 @@ Windows 安裝檔與 macOS .app 打包整個 `assets/dict`，Release workflow �
 3. 之後的 CI 與新版建置就會用新模型
 
 模型授權 CC-BY-SA-4.0，來源與變更說明在 `installer/THIRD-PARTY-NOTICES.txt` 與 `macos/THIRD-PARTY-NOTICES.txt`。
+
+### 組字與候選的顯示介面
+
+`Preedit::display()` 提供游標前文字與目標詞的前、中、後三段。Windows 的 DirectWrite 組字列以這些片段量測字寬；TSF 和 macOS IMK 使用同一份資料轉出的 UTF-16 游標與範圍。AppKit 收到完整組字資料後，以 Core Text 計算螢幕座標。
+
+`CandidatePage` 提供選取列、數字與固頂標記、展開的各欄，以及純提示模式。Windows 候選窗直接取用，macOS 由 C ABI 複製到 Swift 的顯示資料。平台各自管理視窗位置、字型與 App 的行內輸入協定。

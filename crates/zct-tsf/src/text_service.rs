@@ -549,26 +549,18 @@ fn update_document(
         *this.composition_text.borrow_mut() = preedit.text.clone();
 
         // 底線：整段組字 + 選字目標（字元位置換成 UTF-16）
-        let utf16 = |chars: usize| -> i32 {
-            preedit
-                .text
-                .chars()
-                .take(chars)
-                .map(char::len_utf16)
-                .sum::<usize>() as i32
-        };
-        let target = preedit
-            .target
-            .map(|(start, len)| (utf16(start), utf16(start + len) - utf16(start)));
+        let display = preedit.display();
+        let target = display
+            .target_utf16()
+            .map(|(start, len)| (start as i32, len as i32));
         let atoms = this.tsf.borrow().atoms;
         display::apply(ctx, ec, &range, atoms, target);
 
         // 組字區內的游標：從開頭往後移 cursor 個 UTF-16 單位
-        let prefix: String = preedit.text.chars().take(preedit.cursor).collect();
         let caret = range.Clone()?;
         caret.Collapse(ec, TF_ANCHOR_START)?;
         let mut moved = 0i32;
-        let n = prefix.encode_utf16().count() as i32;
+        let n = display.cursor_utf16() as i32;
         caret.ShiftEnd(ec, n, &mut moved, std::ptr::null())?;
         caret.Collapse(ec, TF_ANCHOR_END)?;
         set_selection(ctx, ec, &caret)?;

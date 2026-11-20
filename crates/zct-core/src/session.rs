@@ -38,6 +38,52 @@ pub struct Preedit {
     pub len: usize,
 }
 
+/// Native renderers measure these slices with their own fonts. Both TSF and
+/// IMK address the same positions in UTF-16 code units.
+pub struct CompositionDisplay<'a> {
+    pub before_cursor: &'a str,
+    pub before_target: &'a str,
+    pub target: &'a str,
+    pub after_target: &'a str,
+}
+
+impl CompositionDisplay<'_> {
+    pub fn cursor_utf16(&self) -> usize {
+        self.before_cursor.encode_utf16().count()
+    }
+
+    pub fn target_utf16(&self) -> Option<(usize, usize)> {
+        (!self.target.is_empty()).then(|| {
+            (
+                self.before_target.encode_utf16().count(),
+                self.target.encode_utf16().count(),
+            )
+        })
+    }
+}
+
+impl Preedit {
+    pub fn display(&self) -> CompositionDisplay<'_> {
+        let byte = |index| {
+            self.text
+                .char_indices()
+                .nth(index)
+                .map_or(self.text.len(), |(i, _)| i)
+        };
+        let (start, end) = self
+            .target
+            .map_or((self.text.len(), self.text.len()), |(start, len)| {
+                (byte(start), byte(start.saturating_add(len)))
+            });
+        CompositionDisplay {
+            before_cursor: &self.text[..byte(self.cursor)],
+            before_target: &self.text[..start],
+            target: &self.text[start..end],
+            after_target: &self.text[end..],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CandidatePage {
     pub items: Vec<String>,
@@ -67,6 +113,33 @@ impl CandidatePage {
             highlight: CandidatePage::DISPLAY_ONLY,
             ..CandidatePage::default()
         }
+    }
+
+    pub fn row_label(&self, row: usize) -> String {
+        if self.is_display_only() || row >= self.items.len() {
+            return String::new();
+        }
+        let digit = (row + 1) % 10;
+        if self.pinned.get(row) == Some(&true) {
+            format!("{digit}★")
+        } else {
+            digit.to_string()
+        }
+    }
+
+    pub fn selected_row(&self) -> Option<usize> {
+        (self.highlight < self.items.len()).then_some(self.highlight)
+    }
+
+    /// The active column includes the current page's candidates and pin state.
+    pub fn visible_columns(&self) -> impl Iterator<Item = &[String]> {
+        self.columns.iter().enumerate().map(|(i, column)| {
+            if self.page.checked_sub(self.first_column) == Some(i) {
+                self.items.as_slice()
+            } else {
+                column.as_slice()
+            }
+        })
     }
 
     pub fn is_display_only(&self) -> bool {
@@ -272,6 +345,7 @@ pub struct Session {
     mixed: MixedConfig,
     /// 目前這個音節的原始按鍵（中英混打判斷用）
     raw: String,
+    rejected_first_tone: bool,
     /// 目前這段按鍵的位置可能是英文：組字開頭，或緊接在空白之後（「我 love」可以，「我love」不行）
     raw_english_ok: bool,
     /// 英文優先：組不成注音而轉成英文的單字還在打（按鍵都是字元本身，空白結束）
@@ -347,6 +421,7 @@ impl Session {
             select_rear: false,
             mixed: opts.config.mixed.clone(),
             raw: String::new(),
+            rejected_first_tone: false,
             raw_english_ok: false,
             english_word: false,
             english_alt: None,
@@ -419,6 +494,72 @@ impl Session {
             ..Default::default()
         };
         self.finish(r, commit)
+    }
+
+    /// Select an absolute candidate page/row from a native mouse event.
+    /// Display-only typing hints and stale/out-of-range clicks are ignored.
+    pub fn choose_candidate(&mut self, page: usize, row: usize) -> KeyResult {
+        let ignored = || KeyResult::default();
+        if self.extras_page {
+            if page != 0 || row >= self.extras().len() {
+                return ignored();
+            }
+            self.highlight = row;
+            return self.process_key(&KeyEvent::down(Key::Enter, Mods::NONE, 0));
+        }
+        if row >= self.per_page {
+            return ignored();
+        }
+        let Some(index) = page
+            .checked_mul(self.per_page)
+            .and_then(|v| v.checked_add(row))
+        else {
+            return ignored();
+        };
+        if self.ai_suggestion().is_some() {
+            if index != 0 {
+                return ignored();
+            }
+        } else if let Some(pick) = self.emoji.as_mut() {
+            if index >= pick.items.len() {
+                return ignored();
+            }
+            pick.page = page;
+            pick.highlight = row;
+        } else if let Some(pick) = self.reading.as_mut() {
+            if index >= pick.list.items.len() {
+                return ignored();
+            }
+            pick.list.page = page;
+            pick.list.highlight = row;
+        } else if self.editor.is_selecting() {
+            if self.menu.as_ref().is_none_or(|m| index >= m.items.len()) {
+                return ignored();
+            }
+            self.select_menu(index);
+            return self.finish(
+                KeyResult {
+                    eaten: true,
+                    ..Default::default()
+                },
+                String::new(),
+            );
+        } else {
+            return ignored();
+        }
+        self.process_key(&KeyEvent::down(Key::Enter, Mods::NONE, 0))
+    }
+
+    pub fn toggle_output(&mut self) -> KeyResult {
+        self.output = self.output.toggled();
+        self.finish(
+            KeyResult {
+                eaten: true,
+                output_changed: Some(self.output),
+                ..Default::default()
+            },
+            String::new(),
+        )
     }
 
     /// 遊戲模式鎖定英文、沒有組字時：除了回傳的這幾個快捷鍵，按鍵都交給 App，
@@ -1484,8 +1625,15 @@ impl Session {
                 && self.ai_suggestion().is_none()
                 && self.editor.entering_syllable()
                 && !self.editor.is_selecting();
+            let rejected_first_tone = std::mem::take(&mut self.rejected_first_tone);
             if pending_syllable && ev.key == Key::Backspace {
-                self.backspace_syllable_key();
+                if rejected_first_tone {
+                    self.editor.cancel_entering_syllable();
+                    self.raw.clear();
+                    self.english_alt = None;
+                } else {
+                    self.backspace_syllable_key();
+                }
                 return self.finish(r, commit);
             }
             if pending_syllable && ev.key == Key::Enter && !ev.mods.shift {
@@ -1654,6 +1802,7 @@ impl Session {
                                 return self.finish(r, commit);
                             }
                             // 原始按鍵維持和畫面上的注音一致（聲調鍵也留著）
+                            self.rejected_first_tone = key == Key::Space;
                             self.raw = raw_before;
                             if let Key::Char(c) = key {
                                 self.raw.push(c as char);
@@ -2192,6 +2341,7 @@ impl Session {
 
     /// 送出目前所有組字內容（失焦、切換中英時使用）；回傳的是 chewing 原始（繁體）文字
     pub fn flush(&mut self) -> String {
+        self.rejected_first_tone = false;
         if self.editor.is_selecting() {
             let _ = self.editor.cancel_selecting();
         }
@@ -2213,6 +2363,7 @@ impl Session {
 
     /// 丟棄組字內容與 Shift 狀態（App 中止組字時）
     pub fn reset(&mut self) {
+        self.rejected_first_tone = false;
         self.english_word = false;
         self.editor.clear();
         self.shift.reset();

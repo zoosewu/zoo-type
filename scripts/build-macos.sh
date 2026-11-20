@@ -36,7 +36,7 @@ if ! xcrun --find clang >/dev/null 2>&1; then
     exit 1
 fi
 
-set -- -p zct-core -p zct-ai -p zct-eval -p zct-ffi -p zct-preferences --locked
+set -- -p zct-core -p zct-ai -p zct-eval -p zct-ffi -p zct-preferences -p zct-update --locked
 OUTPUT=target/macos
 APP_NAME="動物園輸入法"
 BUNDLE_ID=com.zoosewu.inputmethod.ZooType
@@ -68,7 +68,7 @@ xcrun swiftc -swift-version 5 -O -module-name ZooType \
     -module-cache-path "$ROOT/$OUTPUT/swift-module-cache" \
     -import-objc-header "$ZCT_FFI_HEADER" \
     macos/Sources/*.swift -L "$ROOT/$OUTPUT/release" -lzct_ffi \
-    -framework AppKit -framework InputMethodKit -framework Carbon -liconv \
+    -framework AppKit -framework InputMethodKit -framework Carbon -framework Security -liconv \
     -o "$APP/Contents/MacOS/zoo-type"
 python3 scripts/macos-plist.py "$APP" "$APP_NAME" "$BUNDLE_ID" "$VERSION" "$MACOSX_DEPLOYMENT_TARGET"
 if [ ! -f assets/dict/ngram.bin ]; then
@@ -86,8 +86,7 @@ for size in 16 32 128 256 512; do
     sips -z "$double" "$double" "$APP/Contents/Resources/app-icon.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 python3 scripts/macos-icns.py "$ICONSET" "$APP/Contents/Resources/zoo-type.icns"
-# 本機與 CI 使用 ad-hoc 簽章；Developer ID 與公證另行配置。
-codesign --force --sign - "$APP"
-codesign --verify --strict "$APP"
+# Developer ID / notarization when configured; ad-hoc for local development.
+sh scripts/sign-macos.sh "$APP"
 "$APP/Contents/MacOS/zoo-type" --self-test
 echo "macOS 輸入法建置完成：$APP"

@@ -6601,8 +6601,10 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml 1.2.0+spec-1.1.0",
+ "zct-ai",
  "zct-core",
  "zct-preferences",
+ "zct-update",
 ]
 
 [[package]]
@@ -6686,6 +6688,7 @@ version = "0.1.4"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
+ "semver",
  "sha2",
 ]
 

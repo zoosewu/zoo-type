@@ -414,12 +414,7 @@ impl Ui {
         let mut items = Vec::new();
         let mut row_h: f32 = 0.0;
         for (i, item) in page.items.iter().enumerate() {
-            let mark = if page.pinned.get(i).copied().unwrap_or(false) {
-                "★"
-            } else {
-                ""
-            };
-            let num = self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?;
+            let num = self.layout(&page.row_label(i), &self.num_fmt)?;
             let text = self.layout(item, &self.text_fmt)?;
             row_h = row_h.max(text.2).max(num.2);
             items.push((num, text));
@@ -430,7 +425,7 @@ impl Ui {
         let mut x = PAD_X;
         for (i, ((num, nw, nh), (text, tw, th))) in items.into_iter().enumerate() {
             let w = ROW_PAD_X + nw + GAP_NUM / 2.0 + tw + ROW_PAD_X;
-            if i == page.highlight {
+            if page.selected_row() == Some(i) {
                 highlight = Some(D2D_RECT_F {
                     left: x,
                     top: PAD_Y,
@@ -474,19 +469,12 @@ impl Ui {
         let (_, num_w, _) = self.layout("0★", &self.num_fmt)?;
         let mut cols = Vec::new();
         let mut row_h: f32 = 0.0;
-        for (c, items) in page.columns.iter().enumerate() {
-            // 目前這欄用 page.items（含 ★ 與英文選項）
-            let items = if c == active { &page.items } else { items };
+        for (c, items) in page.visible_columns().enumerate() {
             let mut rows = Vec::new();
             let mut text_w: f32 = 0.0;
             for (i, item) in items.iter().enumerate() {
                 let num = if c == active {
-                    let mark = if page.pinned.get(i).copied().unwrap_or(false) {
-                        "★"
-                    } else {
-                        ""
-                    };
-                    Some(self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?)
+                    Some(self.layout(&page.row_label(i), &self.num_fmt)?)
                 } else {
                     None
                 };
@@ -507,7 +495,7 @@ impl Ui {
             let col_w = ROW_PAD_X + num_w + GAP_NUM + text_w + ROW_PAD_X;
             let mut y = PAD_Y;
             for (i, (num, (text, _, th))) in rows.into_iter().enumerate() {
-                if c == active && i == page.highlight {
+                if c == active && page.selected_row() == Some(i) {
                     highlight = Some(D2D_RECT_F {
                         left: x,
                         top: y,
@@ -557,12 +545,7 @@ impl Ui {
         let mut row_h: f32 = 0.0;
         let mut text_w: f32 = 0.0;
         for (i, item) in page.items.iter().enumerate() {
-            let mark = if page.pinned.get(i).copied().unwrap_or(false) {
-                "★"
-            } else {
-                ""
-            };
-            let num = self.layout(&format!("{}{mark}", (i + 1) % 10), &self.num_fmt)?;
+            let num = self.layout(&page.row_label(i), &self.num_fmt)?;
             let text = self.layout(item, &self.text_fmt)?;
             row_h = row_h.max(text.2).max(num.2);
             text_w = text_w.max(text.1);
@@ -575,7 +558,7 @@ impl Ui {
         let mut y = PAD_Y;
         let mut highlight = None;
         for (i, ((num, nw, nh), (text, _, th))) in rows.into_iter().enumerate() {
-            if i == page.highlight {
+            if page.selected_row() == Some(i) {
                 highlight = Some(D2D_RECT_F {
                     left: PAD_X,
                     top: y,
@@ -644,21 +627,13 @@ impl Ui {
         let Some(anchor) = self.anchor(anchor) else {
             return Ok(());
         };
-        let chars: Vec<char> = p.text.chars().collect();
-        let (start, len) = p.target.unwrap_or((chars.len(), 0));
-        let end = (start + len).min(chars.len());
-        let pieces = [
-            chars[..start.min(chars.len())].iter().collect::<String>(),
-            chars[start.min(chars.len())..end]
-                .iter()
-                .collect::<String>(),
-            chars[end..].iter().collect::<String>(),
-        ];
+        let display = p.display();
+        let pieces = [display.before_target, display.target, display.after_target];
         let mut runs = Vec::new();
         let mut x = PAD_X + ROW_PAD_X;
         let mut h: f32 = 0.0;
         let mut highlight = None;
-        for (i, piece) in pieces.iter().enumerate() {
+        for (i, piece) in pieces.into_iter().enumerate() {
             if piece.is_empty() {
                 continue;
             }
@@ -694,11 +669,11 @@ impl Ui {
         }
         // 游標：游標前文字的寬度
         let x0 = PAD_X + ROW_PAD_X;
-        let before: String = chars[..p.cursor.min(chars.len())].iter().collect();
+        let before = display.before_cursor;
         let caret_x = if before.is_empty() {
             x0
         } else {
-            x0 + self.layout(&before, &self.text_fmt)?.1
+            x0 + self.layout(before, &self.text_fmt)?.1
         };
         let caret = D2D_RECT_F {
             left: caret_x - 0.5,
@@ -913,4 +888,46 @@ fn with_ui<R>(f: impl FnOnce(&mut Ui) -> R) -> Option<R> {
         Ok(mut guard) => guard.as_mut().map(f),
         Err(_) => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn composition_and_candidate_popups_paint_the_shared_selection() -> Result<()> {
+        let (_, rx) = channel();
+        let mut ui = Ui::new(rx, ThemeConfig::default())?;
+        let anchor = Some(Rect {
+            left: 10,
+            top: 10,
+            right: 11,
+            bottom: 28,
+        });
+        let mut preedit = Preedit {
+            text: "天😀氣".into(),
+            cursor: 0,
+            target: Some((0, 1)),
+            len: 3,
+        };
+        ui.show_composition(&preedit, anchor)?;
+        let first = ui.comp.caret.unwrap().left;
+        preedit.cursor = 1;
+        preedit.target = Some((1, 1));
+        ui.show_composition(&preedit, anchor)?;
+        let caret = ui.comp.caret.unwrap().left;
+        let target = ui.comp.highlight.unwrap();
+        assert!(caret > first && target.left <= caret && target.right > caret);
+        let mut page = CandidatePage {
+            items: vec!["氣".into(), "汽".into()],
+            total_pages: 1,
+            ..Default::default()
+        };
+        ui.show_candidates(&page, anchor)?;
+        let first = ui.cand.highlight.unwrap().top;
+        page.highlight = 1;
+        ui.show_candidates(&page, anchor)?;
+        assert!(ui.cand.highlight.unwrap().top > first);
+        Ok(())
+    }
 }

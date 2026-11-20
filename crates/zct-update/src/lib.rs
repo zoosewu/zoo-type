@@ -32,24 +32,14 @@ pub const TASK_NAME: &str = "ZooType Updater";
 
 /// 版號：`主.次.修`，可以帶 `-rc.1` 這類後綴（比新舊時後綴版比正式版舊）
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Version {
-    pub numbers: [u64; 3],
-    pub pre: Option<String>,
-}
+pub struct Version(semver::Version);
 
 impl Version {
     pub fn parse(s: &str) -> Option<Version> {
-        let s = s.trim().trim_start_matches('v');
-        let (core, pre) = match s.split_once('-') {
-            Some((c, p)) => (c, Some(p.to_owned())),
-            None => (s, None),
-        };
-        let mut it = core.split('.').map(|n| n.parse::<u64>().ok());
-        let numbers = [it.next()??, it.next()??, it.next()??];
-        if it.next().is_some() || pre.as_deref() == Some("") {
-            return None;
-        }
-        Some(Version { numbers, pre })
+        let s = s.trim();
+        semver::Version::parse(s.strip_prefix('v').unwrap_or(s))
+            .ok()
+            .map(Version)
     }
 
     /// 這個程式自己的版號
@@ -58,27 +48,13 @@ impl Version {
     }
 
     pub fn is_newer_than(&self, other: &Version) -> bool {
-        self.cmp_key() > other.cmp_key()
-    }
-
-    fn cmp_key(&self) -> ([u64; 3], bool, &str) {
-        // 同樣的數字：沒有後綴（正式版）比有後綴新
-        (
-            self.numbers,
-            self.pre.is_none(),
-            self.pre.as_deref().unwrap_or(""),
-        )
+        self.0.cmp_precedence(&other.0).is_gt()
     }
 }
 
 impl std::fmt::Display for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let [a, b, c] = self.numbers;
-        write!(f, "{a}.{b}.{c}")?;
-        if let Some(p) = &self.pre {
-            write!(f, "-{p}")?;
-        }
-        Ok(())
+        self.0.fmt(f)
     }
 }
 
@@ -163,6 +139,9 @@ mod tests {
         assert!(v("v0.2.0").is_newer_than(&v("0.1.9")));
         assert!(v("0.2.0").is_newer_than(&v("0.2.0-rc.1")));
         assert!(!v("0.1.0").is_newer_than(&v("0.1.0")));
+        assert!(v("0.1.0-rc.10").is_newer_than(&v("0.1.0-rc.2")));
+        assert!(!v("0.1.0+build.2").is_newer_than(&v("0.1.0+build.1")));
+        assert!(Version::parse("1.0.0-rc/../file").is_none());
         assert!(Version::parse("0.1").is_none());
         assert!(Version::parse("0.1.0-").is_none());
         assert_eq!(v("1.2.3-rc.1").to_string(), "1.2.3-rc.1");

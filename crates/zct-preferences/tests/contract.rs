@@ -79,7 +79,7 @@ fn every_config_and_app_field_has_one_shared_descriptor() {
         keys,
         win.app_fields.iter().map(|f| f.path.clone()).collect()
     );
-    assert!(win.capabilities.ai && !mac.capabilities.ai);
+    assert!(win.capabilities.ai && mac.capabilities.ai);
     assert!(win.capabilities.sync && mac.capabilities.sync);
 }
 #[test]

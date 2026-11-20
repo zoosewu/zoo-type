@@ -9,3 +9,4 @@ rust-version.workspace = true
 ed25519-dalek = "3.0.0"
 getrandom = "0.4.3"
 sha2 = "0.11.1"
+semver = "1"

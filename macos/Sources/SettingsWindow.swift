@@ -25,6 +25,8 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     private var wordField: NSTextField?
     private var readingField: NSTextField?
     private var syncTimer: Timer?
+    private weak var updateStatusLabel: NSTextField?
+    private weak var updateInstallButton: NSButton?
     private weak var syncStatusLabel: NSTextField?
     private var backupPicker: NSPopUpButton?
 
@@ -39,7 +41,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         window.isReleasedWhenClosed = false
         super.init(window: window)
         buildWindow(); window.center()
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refreshSyncStatus() }
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refreshSyncStatus(); self?.refreshUpdateStatus() }
     }
     deinit { syncTimer?.invalidate() }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -215,11 +217,18 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         case "ai":
             let key = button("儲存 API Key…", #selector(saveApiKey(_:))); key.isEnabled = model.supports("api_key"); body.addArrangedSubview(key)
             let test = button("測試連線", #selector(testAi(_:))); test.isEnabled = model.supports("ai"); body.addArrangedSubview(test)
-            note("API Key 由平台憑證庫管理，不寫入 config.toml。")
+            do { let present = try model.manage(["op": "api_key_status"])["present"] as? Bool == true
+                note(present ? "API Key 已存於 macOS Keychain。" : "未設定 API Key；本機免金鑰服務可留空。")
+            } catch { note("無法讀取 Keychain：" + String(describing: error)) }
         case "about":
             let version = Bundle.main.object(forInfoDictionaryKey: "ZooTypeVersion") as? String ?? ""
             body.addArrangedSubview(NSTextField(labelWithString: "版本 \(version)"))
             note("設定欄位、預設值、驗證、儲存與管理操作由共用設定層提供。")
+            let update = button("檢查更新", #selector(checkUpdate(_:))); update.isEnabled = UpdateManager.shared.supported
+            body.addArrangedSubview(update)
+            let install = button("安裝更新並重新啟動", #selector(installUpdate(_:))); body.addArrangedSubview(install); updateInstallButton = install
+            let label = NSTextField(wrappingLabelWithString: ""); label.preferredMaxLayoutWidth = 520
+            body.addArrangedSubview(label); updateStatusLabel = label; refreshUpdateStatus()
             body.addArrangedSubview(button("編輯設定檔…", #selector(editFile(_:))))
         default: break
         }
@@ -228,7 +237,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         if let scroll = body.enclosingScrollView { scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView) }
     }
     private func updatePreview() {
-        preview.update(items: ["天氣", "天汽", "添氣"], highlight: 0, page: 0, totalPages: 3, theme: CandidateTheme(config: model.config))
+        preview.update(CandidateDisplay(items: ["天氣", "天汽", "添氣"], labels: ["1", "2", "3"], highlight: 0, page: 0, totalPages: 3), theme: CandidateTheme(config: model.config))
         preview.invalidateIntrinsicContentSize()
     }
     private func appEditor() {
@@ -375,13 +384,33 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24)); alert.accessoryView = field
         alert.addButton(withTitle: "儲存"); alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        do { _ = try model.manage(["op": "write_api_key", "key": field.stringValue]); status.stringValue = "憑證已更新" }
+        do { _ = try model.manage(["op": "write_api_key", "key": field.stringValue]); collect(); showPage(); status.stringValue = "憑證已更新" }
         catch { showError(error) }
     }
+    private func refreshUpdateStatus() {
+        let updates = UpdateManager.shared
+        updateStatusLabel?.stringValue = updates.supported ? updates.message : "開發版或隔離測試不檢查更新"
+        updateInstallButton?.isEnabled = updates.available != nil && !updates.busy
+    }
+    @objc private func checkUpdate(_ sender: Any?) { UpdateManager.shared.check(); refreshUpdateStatus() }
+    @objc private func installUpdate(_ sender: Any?) { UpdateManager.shared.install(); refreshUpdateStatus() }
     @objc private func testAi(_ sender: Any?) {
         collect()
-        do { status.stringValue = try model.manage(["op": "test_ai", "config": model.config["ai"]!])["message"] as? String ?? "連線成功" }
-        catch { showError(error) }
+        guard let config = model.config["ai"] as? [String: Any] else { return }
+        do {
+            let key = try Credentials.read() ?? ""
+            status.stringValue = "測試連線中…"
+            (sender as? NSButton)?.isEnabled = false
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let result = Result { try AIConnection.test(config: config, key: key) }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    (sender as? NSButton)?.isEnabled = true
+                    switch result { case .success(let message): self.status.stringValue = "連線成功：" + message
+                    case .failure(let error): self.showError(error) }
+                }
+            }
+        } catch { showError(error) }
     }
     @objc private func syncNow(_ sender: Any?) {
         do { collect(); try parseJSONDrafts(); try model.save(); _ = try model.manage(["op": "sync_now"]); refreshSyncStatus(); status.stringValue = "已要求背景同步" }

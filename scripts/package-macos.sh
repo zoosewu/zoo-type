@@ -27,7 +27,7 @@ cp macos/THIRD-PARTY-NOTICES.txt "$PACKAGE/"
 cat > "$PACKAGE/README.txt" <<EOF
 動物園輸入法 $VERSION — macOS $ARCH 命令列工具
 
-這不是可安裝的輸入法；InputMethodKit 前端尚未完成。
+這是獨立的命令列工具包；可安裝輸入法請下載同版本的 macOS .zip。
 GitHub Release 的工具最低需求為 macOS 15。
 解壓後保留資料夾結構，從終端機執行：
   bin/zoo-type-sim "wu0 fu4" "<enter>"
@@ -61,8 +61,16 @@ exec "$ROOT/動物園輸入法.app/Contents/MacOS/zoo-type" --settings
 SETTINGS
 chmod +x "$APP_PACKAGE/開啟設定.command"
 cp LICENSE "$APP_PACKAGE/"
+SIGNING_STATUS="ad-hoc 簽章"
+if codesign -dv --verbose=4 "$APP" 2>&1 | grep -q '^Authority=Developer ID Application:'; then
+    SIGNING_STATUS="Developer ID 簽章"
+    if xcrun stapler validate "$APP" >/dev/null 2>&1; then
+        SIGNING_STATUS="Developer ID 簽章，已附加 Apple 公證票證"
+    fi
+fi
 cat > "$APP_PACKAGE/README.txt" <<EOF
 動物園輸入法 $VERSION — macOS ${ARCH}（macOS 15 以上）
+此 App 的發行狀態：$SIGNING_STATUS
 
 這個壓縮包包含 InputMethodKit 輸入法 .app 與內建詞庫。
 
@@ -72,18 +80,18 @@ cat > "$APP_PACKAGE/README.txt" <<EOF
 2. 在系統設定 → 鍵盤 → 文字輸入 → 編輯 → ＋ → 繁體中文，加入「動物園輸入法」。
 3. 若清單尚未出現，請登出再登入。
 
-這是初版 macOS 前端，尚未做 Developer ID 簽章或 Apple 公證。
 若 macOS 阻擋開啟，請先確認下載來源，再至系統設定 → 隱私權與安全性允許。
 升級前請切換到其他輸入法；安裝後登出再登入，讓舊版程序結束。
 
 中文／英文：單按 Shift。選字：↓ 開啟，方向鍵移動，Enter 或數字確認。
-候選窗目前以鍵盤操作。Control / Option / Command 組合鍵預設交回 App。
+候選窗支援鍵盤、滑鼠點選與捲動翻頁。Control / Option / Command 組合鍵預設交回 App。
 設定檔與 App 規則在 ~/Library/Application Support/ZooType/。
 點上方「動」圖示 →「設定…」開啟原生設定視窗，也可雙擊本包的「開啟設定.command」。
-一般、快捷鍵、外觀預覽與 App 規則可直接修改，其他欄位可從關於頁開啟進階設定檔。
+九個設定頁可管理全部設定、App 規則、詞庫、學習與備份、git 同步、AI 和更新。
 從舊版升級後請登出再登入；若仍出現舊輸入來源，先移除後再加入新版。
 學習資料定期存檔，並在切換輸入法時存檔。
-AI、git 同步、詞庫管理 GUI 與 Windows 的啟發式遊戲偵測尚未移植。
+支援 git 背景同步、AI 同音字修正、Keychain 憑證、全螢幕遊戲偵測與個別 App 組字提示列。
+正式版可從設定關於頁檢查更新；下載通過官方簽章與版本驗證後，可從輸入法選單安裝。
 卸載：切換到其他輸入法，移除輸入方式清單中的項目，刪除該 .app，再登出登入。
 使用者資料不會隨著移除 .app 而刪除。
 
