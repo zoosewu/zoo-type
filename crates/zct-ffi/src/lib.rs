@@ -8,8 +8,7 @@ use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-use zct_core::paths::DataRoot;
-use zct_core::{AppRules, Config, Engine, InputMode, Key, KeyEvent, KeyResult, Mods, Side};
+use zct_core::{AppRules, Config, InputMode, Key, KeyEvent, KeyResult, Mods, Side};
 use zct_host::{Host, HostSession};
 
 thread_local! {
@@ -44,21 +43,27 @@ unsafe fn text<'a>(p: *const c_char) -> Result<&'a str, String> {
 }
 
 pub struct ZctRuntime {
-    /// 引擎、設定熱載入、遊戲模式、中英狀態記憶（與 Windows 服務程序共用）
+    /// 資料目錄、引擎、存檔與同步、設定熱載入、遊戲模式、中英狀態記憶（與 Windows 服務程序共用）
     host: Arc<Host>,
     next_session: u64,
-    sync: zct_preferences::SyncWorker,
-    data: DataRoot,
-    dictionary: std::path::PathBuf,
     config_path: CString,
     settings_buffer: CString,
-    read_only: bool,
 }
 
-fn open_engine(dictionary: &std::path::Path, data: &DataRoot) -> Result<Arc<Engine>, String> {
-    let engine = Engine::open(dictionary, &data.learning()).map_err(|e| e.to_string())?;
-    engine.reload_user_words(&data.root().join("dict/english.txt"));
-    Ok(Arc::new(engine))
+impl ZctRuntime {
+    fn new(host: Host) -> ZctRuntime {
+        let config_path = string(&host.data().config().to_string_lossy());
+        ZctRuntime {
+            host: Arc::new(host),
+            next_session: 1,
+            config_path,
+            settings_buffer: CString::default(),
+        }
+    }
+
+    fn store(&self) -> zct_preferences::SettingsStore {
+        zct_preferences::SettingsStore::new(self.host.data())
+    }
 }
 
 pub struct ZctSession {
@@ -215,29 +220,9 @@ pub extern "C" fn zct_last_error() -> *const c_char {
 pub unsafe extern "C" fn zct_runtime_new(dict: *const c_char) -> *mut ZctRuntime {
     guard(|| {
         let dict = unsafe { text(dict)? };
-        if std::env::var_os(zct_core::paths::ENV_HOME).is_none() {
-            let _ = zct_core::paths::migrate_legacy();
-            let _ = zct_core::paths::seed_dev_from_official();
-        }
-        let data = DataRoot::discover().ok_or("找不到使用者資料目錄")?;
-        std::fs::create_dir_all(data.root()).map_err(|e| e.to_string())?;
-        if !data.config().exists() {
-            Config::default()
-                .save(&data.config())
-                .map_err(|e| e.to_string())?;
-        }
-        let engine = open_engine(std::path::Path::new(dict), &data)?;
-        let config_path = string(&data.config().to_string_lossy());
-        Ok(Box::into_raw(Box::new(ZctRuntime {
-            host: Arc::new(Host::new(zct_host::Platform::Macos, &data, engine)),
-            next_session: 1,
-            sync: zct_preferences::SyncWorker::default(),
-            data,
-            dictionary: dict.into(),
-            config_path,
-            settings_buffer: CString::default(),
-            read_only: false,
-        })))
+        let (data, _) = zct_core::paths::prepare_data()?;
+        let host = Host::open(zct_host::Platform::Macos, data, dict.into())?;
+        Ok(Box::into_raw(Box::new(ZctRuntime::new(host))))
     })
 }
 
@@ -247,15 +232,8 @@ pub unsafe extern "C" fn zct_runtime_new(dict: *const c_char) -> *mut ZctRuntime
 pub unsafe extern "C" fn zct_runtime_save(runtime: *mut ZctRuntime) -> bool {
     guard(|| {
         let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
-        if runtime.read_only {
-            return Ok(true);
-        }
-        let engine = runtime.host.engine();
-        engine
-            .save()
-            .and_then(|_| engine.backup(&runtime.data.backup(), 7))
-            .map_err(|e| e.to_string())?;
-        runtime.sync.tick(&runtime.data, &engine);
+        // 存檔、每日備份、到了間隔就自動同步（唯讀時都不做）
+        runtime.host.tick();
         Ok(true)
     })
 }
@@ -281,10 +259,10 @@ pub unsafe extern "C" fn zct_runtime_settings(
     guard(|| {
         let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
         let value = if apps {
-            let rules = zct_preferences::SettingsStore::new(runtime.data.clone()).apps()?;
+            let rules = runtime.store().apps()?;
             serde_json::to_string(&rules)
         } else {
-            let config = zct_preferences::SettingsStore::new(runtime.data.clone()).config()?;
+            let config = runtime.store().config()?;
             serde_json::to_string(&config)
         }
         .map_err(|e| e.to_string())?;
@@ -305,7 +283,7 @@ pub unsafe extern "C" fn zct_runtime_save_settings(
     guard(|| {
         let runtime = unsafe { runtime.as_ref() }.ok_or("空 runtime")?;
         let value = unsafe { text(value)? };
-        let store = zct_preferences::SettingsStore::new(runtime.data.clone());
+        let store = runtime.store();
         if apps {
             let rules: AppRules = serde_json::from_str(value).map_err(|e| e.to_string())?;
             store.save_apps(&rules)?;
@@ -330,36 +308,28 @@ pub unsafe extern "C" fn zct_runtime_preferences(
         let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
         let request: Request =
             serde_json::from_str(unsafe { text(request)? }).map_err(|e| e.to_string())?;
-        match &request {
+        let host = runtime.host.clone();
+        let reply = match &request {
             Request::Manage {
                 action: Action::SyncNow,
-            } => {
-                let reply = runtime
-                    .sync
-                    .request(&runtime.data, &runtime.host.engine())?;
-                runtime.settings_buffer = string(
-                    &serde_json::to_string(&zct_preferences::Response::Management { reply })
-                        .map_err(|e| e.to_string())?,
-                );
-                return Ok(runtime.settings_buffer.as_ptr());
-            }
+            } => Some(host.sync_now()?),
             Request::Manage {
                 action: Action::SyncStatus,
-            } => {
-                let reply = runtime.sync.status(&runtime.data);
-                runtime.settings_buffer = string(
-                    &serde_json::to_string(&zct_preferences::Response::Management { reply })
-                        .map_err(|e| e.to_string())?,
-                );
-                return Ok(runtime.settings_buffer.as_ptr());
-            }
+            } => Some(host.sync_status()),
             Request::Manage {
                 action: Action::Restore { .. },
-            } if runtime.sync.running() => return Err("請等待 git 同步完成後再還原".into()),
-            Request::Save { .. } if runtime.sync.running() => {
+            } if host.sync_running() => return Err("請等待 git 同步完成後再還原".into()),
+            Request::Save { .. } if host.sync_running() => {
                 return Err("請等待 git 同步完成後再儲存設定".into());
             }
-            _ => {}
+            _ => None,
+        };
+        if let Some(reply) = reply {
+            runtime.settings_buffer = string(
+                &serde_json::to_string(&zct_preferences::Response::Management { reply })
+                    .map_err(|e| e.to_string())?,
+            );
+            return Ok(runtime.settings_buffer.as_ptr());
         }
         let restore = matches!(
             &request,
@@ -367,16 +337,17 @@ pub unsafe extern "C" fn zct_runtime_preferences(
                 action: Action::Restore { .. }
             }
         );
-        let store = zct_preferences::SettingsStore::new(runtime.data.clone());
-        let backup = runtime.data.backup();
-        let engine = runtime.host.engine();
-        let result = Manager::new(store, EngineBackend::new(&engine, &backup), Platform::Macos)
-            .execute(request);
+        let backup = host.data().backup();
+        let engine = host.engine();
+        let result = Manager::new(
+            runtime.store(),
+            EngineBackend::new(&engine, &backup),
+            Platform::Macos,
+        )
+        .execute(request);
         // restore freezes the old engine; never leave the UI editing that instance.
         if restore {
-            runtime
-                .host
-                .replace_engine(open_engine(&runtime.dictionary, &runtime.data)?);
+            host.reload_engine()?;
         }
         runtime.settings_buffer =
             string(&serde_json::to_string(&result?).map_err(|e| e.to_string())?);
@@ -394,28 +365,11 @@ pub unsafe extern "C" fn zct_runtime_relocate(
 ) -> *const c_char {
     guard(|| {
         let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
-        if std::env::var_os(zct_core::paths::ENV_HOME).is_some() {
-            return Err("ZCT_HOME 已指定資料位置".into());
-        }
-        if runtime.sync.running() {
-            return Err("請等待 git 同步完成後再搬移資料".into());
-        }
         let destination = std::path::PathBuf::from(unsafe { text(destination)? });
-        let pointer = zct_core::paths::pointer_dir().ok_or("找不到資料位置指標")?;
-        let engine = runtime.host.engine();
-        engine.save().map_err(|e| e.to_string())?;
-        engine.freeze();
-        let result =
-            zct_preferences::relocate_directory(&pointer, runtime.data.root(), &destination);
-        if result.is_ok() {
-            runtime.data = DataRoot::new(destination);
-        }
-        // Also recover a frozen engine when relocation failed.
-        let engine = open_engine(&runtime.dictionary, &runtime.data)?;
-        runtime.host.relocate(&runtime.data, engine);
-        runtime.config_path = string(&runtime.data.config().to_string_lossy());
+        let result = runtime.host.relocate(&destination);
+        runtime.config_path = string(&runtime.host.data().config().to_string_lossy());
         result?;
-        let snapshot = zct_preferences::SettingsStore::new(runtime.data.clone()).load()?;
+        let snapshot = runtime.store().load()?;
         runtime.settings_buffer =
             string(&serde_json::to_string(&snapshot).map_err(|e| e.to_string())?);
         Ok(runtime.settings_buffer.as_ptr())
@@ -429,7 +383,7 @@ pub unsafe extern "C" fn zct_runtime_free(runtime: *mut ZctRuntime) {
     guard(|| {
         if !runtime.is_null() {
             let runtime = unsafe { Box::from_raw(runtime) };
-            runtime.host.engine().save().map_err(|e| e.to_string())?;
+            runtime.host.save()?;
         }
         Ok(())
     });
@@ -634,13 +588,7 @@ pub unsafe extern "C" fn zct_session_is_idle(session: *const ZctSession) -> bool
 pub unsafe extern "C" fn zct_runtime_freeze(runtime: *mut ZctRuntime) -> bool {
     guard(|| {
         let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
-        if runtime.sync.running() {
-            return Err("git 同步進行中，完成後再更新".into());
-        }
-        let engine = runtime.host.engine();
-        engine.save().map_err(|e| e.to_string())?;
-        engine.freeze();
-        runtime.read_only = true;
+        runtime.host.freeze()?;
         Ok(true)
     })
 }
@@ -651,10 +599,7 @@ pub unsafe extern "C" fn zct_runtime_freeze(runtime: *mut ZctRuntime) -> bool {
 pub unsafe extern "C" fn zct_runtime_recover(runtime: *mut ZctRuntime) -> bool {
     guard(|| {
         let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
-        runtime
-            .host
-            .replace_engine(open_engine(&runtime.dictionary, &runtime.data)?);
-        runtime.read_only = false;
+        runtime.host.recover()?;
         Ok(true)
     })
 }
@@ -840,27 +785,15 @@ fn mac_key(code: u16) -> Key {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zct_core::paths::DataRoot;
 
     fn runtime(config: Config) -> (tempfile::TempDir, Box<ZctRuntime>) {
         let temp = tempfile::tempdir().unwrap();
         let data = DataRoot::new(temp.path());
         config.save(&data.config()).unwrap();
         let dict = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/dict");
-        let engine = Arc::new(Engine::open(&dict, &data.learning()).unwrap());
-        let config_path = string(&data.config().to_string_lossy());
-        (
-            temp,
-            Box::new(ZctRuntime {
-                host: Arc::new(Host::new(zct_host::Platform::Macos, &data, engine)),
-                next_session: 1,
-                sync: zct_preferences::SyncWorker::default(),
-                data,
-                dictionary: dict,
-                config_path,
-                settings_buffer: CString::default(),
-                read_only: false,
-            }),
-        )
+        let host = Host::open(zct_host::Platform::Macos, data, dict).unwrap();
+        (temp, Box::new(ZctRuntime::new(host)))
     }
 
     unsafe fn press(session: *mut ZctSession, code: u16, mods: u32, time: u64) -> ZctResult {
@@ -969,7 +902,7 @@ mod tests {
                 input.as_ptr()
             ));
             assert_eq!(
-                Config::load(&runtime.data.config())
+                Config::load(&runtime.host.data().config())
                     .unwrap()
                     .theme
                     .font_size,
@@ -983,7 +916,7 @@ mod tests {
                 input.as_ptr()
             ));
             assert_eq!(
-                Config::load(&runtime.data.config())
+                Config::load(&runtime.host.data().config())
                     .unwrap()
                     .theme
                     .font_size,
@@ -1184,7 +1117,7 @@ mod tests {
     fn macos_acceptance_legacy_settings_load_and_save_as_new_fields() {
         for enabled in [false, true] {
             let (_directory, mut runtime) = runtime(Config::default());
-            std::fs::write(runtime.data.config(), format!("[mixed]\nauto_english = {enabled}\n[detect]\nlegacy_fullscreen = {enabled}\nexclusive_fullscreen = true\n[theme]\nfont_size = 19.5\n")).unwrap();
+            std::fs::write(runtime.host.data().config(), format!("[mixed]\nauto_english = {enabled}\n[detect]\nlegacy_fullscreen = {enabled}\nexclusive_fullscreen = true\n[theme]\nfont_size = 19.5\n")).unwrap();
             unsafe {
                 let load = string(r#"{"op":"load"}"#);
                 let result = zct_runtime_preferences(&mut *runtime, load.as_ptr());
@@ -1202,12 +1135,12 @@ mod tests {
                 let save = string(&serde_json::json!({"op":"save","document":snapshot["document"],"revision":snapshot["revision"]}).to_string());
                 assert!(!zct_runtime_preferences(&mut *runtime, save.as_ptr()).is_null());
             }
-            let saved = std::fs::read_to_string(runtime.data.config()).unwrap();
+            let saved = std::fs::read_to_string(runtime.host.data().config()).unwrap();
             for legacy in ["auto_english", "legacy_fullscreen", "exclusive_fullscreen"] {
                 assert!(!saved.contains(legacy));
             }
             assert_eq!(
-                Config::load(&runtime.data.config())
+                Config::load(&runtime.host.data().config())
                     .unwrap()
                     .theme
                     .font_size,
@@ -1272,9 +1205,9 @@ mod tests {
             assert!(changed.ok && changed.simplified);
             assert!(zct_session_is_idle(keys.session));
             assert!(zct_runtime_freeze(&mut *keys._runtime));
-            assert!(keys._runtime.read_only);
+            assert!(keys._runtime.host.read_only());
             assert!(zct_runtime_recover(&mut *keys._runtime));
-            assert!(!keys._runtime.read_only);
+            assert!(!keys._runtime.host.read_only());
             // 換了引擎：沒有組字的 session 換新，沿用繁簡
             assert!(zct_session_refresh(keys.session));
             assert!(zct_session_command(keys.session, 5).simplified);

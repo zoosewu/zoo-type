@@ -11,6 +11,7 @@ dev = ["zct-core/dev"]
 
 [dependencies]
 zct-core.workspace = true
+zct-preferences.workspace = true
 zct-ai = { path = "../zct-ai" }
 log.workspace = true
 

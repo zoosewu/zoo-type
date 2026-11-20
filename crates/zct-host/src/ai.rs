@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Receiver};
 use zct_core::Engine;
 
 /// （原文, 修正結果或錯誤）
-pub type Reply = (String, Result<String, String>);
+pub type AiReply = (String, Result<String, String>);
 
 /// 結果回來時要立即顯示的內容（給會主動更新畫面的平台，例如 Windows 候選窗）
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,7 +32,10 @@ pub(crate) struct Request {
     pub(crate) id: u64,
 }
 
-pub(crate) fn spawn(req: Request, notify: Option<Arc<Notify>>) -> Result<Receiver<Reply>, String> {
+pub(crate) fn spawn(
+    req: Request,
+    notify: Option<Arc<Notify>>,
+) -> Result<Receiver<AiReply>, String> {
     let (send, receive) = mpsc::channel();
     let mine = req.generation.load(Ordering::Acquire);
     std::thread::Builder::new()

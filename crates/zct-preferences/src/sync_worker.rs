@@ -80,9 +80,10 @@ impl SyncWorker {
                     engine.save().map_err(|e| e.to_string())?;
                     result
                 })();
+                let today = zct_core::engine::today();
                 let message = match result {
-                    Ok(message) => format!("成功：{message}"),
-                    Err(error) => format!("失敗：{error}"),
+                    Ok(message) => format!("{today} 成功：{message}"),
+                    Err(error) => format!("{today} 失敗：{error}"),
                 };
                 let _ = std::fs::write(data_copy.local().join("sync-status.txt"), &message);
                 let mut state = state_copy.lock().unwrap_or_else(|e| e.into_inner());

@@ -61,18 +61,17 @@ fn run_command(cmd: Command, shared: &Shared) {
         }
         Command::Restart => {
             log::info!("重新啟動");
-            let _ = shared.host.engine().save();
+            let _ = shared.host.save();
             shared.ui.send(UiCmd::Exit);
         }
         Command::PrepareMove => {
             log::info!("變更資料位置：存檔並停止寫入");
-            let engine = shared.host.engine();
-            if let Err(e) = engine.save() {
-                log::warn!("存檔失敗：{e}");
+            if let Err(e) = shared.host.freeze() {
+                log::warn!("{e}");
             }
-            engine.freeze();
+            // 同步進行中也一樣停止寫入：資料要搬走了
             crate::version::set_read_only();
-            shared.host.settings().set_read_only();
+            shared.host.set_read_only();
         }
     }
 }
@@ -229,7 +228,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     Request::Backups => Action::Backups,
                     _ => unreachable!(),
                 };
-                match EngineBackend::new(&shared.host.engine(), &shared.backup).execute(action) {
+                match EngineBackend::new(&shared.host.engine(), &shared.host.data().backup())
+                    .execute(action)
+                {
                     Ok(Reply::Done { .. }) => Response::Ok,
                     Ok(Reply::Phrases { items }) => {
                         Response::Phrases(items.into_iter().map(|row| row.entry).collect())
@@ -243,8 +244,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
             }
             Request::Restore { day } => {
-                let result = EngineBackend::new(&shared.host.engine(), &shared.backup)
-                    .execute(Action::Restore { day });
+                let result =
+                    EngineBackend::new(&shared.host.engine(), &shared.host.data().backup())
+                        .execute(Action::Restore { day });
                 // Reload even after a copy error: restore may already have frozen
                 // the old engine. Reconnection creates fresh sessions.
                 let ui = shared.ui.clone();
@@ -294,10 +296,13 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 run_command(cmd, shared);
                 Response::Ok
             }
-            Request::SyncNow => {
-                let _ = shared.sync.send(());
-                Response::Ok
-            }
+            Request::SyncNow => match shared.host.sync_now() {
+                Ok(_) => Response::Ok,
+                Err(e) => {
+                    log::warn!("同步：{e}");
+                    Response::Error(e)
+                }
+            },
             Request::CheckUpdate => match crate::update::check_now(&shared.update) {
                 Ok(version) => Response::Update(version),
                 Err(e) => {
@@ -332,7 +337,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     // 中英狀態由 HostSession 記住
     drop(session);
     // App 關閉時順便存檔，縮短當機時遺失學習的時間窗
-    if let Err(e) = shared.host.engine().save() {
+    if let Err(e) = shared.host.save() {
         log::error!("學習紀錄存檔失敗：{e}");
     }
     log::debug!("[{id}] 斷線");

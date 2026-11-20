@@ -77,8 +77,8 @@ impl Settings {
         self.paths.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    pub fn set_read_only(&self) {
-        self.read_only.store(true, Ordering::Release);
+    pub fn set_read_only(&self, on: bool) {
+        self.read_only.store(on, Ordering::Release);
     }
 
     /// 設定重新載入的次數（先檢查檔案有沒有變更）

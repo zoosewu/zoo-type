@@ -6617,6 +6617,7 @@ dependencies = [
  "tempfile",
  "zct-ai",
  "zct-core",
+ "zct-preferences",
 ]
 
 [[package]]

@@ -747,8 +747,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     // 改名前的 %APPDATA%\zct 搬到 %APPDATA%\ZooType（服務程序也會做，先開哪個都一樣）
-    let _ = zct_core::paths::migrate_legacy();
-    let data = DataRoot::discover().ok_or("找不到資料根目錄")?;
+    let (data, _) = zct_core::paths::prepare_data()?;
     let ui = SettingsWindow::new()?;
     ui.set_window_title(zct_core::channel::settings_title().into());
     ui.set_app_name(zct_core::channel::CURRENT.name.into());

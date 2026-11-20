@@ -26,7 +26,7 @@ impl Fixture {
         let dir = tempfile::tempdir().unwrap();
         let data = DataRoot::new(dir.path());
         config.save(&data.config()).unwrap();
-        let host = Arc::new(f(Host::new(platform, &data, engine(&data))));
+        let host = Arc::new(f(Host::open(platform, data, dict()).unwrap()));
         Fixture {
             dir,
             host,
@@ -82,9 +82,12 @@ impl Fixture {
     }
 }
 
+fn dict() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/dict")
+}
+
 fn engine(data: &DataRoot) -> Arc<Engine> {
-    let dict = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/dict");
-    Arc::new(Engine::open(&dict, &data.learning()).expect("需要先執行 scripts/fetch-dict.sh"))
+    Arc::new(Engine::open(&dict(), &data.learning()).expect("需要先執行 scripts/fetch-dict.sh"))
 }
 
 #[test]
@@ -216,7 +219,7 @@ fn composition_bar_defaults_and_hotkey_writes_the_platform_rule() {
 #[test]
 fn composition_bar_is_not_written_when_read_only() {
     let mut f = Fixture::new(Platform::Windows, Config::default());
-    f.host.settings().set_read_only();
+    f.host.set_read_only();
     let mut s = f.open("notepad.exe");
     let b = Config::default().hotkeys.composition_bar;
     let r = f.hotkey(&mut s, &b);
@@ -359,7 +362,9 @@ fn relocation_switches_settings_and_engine() {
     config.mixed.typing = zct_core::config::TypingDisplay::Keys;
     config.save(&data.config()).unwrap();
     let fresh = engine(&data);
-    f.host.relocate(&data, fresh.clone());
+    // relocate() 會動到真正的資料位置指標，這裡只測它換設定與引擎的部分
+    f.host.settings().set_root(&data);
+    f.host.replace_engine(fresh.clone());
     assert!(s.refresh());
     assert!(Arc::ptr_eq(&s.session().engine(), &fresh));
     assert_eq!(
@@ -385,4 +390,42 @@ fn composition_bar_hotkey_keeps_the_other_platform_fields() {
     assert_eq!(rule.windows.as_deref(), Some("editor.exe"));
     assert_eq!(rule.detect, Some(false));
     assert_eq!(rule.composition_bar, Some(true));
+}
+
+#[test]
+fn read_only_host_does_not_save_or_sync() {
+    let mut f = Fixture::new(Platform::Windows, Config::default());
+    let mut s = f.open("app.exe");
+    f.type_str(&mut s, "su3");
+    f.press(&mut s, Key::Enter, Mods::NONE);
+    f.host.set_read_only();
+    f.host.tick();
+    assert!(
+        !f.dir.path().join("local").join("backup").exists(),
+        "不備份"
+    );
+    assert!(f.host.sync_now().is_err());
+}
+
+#[test]
+fn freeze_and_recover_reopen_the_engine() {
+    let f = Fixture::new(Platform::Macos, Config::default());
+    let mut s = f.open("app");
+    let before = f.host.engine();
+    f.host.freeze().unwrap();
+    assert!(f.host.read_only());
+    f.host.recover().unwrap();
+    assert!(!f.host.read_only());
+    assert!(!Arc::ptr_eq(&before, &f.host.engine()));
+    assert!(s.refresh(), "沒有組字的 session 換新引擎");
+}
+
+#[test]
+fn tick_saves_and_backs_up() {
+    let mut f = Fixture::new(Platform::Windows, Config::default());
+    let mut s = f.open("app.exe");
+    f.type_str(&mut s, "su3");
+    f.press(&mut s, Key::Enter, Mods::NONE);
+    f.host.tick();
+    assert!(DataRoot::new(f.dir.path()).backup().exists());
 }

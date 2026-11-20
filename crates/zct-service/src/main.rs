@@ -9,8 +9,6 @@ mod conn;
 #[cfg(windows)]
 mod logger;
 #[cfg(windows)]
-mod sync;
-#[cfg(windows)]
 mod ui;
 mod update;
 #[cfg(windows)]
@@ -52,21 +50,15 @@ mod app {
     use windows::Win32::UI::HiDpi::{
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
     };
-    use zct_core::Engine;
-    use zct_core::paths::DataRoot;
 
     use zct_core::CandidatePage;
     use zct_host::{AiDisplay, Host, Platform};
 
-    use crate::{conn, logger, sync, ui, version};
+    use crate::{conn, logger, ui, version};
 
     pub struct Shared {
         /// 所有連線共用的引擎、設定、遊戲模式與中英狀態記憶
         pub host: Arc<Host>,
-        /// 觸發「立即同步」
-        pub sync: std::sync::mpsc::Sender<()>,
-        /// 每日備份資料夾
-        pub backup: PathBuf,
         pub ui: ui::UiHandle,
         /// 診斷用：資料夾 local/ 下有 `debug-keys` 檔案時，記錄非字元鍵（Shift、Delete…）的事件；
         /// 字母、數字、符號一律不記，避免記下使用者打的內容
@@ -89,22 +81,14 @@ mod app {
         }
     }
 
-    /// 背景存檔：學習紀錄只在記憶體中更新，這裡定期寫檔並每日備份
-    fn spawn_saver(host: Arc<Host>, backup: PathBuf) -> std::io::Result<()> {
-        const INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
-        const KEEP_DAYS: usize = 7;
+    /// 背景存檔：學習紀錄只在記憶體中更新，這裡每 30 秒存檔、每日備份、到了間隔就自動同步
+    fn spawn_saver(host: Arc<Host>) -> std::io::Result<()> {
         std::thread::Builder::new()
             .name("saver".into())
             .spawn(move || {
                 loop {
-                    let engine = host.engine();
-                    if let Err(e) = engine.save() {
-                        log::error!("學習紀錄存檔失敗：{e}");
-                    }
-                    if let Err(e) = engine.backup(&backup, KEEP_DAYS) {
-                        log::warn!("備份失敗：{e}");
-                    }
-                    std::thread::sleep(INTERVAL);
+                    host.tick();
+                    std::thread::sleep(std::time::Duration::from_secs(30));
                 }
             })
             .map(|_| ())
@@ -156,8 +140,7 @@ mod app {
                     version::set_read_only();
                 }
                 if let Some(host) = host {
-                    host.engine().freeze();
-                    host.settings().set_read_only();
+                    host.set_read_only();
                 }
                 // 剛啟動（`host` 是 None）多半是舊 DLL 叫起這個舊版、正要連線：先服務，
                 // 由之後每 30 秒的檢查判斷要不要結束；啟動時就結束會讓舊 App 一直連不上（只能打英文）
@@ -213,14 +196,11 @@ mod app {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
 
-        // 改名前的 %APPDATA%\zct 搬到 %APPDATA%\ZooType（找資料根目錄之前）
-        let migrated = zct_core::paths::migrate_legacy();
-        // 開發版第一次啟動：從正式版複製一份資料（關掉同步）
-        let seeded = zct_core::paths::seed_dev_from_official();
-        let data = DataRoot::discover().ok_or("找不到資料根目錄")?;
+        // 改名前的資料夾搬移、開發版第一次從正式版複製一份資料（關掉同步）
+        let (data, done) = zct_core::paths::prepare_data()?;
         logger::init(&data.local().join("logs").join("service.log"));
         log::info!("啟動，資料根目錄：{}", data.root().display());
-        for m in [migrated, seeded].into_iter().flatten() {
+        for m in done {
             log::info!("{m}");
         }
         handle_stale(None);
@@ -232,20 +212,11 @@ mod app {
         let sys_dict_dir = find_sys_dict()?;
         log::info!("系統詞庫：{}", sys_dict_dir.display());
 
-        match Engine::migrate_from(&data.legacy_chewing_dir(), &data.learning()) {
-            Ok(true) => log::info!("已從舊位置遷移學習資料"),
-            Ok(false) => {}
-            Err(e) => log::warn!("遷移學習資料失敗：{e}"),
-        }
-        let mut engine = Engine::open(&sys_dict_dir, &data.learning())?;
-        engine.load_user_words(&data.root().join("dict").join("english.txt"));
-        if version::read_only() {
-            engine.freeze();
-        }
+        let debug_keys = data.local().join("debug-keys").exists();
         let ui = ui::spawn(theme.clone())?;
         // AI 結果回來時直接更新候選窗，不必等下一次按鍵
         let notify_ui = ui.clone();
-        let host = Host::new(Platform::Windows, &data, Arc::new(engine))
+        let host = Host::open(Platform::Windows, data, sys_dict_dir)?
             .with_ai_key_source(Box::new(zct_ipc::secret::read_ai_key))
             .with_ai_notify(Box::new(move |owner, display| match display {
                 AiDisplay::Suggestion(text) => notify_ui.send(ui::UiCmd::Show {
@@ -263,12 +234,11 @@ mod app {
                 AiDisplay::Notice(text) => notify_ui.send(ui::UiCmd::Hint { text, anchor: None }),
             }));
         if version::read_only() {
-            host.settings().set_read_only();
+            host.set_read_only();
         }
         let host = Arc::new(host);
-        spawn_saver(host.clone(), data.backup())?;
+        spawn_saver(host.clone())?;
         spawn_version_watch(host.clone())?;
-        let sync = sync::spawn(data.clone(), host.clone())?;
 
         crate::update::fix_autostart();
         let update = crate::update::Available::default();
@@ -277,10 +247,8 @@ mod app {
         }
         let shared = Arc::new(Shared {
             host,
-            sync,
-            backup: data.backup(),
             ui,
-            debug_keys: data.local().join("debug-keys").exists(),
+            debug_keys,
             update,
         });
         if shared.debug_keys {

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use zct_core::{Key, KeyEvent, KeyResult, Mods, Output, Session, SessionOptions};
 
-use crate::ai::{self, Reply};
+use crate::ai::{self, AiReply};
 use crate::{Host, notice};
 
 pub struct HostSession {
@@ -20,7 +20,7 @@ pub struct HostSession {
     /// 建立 `inner` 時的 [`Host::revision`]
     revision: u64,
     composition_bar: bool,
-    ai: Option<Receiver<Reply>>,
+    ai: Option<Receiver<AiReply>>,
     /// 按下其他鍵就加一，背景 AI 回來時代數不同就丟掉
     ai_generation: Arc<AtomicU64>,
 }
@@ -118,7 +118,7 @@ impl HostSession {
         }
     }
 
-    fn apply_ai(&mut self, (original, fixed): Reply) -> Option<String> {
+    fn apply_ai(&mut self, (original, fixed): AiReply) -> Option<String> {
         match fixed {
             Ok(fixed) => {
                 (!self.inner.set_ai_suggestion(&original, fixed)).then(|| notice::AI_NO_TYPO.into())

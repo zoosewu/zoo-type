@@ -26,7 +26,7 @@ macOS：動物園輸入法.app（IMK 程序）直接內嵌 zct-core，不需要 
 | crate | 類型 | 平台 | 職責 |
 |-------|------|------|------|
 | `zct-core` | lib | 全部 | 引擎包裝、輸入狀態機、Shift 判定、按鍵放行規則、設定、資料路徑、簡繁輸出 |
-| `zct-host` | lib | 全部 | 主機層：session 生命週期、設定熱載入、AI 背景請求、遊戲模式、組字提示列、中英狀態記憶、提示文字 |
+| `zct-host` | lib | 全部 | 主機層：引擎開啟、存檔備份、git 同步、凍結與恢復、搬移資料；session 生命週期、設定熱載入、AI 背景請求、遊戲模式、組字提示列、中英狀態記憶、提示文字 |
 | `zct-ipc` | lib | Windows | DLL ↔ 服務程序的訊息格式與編解碼（固定長度二進位，無配置） |
 | `zct-service` | bin | Windows | 常駐服務：session 管理、候選窗繪製、系統匣 |
 | `zct-tsf` | cdylib | Windows | TSF 文字服務（x86 / x64 / ARM64） |

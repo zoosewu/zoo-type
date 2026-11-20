@@ -59,6 +59,25 @@ fn suffix_for(home: &str) -> String {
     format!("-h{hash:016x}")
 }
 
+/// 找資料根目錄並準備好：改名前的舊資料夾搬過來、開發版第一次從正式版複製
+/// （用 `ZCT_HOME` 指定位置時都不做，測試程式不會動到使用者的資料），沒有設定檔就建立預設的。
+/// 回傳資料根目錄與做了什麼（記在 log）
+pub fn prepare_data() -> Result<(DataRoot, Vec<String>), String> {
+    let mut done = Vec::new();
+    if std::env::var_os(ENV_HOME).is_none() {
+        done.extend(migrate_legacy());
+        done.extend(seed_dev_from_official());
+    }
+    let data = DataRoot::discover().ok_or("找不到使用者資料目錄")?;
+    std::fs::create_dir_all(data.root()).map_err(|e| e.to_string())?;
+    if !data.config().exists() {
+        crate::Config::default()
+            .save(&data.config())
+            .map_err(|e| e.to_string())?;
+    }
+    Ok((data, done))
+}
+
 /// 改名前的資料夾（`%APPDATA%\zct`）搬到新名稱；回傳做了什麼（記在 log）
 ///
 /// 服務程序與設定程式啟動時、找資料根目錄之前呼叫。新資料夾已存在就不動。

@@ -1,28 +1,27 @@
 //! 兩個平台共用的主機層
 //!
 //! 平台（Windows 服務程序、macOS FFI）只負責 UI 與 IO：收按鍵、畫候選窗、讀寫系統憑證、播放提示音。
-//! 「怎麼處理」都在這裡：session 生命週期、設定熱載入、AI 請求、遊戲模式、組字提示列、中英狀態記憶、提示文字。
+//! 「怎麼處理」都在這裡：
+//! - 每個程序一個 [`Host`]：資料目錄、引擎、設定熱載入、存檔與備份、git 同步、凍結與恢復、遊戲模式
+//! - 每個輸入 context 一個 [`HostSession`]：AI 請求、組字提示列、中英狀態記憶、提示文字
 
 mod ai;
 pub mod notice;
+mod runtime;
 mod session;
 pub mod settings;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-pub use ai::{AiDisplay, Notify, Reply};
+pub use ai::{AiDisplay, AiReply, Notify};
 pub use session::HostSession;
 pub use settings::Settings;
 use zct_core::paths::DataRoot;
 use zct_core::{AppRules, Config, Engine, InputMode};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Platform {
-    Windows,
-    Macos,
-}
+pub use zct_preferences::Platform;
 
 /// 預設開啟組字提示列的純終端機（App 自己不顯示組字，或常被 TUI 藏起來）：
 /// Windows 是執行檔名稱，macOS 是 bundle ID，不分大小寫
@@ -56,6 +55,12 @@ pub type KeySource = Box<dyn Fn() -> Option<String> + Send + Sync>;
 /// 一個程序一個：所有 session 共用的引擎、設定與全域狀態
 pub struct Host {
     platform: Platform,
+    data: RwLock<DataRoot>,
+    /// 系統詞庫資料夾（重新開啟引擎時用）
+    dictionary: PathBuf,
+    sync: Mutex<zct_preferences::SyncWorker>,
+    /// 已安裝新版或正在更新、搬移資料：不存檔、不同步、不寫設定
+    read_only: AtomicBool,
     settings: Settings,
     engine: RwLock<Arc<Engine>>,
     engine_generation: AtomicU64,
@@ -68,10 +73,14 @@ pub struct Host {
 }
 
 impl Host {
-    pub fn new(platform: Platform, data: &DataRoot, engine: Arc<Engine>) -> Host {
+    fn new(platform: Platform, data: DataRoot, dictionary: PathBuf, engine: Arc<Engine>) -> Host {
         Host {
             platform,
-            settings: Settings::new(data, platform),
+            settings: Settings::new(&data, platform),
+            data: RwLock::new(data),
+            dictionary,
+            sync: Mutex::new(zct_preferences::SyncWorker::default()),
+            read_only: AtomicBool::new(false),
             engine: RwLock::new(engine),
             engine_generation: AtomicU64::new(0),
             game: AtomicBool::new(false),
@@ -112,12 +121,6 @@ impl Host {
     pub fn replace_engine(&self, engine: Arc<Engine>) {
         *self.engine.write().unwrap_or_else(|e| e.into_inner()) = engine;
         self.engine_generation.fetch_add(1, Ordering::AcqRel);
-    }
-
-    /// 資料位置搬到別處：換成新位置的設定與引擎
-    pub fn relocate(&self, data: &DataRoot, engine: Arc<Engine>) {
-        self.settings.set_root(data);
-        self.replace_engine(engine);
     }
 
     /// 設定或引擎變了就會改變；session 據此決定要不要重新建立
