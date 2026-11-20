@@ -945,11 +945,26 @@ detect = false
             let chat = string("org.example.chat");
             let g = zct_session_new(&mut *runtime, game.as_ptr());
             let c = zct_session_new(&mut *runtime, chat.as_ptr());
-            assert!(zct_session_not_input(g, true, true, true, false), "安全輸入");
-            assert!(!zct_session_not_input(g, false, true, true, false), "一般輸入框");
-            assert!(zct_session_not_input(g, false, false, false, true), "全螢幕遊戲");
-            assert!(!zct_session_not_input(c, false, false, false, true), "App 規則關掉偵測");
-            assert!(zct_session_not_input(c, true, true, true, false), "安全輸入一律放行");
+            assert!(
+                zct_session_not_input(g, true, true, true, false),
+                "安全輸入"
+            );
+            assert!(
+                !zct_session_not_input(g, false, true, true, false),
+                "一般輸入框"
+            );
+            assert!(
+                zct_session_not_input(g, false, false, false, true),
+                "全螢幕遊戲"
+            );
+            assert!(
+                !zct_session_not_input(c, false, false, false, true),
+                "App 規則關掉偵測"
+            );
+            assert!(
+                zct_session_not_input(c, true, true, true, false),
+                "安全輸入一律放行"
+            );
             zct_session_free(g);
             zct_session_free(c);
         }

@@ -46,6 +46,16 @@ pub struct Field {
     pub lock: Option<Lock>,
     /// 少用的設定：收在頁面最後預設收合的「進階」
     pub advanced: bool,
+    /// 頁面內的分區標題；和前一個欄位不同時顯示（進階的欄位不分區）
+    pub section: String,
+    /// 數字欄位的範圍；儲存時檢查（見 [`crate::validate`]）
+    pub range: Option<Range>,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Range {
+    pub min: i64,
+    pub max: i64,
+    pub step: i64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lock {
@@ -113,8 +123,100 @@ fn field(
         feature: None,
         lock: None,
         advanced: false,
+        section: String::new(),
+        range: None,
     }
 }
+/// 一般頁：（欄位, 分區, 說明）。進階的欄位不分區
+const GENERAL: &[(&str, &str, &str)] = &[
+    ("input.default_mode", "輸入", "新開 App 時的中英狀態。"),
+    (
+        "input.punctuation",
+        "輸入",
+        "全形（，。？）或半形（,.?），所有 App 共用。",
+    ),
+    (
+        "toggle.shift",
+        "輸入",
+        "單按 Shift 切換。組字中切換不會送出，接著打的英文和數字加進組字區：第 Shift 6 Shift 章 → 第6章。",
+    ),
+    ("candidates.per_page", "候選字", ""),
+    (
+        "candidates.language_model",
+        "候選字",
+        "用內建的語言模型判斷整句哪個同音字最通順（例如「下次再說」「在家」），在電腦上執行，不連網路。",
+    ),
+    (
+        "candidates.habit",
+        "候選字",
+        "Windows：選游標前的詞，選完游標移到詞後面。macOS：選游標後的詞，選完游標不動。",
+    ),
+    ("candidates.select", "候選字", ""),
+    ("candidates.after_select", "候選字", ""),
+    (
+        "mixed.english",
+        "中英混打",
+        "中文優先：句首或空白後打單字表裡的英文再按空白，才當作英文（hello、repo）。英文優先：組不成注音就轉成英文（lo → love），之後的按鍵都是字元本身，空白結束這個單字。用 Shift 打過的英文會記住。",
+    ),
+    (
+        "mixed.english_candidate",
+        "中英混打",
+        "按鍵也是英文單字時，候選窗多一個英文選項：fu → 七、fu。",
+    ),
+    (
+        "mixed.auto_space",
+        "中英混打",
+        "中文與英文、數字之間加一個空格。",
+    ),
+    (
+        "mixed.typing",
+        "中英混打",
+        "注音還沒打完時的顯示。字母：組字區顯示按下的字母（我 lov），注音顯示在旁邊的小視窗，打完就消失。",
+    ),
+    (
+        "input.output",
+        "",
+        "組字區與候選窗一律顯示繁體，送出時才轉成簡體。",
+    ),
+    ("input.on_focus", "", ""),
+    (
+        "toggle.shift_tap_max_ms",
+        "",
+        "按住 Shift 超過這個時間才放開，不算切換。",
+    ),
+    (
+        "punctuation.primary",
+        "",
+        "鍵帽下排的字元：` 再按 , → ，、` 再按 1 → １、` 按兩下 → `。用右 Alt 時，App 收不到右 Alt 組合鍵。",
+    ),
+    (
+        "punctuation.secondary",
+        "",
+        "鍵帽上排的符號：Shift + , → ＜、Shift + ' → ＂。選第二種時，Shift + 鍵改打中文標點（，。；「」）。",
+    ),
+    (
+        "candidates.sort_by_frequency",
+        "",
+        "常用字在前，並參考你的選字紀錄。",
+    ),
+    (
+        "detect.fullscreen",
+        "",
+        "全螢幕遊戲、簡報播放時，按鍵直接交給 App，Shift 也不切換中英。視窗模式的遊戲偵測不到，請用遊戲模式。",
+    ),
+    ("punctuation.full", "", ""),
+    ("punctuation.half", "", ""),
+];
+
+/// 數字欄位：（欄位, 最小, 最大, 間隔）
+const RANGES: &[(&str, i64, i64, i64)] = &[
+    ("candidates.per_page", 1, 10, 1),
+    ("toggle.shift_tap_max_ms", 100, 1000, 50),
+    ("theme.font_size", 8, 48, 1),
+    ("sync.interval_minutes", 1, 1440, 1),
+    ("ai.timeout_seconds", 1, 120, 1),
+];
+
 pub fn catalog(platform: Platform) -> Catalog {
     use FieldKind::*;
     let defaults = serde_json::to_value(Config::default()).expect("serializable Config");
@@ -123,6 +225,20 @@ pub fn catalog(platform: Platform) -> Catalog {
         |path: &str, label: &str, page: &str, kind: FieldKind, options: &[(&str, &str)]| {
             fields.push(field(path, label, page, kind, options, &defaults))
         };
+    let right_alt = match platform {
+        Platform::Windows => "右 Alt",
+        Platform::Macos => "右 Option",
+    };
+    let primary = [
+        "` + 鍵".to_string(),
+        format!("{right_alt} + 鍵"),
+        format!("` + 鍵 或 {right_alt} + 鍵"),
+    ];
+    let secondary = [
+        "Shift + 鍵".to_string(),
+        format!("` 或 {right_alt} + Shift + 鍵"),
+    ];
+    // 一般頁：順序就是畫面上的順序
     add(
         "input.default_mode",
         "預設模式",
@@ -138,52 +254,18 @@ pub fn catalog(platform: Platform) -> Catalog {
         &[("全形", "full"), ("半形", "half")],
     );
     add(
-        "input.output",
-        "文字輸出",
-        "general",
-        Choice,
-        &[("繁體", "traditional"), ("簡體", "simplified")],
-    );
-    add(
-        "input.on_focus",
-        "切換 App 時",
-        "general",
-        Choice,
-        &[("記住狀態", "remember"), ("恢復預設", "reset")],
-    );
-    add(
         "toggle.shift",
-        "單按 Shift 切中英",
+        "Shift 切換中英",
         "general",
         Choice,
         &[
-            ("左右皆可", "both"),
+            ("左右都可", "both"),
             ("左 Shift", "left"),
             ("右 Shift", "right"),
-            ("關閉", "off"),
+            ("不使用", "off"),
         ],
     );
-    add(
-        "toggle.shift_tap_max_ms",
-        "按住上限（毫秒）",
-        "general",
-        Number,
-        &[],
-    );
-    add(
-        "candidates.per_page",
-        "每頁候選字數",
-        "general",
-        Number,
-        &[],
-    );
-    add(
-        "candidates.sort_by_frequency",
-        "依常用程度與個人學習排序",
-        "general",
-        Bool,
-        &[],
-    );
+    add("candidates.per_page", "每頁字數", "general", Number, &[]);
     add(
         "candidates.language_model",
         "智慧選字",
@@ -233,18 +315,12 @@ pub fn catalog(platform: Platform) -> Catalog {
     );
     add(
         "mixed.english_candidate",
-        "候選窗包含英文單字",
+        "候選窗附上英文",
         "general",
         Bool,
         &[],
     );
-    add(
-        "mixed.auto_space",
-        "中英文之間自動加空格",
-        "general",
-        Bool,
-        &[],
-    );
+    add("mixed.auto_space", "中英之間自動空格", "general", Bool, &[]);
     add(
         "mixed.typing",
         "打字時顯示",
@@ -256,11 +332,26 @@ pub fn catalog(platform: Platform) -> Catalog {
             ("字母＋注音與常用字", "keys_and_chars"),
         ],
     );
+    // 以下收在「進階」
     add(
-        "detect.fullscreen",
-        "全螢幕遊戲時不處理按鍵",
+        "input.output",
+        "輸出",
         "general",
-        Bool,
+        Choice,
+        &[("繁體", "traditional"), ("簡體", "simplified")],
+    );
+    add(
+        "input.on_focus",
+        "切回 App 時",
+        "general",
+        Choice,
+        &[("保留中英狀態", "remember"), ("重設為預設模式", "reset")],
+    );
+    add(
+        "toggle.shift_tap_max_ms",
+        "Shift 按住上限（毫秒）",
+        "general",
+        Number,
         &[],
     );
     add(
@@ -269,9 +360,9 @@ pub fn catalog(platform: Platform) -> Catalog {
         "general",
         Choice,
         &[
-            ("` + 鍵", "backtick"),
-            ("右 Alt / Option + 鍵", "right_alt"),
-            ("兩種皆可", "both"),
+            (primary[0].as_str(), "backtick"),
+            (primary[1].as_str(), "right_alt"),
+            (primary[2].as_str(), "both"),
         ],
     );
     add(
@@ -279,7 +370,24 @@ pub fn catalog(platform: Platform) -> Catalog {
         "次要符號",
         "general",
         Choice,
-        &[("Shift + 鍵", "shift"), ("符號層 + Shift + 鍵", "layer")],
+        &[
+            (secondary[0].as_str(), "shift"),
+            (secondary[1].as_str(), "layer"),
+        ],
+    );
+    add(
+        "candidates.sort_by_frequency",
+        "依常用程度排序",
+        "general",
+        Bool,
+        &[],
+    );
+    add(
+        "detect.fullscreen",
+        "全螢幕遊戲時不處理按鍵",
+        "general",
+        Bool,
+        &[],
     );
     add(
         "punctuation.full",
@@ -399,6 +507,17 @@ pub fn catalog(platform: Platform) -> Catalog {
         }
         if field.path == "theme.font" {
             field.help = "未安裝指定字型時使用目前平台的系統字型。".into();
+        }
+        if let Some((section, help)) = GENERAL
+            .iter()
+            .find(|(p, ..)| *p == field.path)
+            .map(|(_, s, h)| (s, h))
+        {
+            field.section = (*section).into();
+            field.help = help.replace("右 Alt", right_alt);
+        }
+        if let Some(&(_, min, max, step)) = RANGES.iter().find(|(p, ..)| *p == field.path) {
+            field.range = Some(Range { min, max, step });
         }
     }
     let pages = [

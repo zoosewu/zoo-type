@@ -124,3 +124,8 @@
 - 程序的 `MainWindowHandle` 不一定是看得到的那個視窗（Slint 有另一個頂層視窗），要列舉程序的可見視窗
 - Windows 11 的外框 1px 半透明、圓角外露出背景：視窗放大 2px 只截內部，並關掉圓角
 - Slint（GPU 繪製）用 PrintWindow 只會得到黑畫面
+
+## commit 前跑完 CI 的同一組檢查（2026-11-20）
+- 現象：改完程式跑過 `cargo fmt`，之後又補了測試沒再格式化就 commit，CI 的格式檢查失敗；後面幾次推送又把舊的 CI 取消，問題晚了好幾個 commit 才發現
+- 規則：每次 commit 前依序跑 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`（開發版 features 也跑一次）、`cargo test --workspace --locked`
+- 刪掉或改名 Rust／Swift 的函式時，`grep` 整個 `macos/Sources`（含 self-test、UIPreview）找呼叫的地方；Swift 只有 CI 會編譯

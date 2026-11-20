@@ -10,13 +10,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use slint::{Model, ModelRc, SharedString, StandardListViewItem, VecModel};
-use zct_core::config::{
-    AfterSelect, Color, EnglishWords, GameMode, Habit, InputMode, Layout, OnFocus, Output,
-    SelectSide, ShiftToggle, TypingDisplay, Width,
-};
+use zct_core::config::{Color, GameMode, InputMode, Layout, OnFocus, Output, Width};
 use zct_core::hotkey::{Binding, Hotkey};
 use zct_core::paths::DataRoot;
-use zct_core::symbols::{PrimarySymbols, SecondarySymbols};
 use zct_core::{AppRule, AppRules, Config, PhraseAction, PhraseEntry};
 use zct_ipc::pipe::Client;
 use zct_ipc::{Command, PROTOCOL_VERSION, Request, Response};
@@ -25,146 +21,6 @@ use zct_preferences::{Action, Backend, Document, Reply, SettingsStore};
 slint::include_modules!();
 
 // ---- 設定檔 ↔ 介面 ----
-
-fn general_from(c: &Config) -> General {
-    General {
-        default_mode: (c.input.default_mode == InputMode::English) as i32,
-        punctuation: (c.input.punctuation == Width::Half) as i32,
-        output: (c.input.output == Output::Simplified) as i32,
-        on_focus: (c.input.on_focus == OnFocus::Reset) as i32,
-        shift: match c.toggle.shift {
-            ShiftToggle::Both => 0,
-            ShiftToggle::Left => 1,
-            ShiftToggle::Right => 2,
-            ShiftToggle::Off => 3,
-        },
-        tap_ms: c.toggle.shift_tap_max_ms as i32,
-        per_page: c.candidates.per_page as i32,
-        sort_freq: c.candidates.sort_by_frequency,
-        language_model: c.candidates.language_model,
-        habit: habit_index(c.candidates.habit),
-        select: select_index(c.candidates.select),
-        after_select: after_select_index(c.candidates.after_select),
-        detect: c.detect.fullscreen,
-        english: match c.mixed.english {
-            EnglishWords::Off => 0,
-            EnglishWords::ChineseFirst => 1,
-            EnglishWords::EnglishFirst => 2,
-        },
-        english_candidate: c.mixed.english_candidate,
-        auto_space: c.mixed.auto_space,
-        typing: match c.mixed.typing {
-            TypingDisplay::Bopomofo => 0,
-            TypingDisplay::Keys => 1,
-            TypingDisplay::KeysAndChars => 2,
-        },
-        auto_update: c.update.auto_check,
-        primary: match c.punctuation.effective().0 {
-            PrimarySymbols::Backtick => 0,
-            PrimarySymbols::RightAlt => 1,
-            PrimarySymbols::Both => 2,
-        },
-        secondary: (c.punctuation.effective().1 == SecondarySymbols::Layer) as i32,
-    }
-}
-
-fn habit_index(h: Habit) -> i32 {
-    match h {
-        Habit::Custom => 0,
-        Habit::Windows => 1,
-        Habit::Macos => 2,
-    }
-}
-
-fn select_index(s: SelectSide) -> i32 {
-    (s == SelectSide::Before) as i32
-}
-
-fn after_select_index(a: AfterSelect) -> i32 {
-    match a {
-        AfterSelect::Forward => 0,
-        AfterSelect::Stay => 1,
-        AfterSelect::Backward => 2,
-    }
-}
-
-fn apply_general(c: &mut Config, g: &General) {
-    c.input.default_mode = if g.default_mode == 1 {
-        InputMode::English
-    } else {
-        InputMode::Chinese
-    };
-    c.input.punctuation = if g.punctuation == 1 {
-        Width::Half
-    } else {
-        Width::Full
-    };
-    c.input.output = if g.output == 1 {
-        Output::Simplified
-    } else {
-        Output::Traditional
-    };
-    c.input.on_focus = if g.on_focus == 1 {
-        OnFocus::Reset
-    } else {
-        OnFocus::Remember
-    };
-    c.toggle.shift = match g.shift {
-        1 => ShiftToggle::Left,
-        2 => ShiftToggle::Right,
-        3 => ShiftToggle::Off,
-        _ => ShiftToggle::Both,
-    };
-    c.toggle.shift_tap_max_ms = g.tap_ms.max(0) as u64;
-    c.candidates.per_page = g.per_page.clamp(1, 10) as usize;
-    c.candidates.sort_by_frequency = g.sort_freq;
-    c.candidates.language_model = g.language_model;
-    c.candidates.habit = match g.habit {
-        1 => Habit::Windows,
-        2 => Habit::Macos,
-        _ => Habit::Custom,
-    };
-    // 操作習慣不是自訂時一般頁不顯示這兩項，不寫回（自己的設定保留著）
-    if c.candidates.habit == Habit::Custom {
-        c.candidates.select = if g.select == 1 {
-            SelectSide::Before
-        } else {
-            SelectSide::After
-        };
-        c.candidates.after_select = match g.after_select {
-            1 => AfterSelect::Stay,
-            2 => AfterSelect::Backward,
-            _ => AfterSelect::Forward,
-        };
-    }
-    c.detect.fullscreen = g.detect;
-    c.mixed.english = match g.english {
-        0 => EnglishWords::Off,
-        2 => EnglishWords::EnglishFirst,
-        _ => EnglishWords::ChineseFirst,
-    };
-    c.mixed.english_candidate = g.english_candidate;
-    c.mixed.auto_space = g.auto_space;
-    c.mixed.typing = match g.typing {
-        1 => TypingDisplay::Keys,
-        2 => TypingDisplay::KeysAndChars,
-        _ => TypingDisplay::Bopomofo,
-    };
-    c.update.auto_check = g.auto_update;
-    c.punctuation.primary = match g.primary {
-        1 => PrimarySymbols::RightAlt,
-        2 => PrimarySymbols::Both,
-        _ => PrimarySymbols::Backtick,
-    };
-    c.punctuation.secondary = if g.secondary == 1 {
-        SecondarySymbols::Layer
-    } else {
-        SecondarySymbols::Shift
-    };
-    // 舊版欄位已轉換，不再保留
-    c.punctuation.shift = None;
-    c.punctuation.right_alt = None;
-}
 
 fn ai_from(c: &Config) -> AiSettings {
     AiSettings {
@@ -631,6 +487,66 @@ fn single_instance(_wait_for_old: bool) -> bool {
     true
 }
 
+/// 設定目錄的一個欄位 → 畫面上的一列
+fn field_row(
+    field: &zct_preferences::Field,
+    values: &serde_json::Value,
+    capabilities: &serde_json::Value,
+    page_title: &str,
+) -> SharedField {
+    use zct_preferences::FieldKind;
+    let locked = field.locked_value(values);
+    let mut value = values;
+    for key in field.path.split('.') {
+        value = &value[key];
+    }
+    // 被操作習慣鎖定：顯示固定值、不能編輯
+    let value = locked.unwrap_or(value);
+    let range = field.range.filter(|_| field.integer);
+    SharedField {
+        path: field.path.clone().into(),
+        label: field.label.clone().into(),
+        section: page_title.into(),
+        header: SharedString::default(),
+        kind: match field.kind {
+            FieldKind::Bool => 0,
+            FieldKind::Choice => 1,
+            FieldKind::Number if range.is_some() => 3,
+            _ => 2,
+        },
+        value: value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| value.to_string())
+            .into(),
+        checked: value.as_bool().unwrap_or(false),
+        options: ModelRc::new(VecModel::from(
+            field
+                .choices
+                .iter()
+                .map(|c| SharedString::from(&c.label))
+                .collect::<Vec<_>>(),
+        )),
+        selected: field
+            .choices
+            .iter()
+            .position(|c| &c.value == value)
+            .unwrap_or(0) as i32,
+        number: value.as_i64().unwrap_or_default() as i32,
+        minimum: range.map_or(0, |r| r.min as i32),
+        maximum: range.map_or(0, |r| r.max as i32),
+        step: range.map_or(1, |r| r.step as i32),
+        enabled: locked.is_none()
+            && field
+                .feature
+                .as_ref()
+                .is_none_or(|f| capabilities[f].as_bool().unwrap_or(false)),
+        locked: locked.is_some(),
+        help: field.help.clone().into(),
+    }
+}
+
+/// 全部設定頁：目錄裡所有的欄位（被鎖定的顯示固定值、不能編輯）
 fn shared_fields(config: &Config) -> Vec<SharedField> {
     let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
     let values = serde_json::to_value(config).expect("serializable Config");
@@ -640,73 +556,69 @@ fn shared_fields(config: &Config) -> Vec<SharedField> {
         .fields
         .iter()
         .map(|field| {
-            let locked = field.locked_value(&values);
-            let mut value = &values;
-            for key in field.path.split('.') {
-                value = &value[key];
-            }
-            // 被操作習慣鎖定：顯示固定值、不能編輯
-            let value = locked.unwrap_or(value);
-            let section = catalog
+            let title = catalog
                 .pages
                 .iter()
                 .find(|p| p.id == field.page)
-                .map(|p| p.title.clone())
+                .map(|p| p.title.as_str())
                 .unwrap_or_default();
-            SharedField {
-                path: field.path.clone().into(),
-                label: field.label.clone().into(),
-                section: section.into(),
-                kind: match field.kind {
-                    zct_preferences::FieldKind::Bool => 0,
-                    zct_preferences::FieldKind::Choice => 1,
-                    _ => 2,
-                },
-                value: value
-                    .as_str()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| value.to_string())
-                    .into(),
-                checked: value.as_bool().unwrap_or(false),
-                options: ModelRc::new(VecModel::from(
-                    field
-                        .choices
-                        .iter()
-                        .map(|c| SharedString::from(&c.label))
-                        .collect::<Vec<_>>(),
-                )),
-                selected: field
-                    .choices
-                    .iter()
-                    .position(|c| &c.value == value)
-                    .unwrap_or(0) as i32,
-                enabled: locked.is_none()
-                    && field
-                        .feature
-                        .as_ref()
-                        .is_none_or(|f| capabilities[f].as_bool().unwrap_or(false)),
-                locked: locked.is_some(),
-                help: field.help.clone().into(),
-            }
+            field_row(field, &values, &capabilities, title)
         })
         .collect()
 }
-fn read_shared_config(config: &Config, rows: &ModelRc<SharedField>) -> Result<Config, String> {
+
+/// 一般頁：分區標題、說明、進階都照設定目錄（與 macOS 同一份）。
+/// 被操作習慣鎖定的欄位不顯示；`advanced`：進階展開
+fn general_fields(config: &Config, advanced: bool) -> Vec<SharedField> {
+    let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
+    let values = serde_json::to_value(config).expect("serializable Config");
+    let capabilities =
+        serde_json::to_value(&catalog.capabilities).expect("serializable capabilities");
+    let fields = catalog
+        .fields
+        .iter()
+        .filter(|f| f.page == "general" && f.locked_value(&values).is_none());
+    let mut rows = Vec::new();
+    let mut section = "";
+    for field in fields.clone().filter(|f| !f.advanced) {
+        let mut row = field_row(field, &values, &capabilities, "");
+        if field.section != section {
+            section = &field.section;
+            row.header = section.into();
+        }
+        rows.push(row);
+    }
+    if fields.clone().any(|f| f.advanced) {
+        rows.push(SharedField {
+            kind: 9,
+            label: if advanced { "▾ 進階" } else { "▸ 進階" }.into(),
+            ..Default::default()
+        });
+        if advanced {
+            rows.extend(
+                fields
+                    .filter(|f| f.advanced)
+                    .map(|f| field_row(f, &values, &capabilities, "")),
+            );
+        }
+    }
+    rows
+}
+
+/// 畫面上的列寫回設定（依欄位路徑；被鎖定的列保留自己的設定）
+fn apply_rows(config: &Config, rows: &ModelRc<SharedField>) -> Result<Config, String> {
     use zct_preferences::FieldKind;
     let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
-    if rows.row_count() != catalog.fields.len() {
-        return Err("設定欄位資料不完整".into());
-    }
     let mut json = serde_json::to_value(config).map_err(|e| e.to_string())?;
-    for (i, field) in catalog.fields.iter().enumerate() {
-        let row = rows.row_data(i).ok_or("設定欄位不存在")?;
-        if row.path.as_str() != field.path {
-            return Err("設定欄位定義不一致".into());
-        }
-        // 畫面上是操作習慣的固定值：保留原本自己的設定
-        if row.locked {
+    for row in (0..rows.row_count()).filter_map(|i| rows.row_data(i)) {
+        if row.locked || row.kind == 9 {
             continue;
         }
+        let field = catalog
+            .fields
+            .iter()
+            .find(|f| f.path == row.path.as_str())
+            .ok_or("設定欄位定義不一致")?;
         let value = match field.kind {
             FieldKind::Bool => serde_json::Value::Bool(row.checked),
             FieldKind::Choice => field
@@ -715,6 +627,7 @@ fn read_shared_config(config: &Config, rows: &ModelRc<SharedField>) -> Result<Co
                 .ok_or("選項不存在")?
                 .value
                 .clone(),
+            FieldKind::Number if row.kind == 3 => serde_json::Value::from(row.number),
             FieldKind::Number | FieldKind::Json => serde_json::from_str(row.value.as_str())
                 .map_err(|e| format!("{}：{e}", field.label))?,
             _ => serde_json::Value::String(row.value.to_string()),
@@ -725,16 +638,21 @@ fn read_shared_config(config: &Config, rows: &ModelRc<SharedField>) -> Result<Co
     let config: Config = serde_json::from_value(json).map_err(|e| e.to_string())?;
     zct_preferences::validate(&config)
 }
+
 fn show_primary_settings(ui: &SettingsWindow, config: &Config) {
-    ui.set_general(general_from(config));
+    ui.set_general_fields(ModelRc::new(VecModel::from(general_fields(
+        config,
+        ui.get_show_advanced(),
+    ))));
+    ui.set_auto_update(config.update.auto_check);
     ui.set_hotkeys(hotkeys_from(config));
     ui.set_theme(theme_from(config));
     ui.set_sync(sync_from(config));
     ui.set_ai(ai_from(config));
 }
 fn collect_primary_settings(ui: &SettingsWindow, original: &Config) -> Result<Config, String> {
-    let mut config = original.clone();
-    apply_general(&mut config, &ui.get_general());
+    let mut config = apply_rows(original, &ui.get_general_fields())?;
+    config.update.auto_check = ui.get_auto_update();
     apply_sync(&mut config, &ui.get_sync());
     apply_ai(&mut config, &ui.get_ai());
     apply_hotkeys(&mut config, &ui.get_hotkeys())?;
@@ -776,11 +694,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => (AppRules::default(), Some(e.to_string())),
     };
     ui.set_shared_fields(ModelRc::new(VecModel::from(shared_fields(&config))));
-    ui.set_general(general_from(&config));
-    ui.set_hotkeys(hotkeys_from(&config));
-    ui.set_theme(theme_from(&config));
-    ui.set_sync(sync_from(&config));
-    ui.set_ai(ai_from(&config));
+    show_primary_settings(&ui, &config);
     ui.set_has_api_key(zct_ipc::secret::read_ai_key().is_some());
     let apps = Rc::new(VecModel::from(
         rules.apps.iter().map(row_from).collect::<Vec<_>>(),
@@ -860,7 +774,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return true;
             }
             let mut st = state.borrow_mut();
-            match read_shared_config(&st.config, &ui.get_shared_fields()) {
+            match apply_rows(&st.config, &ui.get_shared_fields()) {
                 Ok(config) => {
                     show_primary_settings(&ui, &config);
                     st.config = config;
@@ -881,7 +795,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let ui = ui_weak.unwrap();
             let rows = ui.get_shared_fields();
             let st = state.borrow();
-            let Ok(config) = read_shared_config(&st.config, &rows) else {
+            let Ok(config) = apply_rows(&st.config, &rows) else {
                 return;
             };
             let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
@@ -893,6 +807,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // 一般頁換了選項（例如操作習慣）或展開／收合進階：用畫面上的值重新產生列表
+    for toggle in [false, true] {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        let rebuild = move || {
+            let ui = ui_weak.unwrap();
+            let mut st = state.borrow_mut();
+            match apply_rows(&st.config, &ui.get_general_fields()) {
+                Ok(config) => {
+                    if toggle {
+                        ui.set_show_advanced(!ui.get_show_advanced());
+                    }
+                    ui.set_general_fields(ModelRc::new(VecModel::from(general_fields(
+                        &config,
+                        ui.get_show_advanced(),
+                    ))));
+                    st.config = config;
+                }
+                Err(e) => ui.set_status(e.into()),
+            }
+        };
+        if toggle {
+            ui.on_toggle_advanced(rebuild);
+        } else {
+            ui.on_general_changed(rebuild);
+        }
+    }
+
     // 儲存設定
     {
         let (ui_weak, state, apps) = (ui.as_weak(), state.clone(), apps.clone());
@@ -901,7 +842,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut st = state.borrow_mut();
             let result = (|| {
                 let config = if ui.get_page() == 9 {
-                    read_shared_config(&st.config, &ui.get_shared_fields())?
+                    apply_rows(&st.config, &ui.get_shared_fields())?
                 } else {
                     collect_primary_settings(&ui, &st.config)?
                 };
@@ -1373,7 +1314,7 @@ mod tests {
         config.ai.model = "shared-model".into();
         config.sync.remote = "git@example.com:private/input.git".into();
         let rows = ModelRc::new(VecModel::from(shared_fields(&config)));
-        let roundtrip = read_shared_config(&config, &rows).unwrap();
+        let roundtrip = apply_rows(&config, &rows).unwrap();
         assert_eq!(roundtrip, config);
         let theme = theme_from(&config);
         apply_theme(&mut config, &theme).unwrap();
@@ -1381,6 +1322,19 @@ mod tests {
     }
 
     use super::*;
+    use zct_core::config::{
+        AfterSelect, EnglishWords, Habit, SelectSide, ShiftToggle, TypingDisplay,
+    };
+
+    fn rows(fields: Vec<SharedField>) -> ModelRc<SharedField> {
+        ModelRc::new(VecModel::from(fields))
+    }
+
+    fn row(rows: &ModelRc<SharedField>, path: &str) -> Option<SharedField> {
+        (0..rows.row_count())
+            .filter_map(|i| rows.row_data(i))
+            .find(|r| r.path == path)
+    }
 
     #[test]
     fn habit_locks_selection_fields_but_keeps_own_values() {
@@ -1388,36 +1342,53 @@ mod tests {
         config.candidates.habit = Habit::Windows;
         config.candidates.select = SelectSide::After;
         config.candidates.after_select = AfterSelect::Backward;
-        let row = |rows: &ModelRc<SharedField>, path: &str| {
-            (0..rows.row_count())
-                .filter_map(|i| rows.row_data(i))
-                .find(|r| r.path == path)
-                .unwrap()
-        };
-        let rows = ModelRc::new(VecModel::from(shared_fields(&config)));
-        let select = row(&rows, "candidates.select");
+        // 全部設定頁：顯示固定值、不能編輯
+        let all = rows(shared_fields(&config));
+        let select = row(&all, "candidates.select").unwrap();
         assert!(select.locked && !select.enabled);
         assert_eq!(select.selected, 1, "顯示 Windows 的「游標前的詞」");
-        assert_eq!(row(&rows, "candidates.after_select").selected, 0);
-        // 儲存全部設定：自己的設定不會被固定值蓋掉
-        assert_eq!(read_shared_config(&config, &rows).unwrap(), config);
-        // 一般頁：操作習慣不是自訂時，畫面上的固定值不寫回
-        let mut general = general_from(&config);
-        general.select = 1;
-        general.after_select = 0;
-        let mut saved = config.clone();
-        apply_general(&mut saved, &general);
-        assert_eq!(saved, config);
-        // 切回自訂：恢復自己的設定
-        general.habit = 0;
-        general.select = select_index(config.candidates.select);
-        general.after_select = after_select_index(config.candidates.after_select);
-        apply_general(&mut saved, &general);
-        assert_eq!(saved.candidates.habit, Habit::Custom);
-        let rows = ModelRc::new(VecModel::from(shared_fields(&saved)));
-        let select = row(&rows, "candidates.select");
+        assert_eq!(row(&all, "candidates.after_select").unwrap().selected, 0);
+        assert_eq!(
+            apply_rows(&config, &all).unwrap(),
+            config,
+            "自己的設定不會被固定值蓋掉"
+        );
+        // 一般頁：不顯示，存檔保留自己的設定
+        let general = rows(general_fields(&config, true));
+        assert!(row(&general, "candidates.select").is_none());
+        assert!(row(&general, "candidates.after_select").is_none());
+        assert_eq!(apply_rows(&config, &general).unwrap(), config);
+        // 切回自訂：顯示自己的設定
+        let mut custom = config.clone();
+        custom.candidates.habit = Habit::Custom;
+        let general = rows(general_fields(&custom, false));
+        let select = row(&general, "candidates.select").unwrap();
         assert!(!select.locked && select.enabled);
         assert_eq!(select.selected, 0, "自己的「游標後的詞」");
+    }
+
+    #[test]
+    fn general_page_follows_the_catalog_sections_and_advanced() {
+        let config = Config::default();
+        let basic = general_fields(&config, false);
+        let headers: Vec<_> = basic
+            .iter()
+            .filter(|r| !r.header.is_empty())
+            .map(|r| r.header.to_string())
+            .collect();
+        assert_eq!(headers, ["輸入", "候選字", "中英混打"]);
+        assert_eq!(basic.last().unwrap().kind, 9, "最後是進階展開列");
+        assert!(basic.iter().all(|r| r.path != "input.output"), "進階收合");
+        let all = general_fields(&config, true);
+        assert!(all.iter().any(|r| r.path == "input.output"));
+        let per_page = all
+            .iter()
+            .find(|r| r.path == "candidates.per_page")
+            .unwrap();
+        assert_eq!(
+            (per_page.kind, per_page.minimum, per_page.maximum),
+            (3, 1, 10)
+        );
     }
 
     #[test]
@@ -1426,6 +1397,8 @@ mod tests {
         c.input.default_mode = InputMode::English;
         c.input.output = Output::Simplified;
         c.toggle.shift = ShiftToggle::Right;
+        c.toggle.shift_tap_max_ms = 450;
+        c.candidates.per_page = 7;
         c.detect.fullscreen = false;
         c.mixed.english = EnglishWords::EnglishFirst;
         c.mixed.typing = TypingDisplay::KeysAndChars;
@@ -1442,8 +1415,7 @@ mod tests {
         c.ai.model = "qwen3.5:2b".into();
         c.hotkeys.ai = Binding(None);
 
-        let mut back = Config::default();
-        apply_general(&mut back, &general_from(&c));
+        let mut back = apply_rows(&Config::default(), &rows(general_fields(&c, true))).unwrap();
         apply_sync(&mut back, &sync_from(&c));
         apply_ai(&mut back, &ai_from(&c));
         apply_hotkeys(&mut back, &hotkeys_from(&c)).unwrap();

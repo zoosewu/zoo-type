@@ -13,10 +13,7 @@ func platformSelfTests() throws {
     try check(try Credentials.read(service: service) == "fixture-updated", "Keychain 修改")
     try Credentials.write("", service: service)
     try check(try Credentials.read(service: service) == nil, "Keychain 清除")
-    try check(InputDetection.shouldPass(InputSignals(secure: true), enabled: false), "安全輸入不能被設定關閉")
-    try check(InputDetection.shouldPass(InputSignals(hasTextContext: false, hasCaret: false, fullscreen: true), enabled: true), "全螢幕無文字 context 應放行")
-    try check(!InputDetection.shouldPass(InputSignals(fullscreen: true), enabled: true), "全螢幕編輯器照常輸入")
-    try check(!InputDetection.shouldPass(InputSignals(hasTextContext: false, hasCaret: false, fullscreen: true), enabled: false), "遊戲偵測可關閉")
+    // 不在輸入狀態的判斷規則在共用層（zct_core::detect 與 zct-ffi 的測試）
 
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: .borderless, backing: .buffered, defer: false)
     let view = CandidateView(); window.contentView = view

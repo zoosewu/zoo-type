@@ -1,28 +1,5 @@
 import { AboutSlint, Button, ComboBox, LineEdit, Switch, SpinBox, StandardTableView, ListView, ScrollView, Palette } from "std-widgets.slint";
 
-export struct General {
-    default-mode: int,      // 0 中文 1 英文
-    punctuation: int,       // 0 全形 1 半形
-    output: int,            // 0 繁體 1 簡體
-    on-focus: int,          // 0 記住 1 重設
-    shift: int,             // 0 左右 1 左 2 右 3 關
-    tap-ms: int,
-    per-page: int,
-    sort-freq: bool,
-    language-model: bool,
-    habit: int,             // 0 自訂 1 Windows 2 macOS
-    select: int,            // 0 游標後的詞 1 游標前的詞
-    after-select: int,      // 0 移到詞後面 1 不動 2 移到詞前面
-    detect: bool,
-    english: int,           // 0 關 1 中文優先 2 英文優先
-    english-candidate: bool,
-    auto-space: bool,
-    typing: int,            // 0 注音 1 字母＋注音小視窗 2 字母＋注音與常用字
-    auto-update: bool,
-    primary: int,           // 主要符號：0 ` + 鍵 1 右 Alt + 鍵 2 兩種都可以
-    secondary: int,         // 次要符號：0 Shift + 鍵 1 ` / 右 Alt + Shift + 鍵
-}
-
 export struct AiSettings {
     enabled: bool,
     endpoint: string,
@@ -277,17 +254,23 @@ component ColorField inherits HorizontalLayout {
     }
 }
 
-// Generated from zct-preferences' complete field catalog, including advanced
-// fields that are not represented by the compact platform-specific pages.
+// 由 zct-preferences 的設定目錄產生（與 macOS 同一份）：「一般」頁與「全部設定」頁
 export struct SharedField {
     path: string,
     label: string,
+    // 所屬頁面的標題（全部設定頁用）
     section: string,
-    kind: int, // 0 bool, 1 choice, 2 other scalar / JSON
+    // 這一列上方的分區標題（一般頁用；和上一列同一區時是空字串）
+    header: string,
+    kind: int, // 0 開關、1 選單、2 文字／JSON、3 有範圍的整數、9 「進階」展開列
     value: string,
     checked: bool,
     options: [string],
     selected: int,
+    number: int,
+    minimum: int,
+    maximum: int,
+    step: int,
     enabled: bool,
     // 被操作習慣鎖定：顯示的是固定值，儲存時保留自己的設定
     locked: bool,
@@ -312,7 +295,9 @@ export component SettingsWindow inherits Window {
     default-font-family: "Microsoft JhengHei UI";
 
     in-out property <int> page: 0;
-    in-out property <General> general;
+    // 一般頁（設定目錄產生）；進階展開時包含進階的欄位
+    in-out property <[SharedField]> general-fields;
+    in-out property <bool> auto-update;
     in-out property <Hotkeys> hotkeys;
     in-out property <Theme> theme;
     in property <[AppRuleRow]> apps;
@@ -360,6 +345,9 @@ export component SettingsWindow inherits Window {
     callback sync-now();
     // 全部設定頁的選項變了：重新套用鎖定（操作習慣）
     callback shared-choice-changed();
+    // 一般頁換了選項（操作習慣決定要不要顯示選字對象等）、展開或收合進階：重新產生列表
+    callback general-changed();
+    callback toggle-advanced();
     callback check-update();
     callback install-update();
     callback save-api-key(string);
@@ -398,49 +386,21 @@ export component SettingsWindow inherits Window {
                 VerticalLayout {
                     spacing: 10px;
                     alignment: start;
-                    Section { text: "輸入"; }
-                    Row { label: "預設模式"; ComboBox { width: 160px; model: ["中文", "英文"]; current-index <=> root.general.default-mode; } }
-                    Note { text: "新開 App 時的中英狀態。"; }
-                    Row { label: "標點"; ComboBox { width: 160px; model: ["全形", "半形"]; current-index <=> root.general.punctuation; } }
-                    Note { text: "全形（，。？）或半形（,.?），所有 App 共用。"; }
-                    Row { label: "Shift 切換中英"; ComboBox { width: 160px; model: ["左右都可", "左 Shift", "右 Shift", "不使用"]; current-index <=> root.general.shift; } }
-                    Note { text: "單按 Shift 切換。組字中切換不會送出，接著打的英文和數字加進組字區：第 Shift 6 Shift 章 → 第6章。"; }
-                    Section { text: "候選字"; }
-                    Row { label: "每頁字數"; SpinBox { width: 160px; minimum: 1; maximum: 10; value <=> root.general.per-page; } }
-                    Row { label: "智慧選字"; Switch { checked <=> root.general.language-model; } }
-                    Note { text: "用內建的語言模型判斷整句哪個同音字最通順（例如「下次再說」「在家」），在電腦上執行，不連網路。"; }
-                    Row { label: "操作習慣"; ComboBox { width: 160px; model: ["自訂", "Windows", "macOS"]; current-index <=> root.general.habit; } }
-                    Note { text: "Windows：選游標前的詞，選完游標移到詞後面。macOS：選游標後的詞，選完游標不動。"; }
-                    if root.general.habit == 0: Row { label: "選字對象"; ComboBox { width: 160px; model: ["游標後的詞", "游標前的詞"]; current-index <=> root.general.select; } }
-                    if root.general.habit == 0: Row { label: "選字後游標"; ComboBox { width: 160px; model: ["移到詞後面", "不動", "移到詞前面"]; current-index <=> root.general.after-select; } }
-                    Section { text: "中英混打"; }
-                    Row { label: "英文單字判斷"; ComboBox { width: 160px; model: ["關", "中文優先", "英文優先"]; current-index <=> root.general.english; } }
-                    Note { text: "中文優先：句首或空白後打單字表裡的英文再按空白，才當作英文（hello、repo）。英文優先：組不成注音就轉成英文（lo → love），之後的按鍵都是字元本身，空白結束這個單字。用 Shift 打過的英文會記住。"; }
-                    Row { label: "候選窗附上英文"; Switch { checked <=> root.general.english-candidate; } }
-                    Note { text: "按鍵也是英文單字時，候選窗多一個英文選項：fu → 七、fu。"; }
-                    Row { label: "中英之間自動空格"; Switch { checked <=> root.general.auto-space; } }
-                    Note { text: "中文與英文、數字之間加一個空格。"; }
-                    Row { label: "打字時顯示"; ComboBox { width: 200px; model: ["注音", "字母＋注音小視窗", "字母＋注音與常用字"]; current-index <=> root.general.typing; } }
-                    Note { text: "注音還沒打完時的顯示。字母：組字區顯示按下的字母（我 lov），注音顯示在旁邊的小視窗，打完就消失。"; }
-                    HorizontalLayout {
-                        alignment: start;
-                        Button { text: root.show-advanced ? "▾ 進階" : "▸ 進階"; clicked => { root.show-advanced = !root.show-advanced; } }
-                    }
-                    if root.show-advanced: VerticalLayout {
-                        spacing: 10px;
-                        Row { label: "輸出"; ComboBox { width: 160px; model: ["繁體", "簡體"]; current-index <=> root.general.output; } }
-                        Note { text: "組字區與候選窗一律顯示繁體，送出時才轉成簡體。"; }
-                        Row { label: "切回 App 時"; ComboBox { width: 160px; model: ["保留中英狀態", "重設為預設模式"]; current-index <=> root.general.on-focus; } }
-                        Row { label: "Shift 按住上限（毫秒）"; SpinBox { width: 160px; minimum: 100; maximum: 1000; step-size: 50; value <=> root.general.tap-ms; } }
-                        Note { text: "按住 Shift 超過這個時間才放開，不算切換。"; }
-                        Row { label: "主要符號"; ComboBox { width: 280px; model: ["` + 鍵", "右 Alt + 鍵", "` + 鍵 或 右 Alt + 鍵"]; current-index <=> root.general.primary; } }
-                        Note { text: "鍵帽下排的字元：` 再按 , → ，、` 再按 1 → １、` 按兩下 → `。用右 Alt 時，App 收不到右 Alt 組合鍵。"; }
-                        Row { label: "次要符號"; ComboBox { width: 280px; model: ["Shift + 鍵", "` 或 右 Alt + Shift + 鍵"]; current-index <=> root.general.secondary; } }
-                        Note { text: "鍵帽上排的符號：Shift + , → ＜、Shift + ' → ＂。選第二種時，Shift + 鍵改打中文標點（，。；「」）。"; }
-                        Row { label: "依常用程度排序"; Switch { checked <=> root.general.sort-freq; } }
-                        Note { text: "常用字在前，並參考你的選字紀錄。"; }
-                        Row { label: "全螢幕遊戲時不處理按鍵"; Switch { checked <=> root.general.detect; } }
-                        Note { text: "全螢幕遊戲、簡報播放時，按鍵直接交給 App，Shift 也不切換中英。視窗模式的遊戲偵測不到，請用遊戲模式。"; }
+                    for field in root.general-fields: VerticalLayout {
+                        spacing: 6px;
+                        if field.header != "": Section { text: field.header; }
+                        if field.kind == 9: HorizontalLayout {
+                            alignment: start;
+                            Button { text: field.label; clicked => { root.toggle-advanced(); } }
+                        }
+                        if field.kind != 9: Row {
+                            label: field.label;
+                            if field.kind == 0: Switch { checked <=> field.checked; enabled: field.enabled; }
+                            if field.kind == 1: ComboBox { width: 220px; model: field.options; current-index <=> field.selected; enabled: field.enabled; selected => { root.general-changed(); } }
+                            if field.kind == 2: LineEdit { width: 360px; text <=> field.value; enabled: field.enabled; }
+                            if field.kind == 3: SpinBox { width: 160px; minimum: field.minimum; maximum: field.maximum; step-size: field.step; value <=> field.number; enabled: field.enabled; }
+                        }
+                        if field.help != "" && field.kind != 9: Note { text: field.help; }
                     }
                 }
             }
@@ -741,7 +701,7 @@ export component SettingsWindow inherits Window {
                 alignment: start;
                 Section { text: root.app-name; }
                 Text { text: "版本 " + root.version; }
-                if root.official: Row { label: "自動檢查更新"; Switch { checked <=> root.general.auto-update; } }
+                if root.official: Row { label: "自動檢查更新"; Switch { checked <=> root.auto-update; } }
                 if root.official: Note { text: "每天檢查一次；有新版時，輸入法圖示的選單會出現「更新到」。"; }
                 if root.official: Row {
                     label: "";
@@ -771,6 +731,7 @@ export component SettingsWindow inherits Window {
                             if field.kind == 0: Switch { checked <=> field.checked; enabled: field.enabled; }
                             if field.kind == 1: ComboBox { width: 300px; model: field.options; current-index <=> field.selected; enabled: field.enabled; selected => { root.shared-choice-changed(); } }
                             if field.kind == 2: LineEdit { width: 360px; text <=> field.value; enabled: field.enabled; }
+                            if field.kind == 3: SpinBox { width: 160px; minimum: field.minimum; maximum: field.maximum; step-size: field.step; value <=> field.number; enabled: field.enabled; }
                         }
                         Help { text: field.path + (field.help == "" ? "" : " — " + field.help); }
                     }

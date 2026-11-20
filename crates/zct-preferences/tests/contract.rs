@@ -28,10 +28,20 @@ fn leaves(value: &Value, prefix: &str, out: &mut BTreeSet<String>) {
 fn every_config_and_app_field_has_one_shared_descriptor() {
     let win = catalog(Platform::Windows);
     let mac = catalog(Platform::Macos);
-    assert_eq!(
-        serde_json::to_value(&win.fields).unwrap(),
-        serde_json::to_value(&mac.fields).unwrap()
-    );
+    // 兩個平台的欄位、型別、預設值、選項值、分區、進階、範圍、鎖定都相同；
+    // 只有顯示文字可以不同（按鍵名稱：右 Alt／右 Option）
+    let behavior = |fields: &[zct_preferences::Field]| {
+        let mut value = serde_json::to_value(fields).unwrap();
+        for field in value.as_array_mut().unwrap() {
+            field["label"] = serde_json::Value::Null;
+            field["help"] = serde_json::Value::Null;
+            for choice in field["choices"].as_array_mut().unwrap() {
+                choice["label"] = serde_json::Value::Null;
+            }
+        }
+        value
+    };
+    assert_eq!(behavior(&win.fields), behavior(&mac.fields));
     assert_eq!(
         serde_json::to_value(&win.app_fields).unwrap(),
         serde_json::to_value(&mac.app_fields).unwrap()

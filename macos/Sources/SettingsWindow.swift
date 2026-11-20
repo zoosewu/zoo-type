@@ -95,6 +95,10 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     private func button(_ title: String, _ selector: Selector) -> NSButton {
         let result = NSButton(title: title, target: self, action: selector); result.bezelStyle = .rounded; return result
     }
+    private func header(_ text: String) {
+        let label = NSTextField(labelWithString: text); label.font = .boldSystemFont(ofSize: 16)
+        body.addArrangedSubview(label)
+    }
     private func note(_ text: String) {
         let label = NSTextField(wrappingLabelWithString: text)
         label.textColor = .secondaryLabelColor; label.font = .systemFont(ofSize: 12); label.preferredMaxLayoutWidth = 610
@@ -179,7 +183,11 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
             control.widthAnchor.constraint(equalToConstant: 300).isActive = true
             control.target = self; control.action = #selector(changed(_:))
             let integer = field.integer
-            if field.kind == "number" { let formatter = NumberFormatter(); formatter.allowsFloats = !integer; control.formatter = formatter }
+            if field.kind == "number" {
+                let formatter = NumberFormatter(); formatter.allowsFloats = !integer
+                if let range = field.range { formatter.minimum = NSNumber(value: range.min); formatter.maximum = NSNumber(value: range.max) }
+                control.formatter = formatter
+            }
             bindings.append { [weak control] in
                 guard let control else { return }
                 if field.kind == "number" { set(integer ? (Int(control.stringValue) ?? 0) as Any : (Double(control.stringValue) ?? 0) as Any) }
@@ -188,6 +196,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         }
         if !field.help.isEmpty && field.kind != "hotkey" { note(field.help) }
     }
+    private func isLocked(_ field: PreferenceField) -> Bool { model.lockedValue(field) != nil }
     @objc private func selectPage(_ sender: NSButton) { collect(); page = sender.tag; showPage() }
     @objc private func toggleAdvanced(_ sender: Any?) { collect(); showAdvanced.toggle(); showPage() }
     private func showPage() {
@@ -203,7 +212,16 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         if fields.contains(where: { $0.feature.map { !model.supports($0) } ?? false }) {
             note("灰色欄位的功能尚未在此平台提供；既有值會保留，與其他平台共用設定時不會被清除。")
         }
-        for field in fields where !field.advanced { render(field) }
+        var section = ""
+        for field in fields where !field.advanced {
+            // 被操作習慣鎖定的欄位不顯示，也不單獨帶出分區標題
+            if isLocked(field) { continue }
+            if field.section != section {
+                section = field.section
+                if !section.isEmpty { header(section) }
+            }
+            render(field)
+        }
         if fields.contains(where: { $0.advanced }) {
             body.addArrangedSubview(button(showAdvanced ? "▾ 進階" : "▸ 進階", #selector(toggleAdvanced(_:))))
             if showAdvanced { for field in fields where field.advanced { render(field) } }

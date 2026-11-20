@@ -23,8 +23,16 @@ struct PreferenceField {
     let lockValues: [String: Any]
     /// 少用的設定：收在頁面最後預設收合的「進階」
     let advanced: Bool
+    /// 頁面內的分區標題；和前一個欄位不同時顯示
+    let section: String
+    /// 數字欄位的範圍（儲存時共用層也會檢查）
+    let range: (min: Int, max: Int)?
     init(_ value: [String: Any]) {
         advanced = value["advanced"] as? Bool ?? false
+        section = value["section"] as? String ?? ""
+        if let r = value["range"] as? [String: Any], let min = r["min"] as? Int, let max = r["max"] as? Int {
+            range = (min, max)
+        } else { range = nil }
         let lock = value["lock"] as? [String: Any]
         lockBy = lock?["by"] as? String
         lockValues = lock?["values"] as? [String: Any] ?? [:]

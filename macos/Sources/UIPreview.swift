@@ -134,7 +134,7 @@ private func settingsAcceptanceTest(runtime: EngineRuntime, capture: (NSView, St
     try choose("candidates.habit", "custom")
     try check(try selected("candidates.select") == "游標前的詞" && selected("candidates.after_select") == "移到詞前面", "重開後自訂值必須保留")
     try click("▸ 進階")
-    try check(try selected("input.output") == "簡體" && selected("input.on_focus") == "恢復預設", "進階設定必須保留")
+    try check(try selected("input.output") == "簡體" && selected("input.on_focus") == "重設為預設模式", "進階設定必須保留")
     try check((try field("toggle.shift_tap_max_ms") as? NSTextField)?.stringValue == "321", "按住上限必須保留")
     try capture(try root(), "settings-reopened.png")
     settings.close()

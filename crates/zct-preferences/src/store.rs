@@ -38,8 +38,22 @@ pub fn validate(config: &Config) -> Result<Config, String> {
     let config = canonical(config.clone());
     let text = toml::to_string(&config).map_err(|e| e.to_string())?;
     let config = Config::parse(&text).map_err(|e| e.to_string())?;
-    if !(1..=10).contains(&config.candidates.per_page) {
-        return Err("每頁候選字數應在 1–10 之間".into());
+    // 數字欄位的範圍在設定目錄（兩個平台的設定畫面用同一份）
+    let json = serde_json::to_value(&config).map_err(|e| e.to_string())?;
+    for field in crate::catalog(crate::Platform::Windows).fields {
+        let Some(range) = field.range else { continue };
+        let value = field
+            .path
+            .split('.')
+            .fold(&json, |v, key| &v[key])
+            .as_f64()
+            .unwrap_or(f64::NAN);
+        if !(range.min as f64..=range.max as f64).contains(&value) {
+            return Err(format!(
+                "{}應在 {}–{} 之間",
+                field.label, range.min, range.max
+            ));
+        }
     }
     Ok(config)
 }
