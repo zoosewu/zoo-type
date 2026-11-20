@@ -136,6 +136,8 @@ final class EngineSession {
         try text.withCString { try EngineResult(zct_session_reconvert(handle, $0)) }
     }
     var isIdle: Bool { zct_session_is_idle(handle) }
+    /// 不在輸入狀態（按鍵交給 App）：規則與 Windows 共用，依這個 App 的設定與規則
+    func notInput(_ s: InputSignals) -> Bool { zct_session_not_input(handle, s.secure, s.hasTextContext, s.hasCaret, s.fullscreen) }
     /// 設定變了而且沒有組字：共用層換成新設定（沿用中英等狀態）。回傳有沒有換
     func refresh() -> Bool { zct_session_refresh(handle) }
     func command(_ code: UInt32) throws -> EngineResult { try EngineResult(zct_session_command(handle, code)) }

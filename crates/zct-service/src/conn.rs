@@ -109,7 +109,9 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     // 切到別的輸入法時連線會斷：同一個程序再連回來沿用中英狀態
                     match HostSession::open(&shared.host, id, &exe, &format!("pid:{pid}")) {
                         Ok(s) => {
-                            let (detect_legacy, detect_fullscreen) = s.session().detection();
+                            let h = s.session().heuristics();
+                            let (detect_legacy, detect_fullscreen) =
+                                (h.fullscreen_without_caret, h.exclusive_fullscreen);
                             session = Some(s);
                             Response::Welcome {
                                 detect_legacy,

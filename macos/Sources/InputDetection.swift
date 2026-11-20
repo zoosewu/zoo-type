@@ -9,12 +9,8 @@ struct InputSignals {
     var fullscreen = false
 }
 
+// 只收集訊號；判斷規則在共用層（EngineSession.notInput）
 enum InputDetection {
-    // A fullscreen editor with a real text context remains usable. Heuristics
-    // only suppress input in a game-like context; secure input always wins.
-    static func shouldPass(_ signals: InputSignals, enabled: Bool) -> Bool {
-        signals.secure || (enabled && (signals.fullscreen && !signals.hasTextContext && !signals.hasCaret))
-    }
     private static var observedAt = Date.distantPast
     private static var observedPID: pid_t = 0
     private static var coversScreen = false

@@ -588,6 +588,34 @@ pub unsafe extern "C" fn zct_session_refresh(session: *mut ZctSession) -> bool {
             .refresh())
     })
 }
+/// 不在輸入狀態（按鍵交給 App）：平台收集訊號，規則與 Windows 共用（`zct_core::detect`）。
+/// `secure`：安全輸入；`text_context`：有選取範圍、正在組字或是終端機；`covers_screen`：前景視窗蓋滿螢幕
+/// # Safety
+/// Session is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_not_input(
+    session: *const ZctSession,
+    secure: bool,
+    text_context: bool,
+    has_caret: bool,
+    covers_screen: bool,
+) -> bool {
+    guard(|| {
+        let session = unsafe { session.as_ref() }.ok_or("空 session")?;
+        let signals = zct_core::detect::Signals {
+            blocked: secure,
+            text_context,
+            has_caret,
+            covers_screen,
+            exclusive_fullscreen: false,
+        };
+        Ok(zct_core::detect::not_input(
+            &signals,
+            session.inner.session().heuristics(),
+        ))
+    })
+}
+
 /// # Safety
 /// Session is live.
 #[unsafe(no_mangle)]
@@ -898,6 +926,32 @@ mod tests {
             assert!(press(first, 13, 0, 500).eaten);
             zct_session_free(first);
             zct_session_free(second);
+        }
+    }
+
+    #[test]
+    fn detection_follows_shared_rules_and_app_rules() {
+        let (dir, mut runtime) = runtime(Config::default());
+        std::fs::write(
+            dir.path().join("apps.toml"),
+            "[[app]]
+macos = 'org.example.chat'
+detect = false
+",
+        )
+        .unwrap();
+        unsafe {
+            let game = string("org.example.game");
+            let chat = string("org.example.chat");
+            let g = zct_session_new(&mut *runtime, game.as_ptr());
+            let c = zct_session_new(&mut *runtime, chat.as_ptr());
+            assert!(zct_session_not_input(g, true, true, true, false), "安全輸入");
+            assert!(!zct_session_not_input(g, false, true, true, false), "一般輸入框");
+            assert!(zct_session_not_input(g, false, false, false, true), "全螢幕遊戲");
+            assert!(!zct_session_not_input(c, false, false, false, true), "App 規則關掉偵測");
+            assert!(zct_session_not_input(c, true, true, true, false), "安全輸入一律放行");
+            zct_session_free(g);
+            zct_session_free(c);
         }
     }
 

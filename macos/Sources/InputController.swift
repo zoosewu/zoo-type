@@ -16,7 +16,6 @@ final class InputController: IMKInputController {
     private var showComposition = false
     private var aiTimer: Timer?
     private var settingsTimer: Timer?
-    private var detectFullscreen = true
     private var compositionAnchor: NSRect?
     private var game = false
     private var simplified = false
@@ -76,7 +75,7 @@ final class InputController: IMKInputController {
         // Terminal grids can omit both a selection and caret during a TUI redraw.
         let hasTextContext = Self.isTerminal(appID) || marked || !engine.isIdle || client.selectedRange().location != NSNotFound
         let signals = InputDetection.gather(hasTextContext: hasTextContext, hasCaret: caret.height > 0)
-        if InputDetection.shouldPass(signals, enabled: detectFullscreen) {
+        if engine.notInput(signals) {
             aiTimer?.invalidate(); panel?.orderOut(nil); modifiersDown.removeAll()
             return false
         }
@@ -205,11 +204,7 @@ final class InputController: IMKInputController {
     private func applySettings(_ snapshot: [String: Any]) {
         let document = snapshot["document"] as? [String: Any]
         let config = document?["config"] as? [String: Any] ?? [:]
-        let apps = (document?["apps"] as? [String: Any])?["app"] as? [[String: Any]] ?? []
-        let rule = apps.first { $0["macos"] as? String == appID }
         theme = CandidateTheme(config: config)
-        let fullscreen = (config["detect"] as? [String: Any])?["fullscreen"] as? Bool ?? true
-        detectFullscreen = fullscreen && (rule?["detect"] as? Bool ?? true)
     }
     private func refreshIdleSettings() {
         // 共用層判斷設定有沒有變、能不能換（組字中等組字結束）；換了才重新讀外觀

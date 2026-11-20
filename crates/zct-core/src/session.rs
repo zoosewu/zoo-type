@@ -464,9 +464,12 @@ impl Session {
         }
     }
 
-    /// 平台層要做的啟發式偵測：（舊式程式 + 沒有游標，獨佔全螢幕）
-    pub fn detection(&self) -> (bool, bool) {
-        (self.eff.detect_legacy, self.eff.detect_fullscreen)
+    /// 這個 App 要做的「不在輸入狀態」啟發式偵測（設定與 App 規則決定），判斷見 [`crate::detect`]
+    pub fn heuristics(&self) -> crate::detect::Heuristics {
+        crate::detect::Heuristics {
+            fullscreen_without_caret: self.eff.detect_legacy,
+            exclusive_fullscreen: self.eff.detect_fullscreen,
+        }
     }
 
     /// 設定變更後換成新的 session：沿用中英、全半形、輸出字形與遊戲模式

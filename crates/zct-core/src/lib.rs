@@ -4,6 +4,7 @@ pub mod abbrev;
 pub mod apps;
 pub mod channel;
 pub mod config;
+pub mod detect;
 pub mod emoji;
 pub mod engine;
 pub mod hanzi;

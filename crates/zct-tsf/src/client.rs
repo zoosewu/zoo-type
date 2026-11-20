@@ -138,7 +138,7 @@ fn try_connect() -> Option<(Client, Heuristics)> {
         }) => Some((
             c,
             Heuristics {
-                legacy_fullscreen: detect_legacy,
+                fullscreen_without_caret: detect_legacy,
                 exclusive_fullscreen: detect_fullscreen,
             },
         )),
