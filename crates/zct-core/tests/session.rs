@@ -116,12 +116,19 @@ fn types_sentence_and_commits_on_enter() {
 
 #[test]
 fn tone_key_alone_types_the_tone_mark() {
-    // 注音區是空的：聲調鍵直接變成符號，一次就好
+    // 沒有在打注音、組字區也是空的：聲調鍵直接送出符號，一次就好
     let mut h = Harness::new();
-    assert!(h.type_str("3")[0].eaten);
-    assert_eq!(h.s.preedit().text, "ˇ");
-    let r = h.press(Key::Enter, Mods::NONE);
+    assert!(
+        h.s.test_key_down(&KeyEvent::down(Key::Char(b'3'), Mods::NONE, 1)),
+        "Windows 先問：要吃掉，App 不會收到 3"
+    );
+    let r = &h.type_str("3")[0];
+    assert!(r.eaten);
     assert_eq!(r.commit.as_deref(), Some("ˇ"));
+    assert!(!h.s.is_composing(), "不留在組字區");
+    for (key, mark) in [("4", "ˋ"), ("6", "ˊ"), ("7", "˙")] {
+        assert_eq!(h.type_str(key)[0].commit.as_deref(), Some(mark));
+    }
 
     // 句子中間也一樣；正在打的音節照常收聲調
     let mut h = Harness::new();

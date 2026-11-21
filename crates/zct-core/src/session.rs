@@ -1733,9 +1733,13 @@ impl Session {
                     self.join(&mut commit, &text);
                 }
             } else if let Some(tone) = self.lone_tone(ev) {
-                // 注音區是空的時候按聲調鍵：直接當符號放進組字區。
-                // chewing 會把它留在注音區等下一個鍵，要再按一次才變成字
-                self.insert_latin(tone);
+                // 沒有在打注音時按聲調鍵：直接是那個符號（chewing 會把它留在注音區等下一個鍵）。
+                // 組字區是空的就直接送出；有字時放進組字區，和前面的字一起送出、順序才對
+                if self.editor.is_empty() {
+                    self.join(&mut commit, tone);
+                } else {
+                    self.insert_latin(tone);
+                }
                 r.eaten = true;
             } else if let Some(notice) = self.learning_key(ev) {
                 r.notice = Some(notice);
