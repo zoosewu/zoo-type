@@ -639,6 +639,19 @@ fn apply_rows(config: &Config, rows: &ModelRc<SharedField>) -> Result<Config, St
     zct_preferences::validate(&config)
 }
 
+/// 一般頁換了選項或展開／收合進階：畫面上的值寫進 `config`（暫存，切頁不會遺失），重新產生列表
+fn rebuild_general(ui: &SettingsWindow, config: &mut Config, toggle: bool) -> Result<(), String> {
+    *config = apply_rows(config, &ui.get_general_fields())?;
+    if toggle {
+        ui.set_show_advanced(!ui.get_show_advanced());
+    }
+    ui.set_general_fields(ModelRc::new(VecModel::from(general_fields(
+        config,
+        ui.get_show_advanced(),
+    ))));
+    Ok(())
+}
+
 fn show_primary_settings(ui: &SettingsWindow, config: &Config) {
     ui.set_general_fields(ModelRc::new(VecModel::from(general_fields(
         config,
@@ -813,18 +826,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rebuild = move || {
             let ui = ui_weak.unwrap();
             let mut st = state.borrow_mut();
-            match apply_rows(&st.config, &ui.get_general_fields()) {
-                Ok(config) => {
-                    if toggle {
-                        ui.set_show_advanced(!ui.get_show_advanced());
-                    }
-                    ui.set_general_fields(ModelRc::new(VecModel::from(general_fields(
-                        &config,
-                        ui.get_show_advanced(),
-                    ))));
-                    st.config = config;
-                }
-                Err(e) => ui.set_status(e.into()),
+            if let Err(e) = rebuild_general(&ui, &mut st.config, toggle) {
+                ui.set_status(e.into());
             }
         };
         if toggle {
@@ -1654,5 +1657,49 @@ mod ui_tests {
             Some(("動物".into(), "動物園".into(), "ㄉㄨㄥˋ ㄨˋ ㄩㄢˊ".into()))
         );
         assert_eq!(ui.get_phrase_edit_row(), -1);
+    }
+}
+
+#[cfg(test)]
+mod general_page_ui {
+    use super::*;
+    use i_slint_backend_testing::ElementQuery;
+    use zct_core::config::EnglishWords;
+
+    /// 在一般頁點選單選值（事件裡會重新產生列表），存檔要寫進設定
+    #[test]
+    fn choosing_in_the_generated_page_is_saved() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = SettingsWindow::new().unwrap();
+        let config = Rc::new(RefCell::new(Config::default()));
+        show_primary_settings(&ui, &config.borrow());
+        // 和 main 一樣：選單的 selected 事件裡重新產生列表
+        {
+            let (ui_weak, config) = (ui.as_weak(), config.clone());
+            ui.on_general_changed(move || {
+                rebuild_general(&ui_weak.unwrap(), &mut config.borrow_mut(), false).unwrap();
+            });
+        }
+        ui.set_page(0);
+        ui.window()
+            .set_size(slint::LogicalSize::new(1000.0, 4000.0));
+        ui.show().unwrap();
+        let combo = ElementQuery::from_root(&ui)
+            .match_descendants()
+            .match_accessible_role(i_slint_backend_testing::AccessibleRole::Combobox)
+            .find_all()
+            .into_iter()
+            .find(|c| c.accessible_value().as_deref() == Some("中文優先"))
+            .expect("英文單字判斷的選單");
+        combo.mock_single_click(slint::platform::PointerEventButton::Left);
+        ElementQuery::from_root(&ui)
+            .match_descendants()
+            .match_predicate(|e| e.accessible_label().as_deref() == Some("英文優先"))
+            .find_all()
+            .last()
+            .expect("選單的選項")
+            .mock_single_click(slint::platform::PointerEventButton::Left);
+        let saved = collect_primary_settings(&ui, &config.borrow()).unwrap();
+        assert_eq!(saved.mixed.english, EnglishWords::EnglishFirst);
     }
 }

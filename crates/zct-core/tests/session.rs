@@ -2850,3 +2850,13 @@ fn candidate_display_labels_pins_and_the_active_column() {
     assert_eq!(hint.selected_row(), None);
     assert_eq!(hint.row_label(0), "");
 }
+
+#[test]
+fn english_first_with_keys_shown_types_hello_after_chinese() {
+    let mut c = Config::default();
+    c.mixed.english = zct_core::config::EnglishWords::EnglishFirst;
+    c.mixed.typing = zct_core::config::TypingDisplay::Keys;
+    let mut h = Harness::with_config(c);
+    h.type_str("su3cl3 hello ");
+    assert_eq!(h.s.preedit().text, "你好 hello ");
+}
