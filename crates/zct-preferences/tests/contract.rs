@@ -293,3 +293,33 @@ fn phrase_edits_preserve_state_and_reject_invalid_replacements() {
     };
     assert!(!format!("{secret:?}").contains("never-log-this"));
 }
+
+#[test]
+fn chained_choices_write_valid_values_of_existing_fields() {
+    let catalog = catalog(Platform::Windows);
+    for field in catalog.fields.iter().filter(|f| !f.also.is_empty()) {
+        for (key, writes) in &field.also {
+            assert!(
+                field.choices.iter().any(|c| c.value.as_str() == Some(key)),
+                "{} 沒有選項 {key}",
+                field.path
+            );
+            for (path, value) in writes {
+                let target = catalog
+                    .fields
+                    .iter()
+                    .find(|f| &f.path == path)
+                    .unwrap_or_else(|| panic!("{path} 不存在"));
+                assert!(
+                    target.choices.iter().any(|c| &c.value == value),
+                    "{path} 沒有選項 {value}"
+                );
+            }
+        }
+    }
+    // 預設設定對應到一個選項（不會一開始就顯示「自訂」）
+    let defaults = serde_json::to_value(Config::default()).unwrap();
+    for field in catalog.fields.iter().filter(|f| !f.also.is_empty()) {
+        assert!(field.chosen(&defaults).is_some(), "{}", field.path);
+    }
+}

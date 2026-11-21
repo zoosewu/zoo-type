@@ -155,12 +155,16 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
             bindings.append { [weak control] in set(control?.state == .on) }; body.addArrangedSubview(control)
         case "choice":
             let control = NSPopUpButton(); control.addItems(withTitles: field.choices.map { $0["label"] as? String ?? "" })
-            control.selectItem(at: field.choices.firstIndex { ($0["value"] as? NSObject)?.isEqual(current) == true } ?? 0)
+            // 全域設定：連同順便寫入的欄位比對；手動改過設定檔、都不符合時多一個「自訂」，選著它儲存時不動
+            let chosen = appIndex == nil ? model.chosen(field) : field.choices.firstIndex { ($0["value"] as? NSObject)?.isEqual(current) == true }
+            if appIndex == nil && chosen == nil { control.addItem(withTitle: "自訂") }
+            control.selectItem(at: chosen ?? (appIndex == nil ? field.choices.count : 0))
             control.target = self; control.action = #selector(changed(_:)); control.isEnabled = enabled
             control.widthAnchor.constraint(equalToConstant: 280).isActive = true
-            bindings.append { [weak control] in
-                guard let control, field.choices.indices.contains(control.indexOfSelectedItem) else { return }
-                set(field.choices[control.indexOfSelectedItem]["value"] ?? NSNull())
+            bindings.append { [weak self, weak control] in
+                guard let self, let control, field.choices.indices.contains(control.indexOfSelectedItem) else { return }
+                if appIndex == nil { self.model.choose(field, control.indexOfSelectedItem) }
+                else { set(field.choices[control.indexOfSelectedItem]["value"] ?? NSNull()) }
             }; row(title, control)
         case "color":
             let control = NSColorWell(); control.color = CandidateTheme.color(current as? String) ?? .white
@@ -213,7 +217,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
             note("灰色欄位的功能尚未在此平台提供；既有值會保留，與其他平台共用設定時不會被清除。")
         }
         var section = ""
-        for field in fields where !field.advanced {
+        for field in fields where !field.advanced && !field.hidden {
             // 被操作習慣鎖定的欄位不顯示，也不單獨帶出分區標題
             if isLocked(field) { continue }
             if field.section != section {
@@ -224,7 +228,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         }
         if fields.contains(where: { $0.advanced }) {
             body.addArrangedSubview(button(showAdvanced ? "▾ 進階" : "▸ 進階", #selector(toggleAdvanced(_:))))
-            if showAdvanced { for field in fields where field.advanced { render(field) } }
+            if showAdvanced { for field in fields where field.advanced && !field.hidden { render(field) } }
         }
         switch id {
         case "appearance": body.addArrangedSubview(preview); updatePreview()

@@ -1153,9 +1153,11 @@ fn no_backup_without_data() {
 
 // ---- M7：中英混打 ----
 
+/// 中英混打的測試設定：候選窗附上英文（預設關）打開
 fn no_auto_space() -> Config {
     let mut c = Config::default();
     c.mixed.auto_space = false;
+    c.mixed.english_candidate = true;
     c
 }
 
@@ -1473,7 +1475,7 @@ fn b_english_option_in_candidates() {
 
 #[test]
 fn b_english_option_keeps_previous_chinese() {
-    let mut h = Harness::new();
+    let mut h = Harness::with_config(no_auto_space());
     h.type_str("ji3 fu "); // 我 + 空白 + ㄑㄧ（七）
     let page = h.press(Key::Down, Mods::NONE).candidates.expect("候選窗");
     let n = page.items.len();
@@ -1487,7 +1489,7 @@ fn b_english_option_keeps_previous_chinese() {
 #[test]
 fn b_failed_syllable_does_not_leave_english_option() {
     // go = ㄕㄟ 沒有一聲，不會組成字；之後開「我」的候選窗不能出現 go，選了會把「我」刪掉
-    let mut h = Harness::new();
+    let mut h = Harness::with_config(no_auto_space());
     h.type_str("ji3go");
     assert!(h.press(Key::Space, Mods::NONE).bell, "組不成字要提示");
     assert_eq!(h.s.preedit().text, "我ㄕㄟ");

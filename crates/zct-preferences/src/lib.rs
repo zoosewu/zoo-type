@@ -11,7 +11,8 @@ pub use backend::{
     Action, Backend, Capabilities, DayView, EngineBackend, PhraseView, Reply, accuracy, edit_phrase,
 };
 pub use catalog::{
-    Catalog, Choice, Field, FieldKind, Lock, Page, Platform, Range, app_fields, catalog,
+    CUSTOM_CHOICE, Catalog, Choice, Field, FieldKind, Lock, Page, Platform, Range, app_fields,
+    catalog,
 };
 pub use store::{Document, SettingsStore, Snapshot, relocate_directory, validate};
 

@@ -27,7 +27,13 @@ struct PreferenceField {
     let section: String
     /// 數字欄位的範圍（儲存時共用層也會檢查）
     let range: (min: Int, max: Int)?
+    /// 設定畫面不顯示（只能改設定檔）
+    let hidden: Bool
+    /// 選了某個選項時順便寫入的其他欄位：選項值 → {欄位路徑: 值}
+    let also: [String: [String: Any]]
     init(_ value: [String: Any]) {
+        hidden = value["hidden"] as? Bool ?? false
+        also = value["also"] as? [String: [String: Any]] ?? [:]
         advanced = value["advanced"] as? Bool ?? false
         section = value["section"] as? String ?? ""
         if let r = value["range"] as? [String: Any], let min = r["min"] as? Int, let max = r["max"] as? Int {
@@ -81,6 +87,21 @@ final class PreferencesModel {
     func lockedValue(_ field: PreferenceField) -> Any? {
         guard let by = field.lockBy, let key = value(by) as? String else { return nil }
         return field.lockValues[key]
+    }
+    /// 目前的設定對應到哪一個選項（含順便寫入的欄位）；手動改過設定檔、都不符合時是 nil（顯示「自訂」）
+    func chosen(_ field: PreferenceField) -> Int? {
+        func same(_ a: Any?, _ b: Any?) -> Bool { (a as? NSObject)?.isEqual(b) == true }
+        return field.choices.firstIndex { choice in
+            guard same(choice["value"], value(field.path)) else { return false }
+            guard let key = choice["value"] as? String, let more = field.also[key] else { return true }
+            return more.allSatisfy { same($0.value, value($0.key)) }
+        }
+    }
+    /// 選了第 index 個選項：連同順便寫入的欄位；「自訂」（超出範圍）不動
+    func choose(_ field: PreferenceField, _ index: Int) {
+        guard field.choices.indices.contains(index), let selected = field.choices[index]["value"] else { return }
+        set(field.path, selected)
+        if let key = selected as? String { for (path, value) in field.also[key] ?? [:] { set(path, value) } }
     }
     func set(_ path: String, _ value: Any) {
         let keys = path.split(separator: ".").map(String.init)

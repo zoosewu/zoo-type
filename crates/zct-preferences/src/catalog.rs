@@ -50,6 +50,11 @@ pub struct Field {
     pub section: String,
     /// 數字欄位的範圍；儲存時檢查（見 [`crate::validate`]）
     pub range: Option<Range>,
+    /// 設定畫面不顯示（只能改設定檔；「全部設定」頁仍列出）
+    pub hidden: bool,
+    /// 選了某個選項時順便寫入的其他欄位：選項值 → {欄位路徑: 值}。
+    /// 目前的設定不符合任何一個選項（手動改過設定檔）時，畫面顯示「自訂」，儲存時不動這些欄位
+    pub also: BTreeMap<String, BTreeMap<String, Value>>,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Range {
@@ -64,7 +69,35 @@ pub struct Lock {
     /// 控制欄位的值 → 這個欄位固定的值；不在表裡的值不鎖定
     pub values: BTreeMap<String, Value>,
 }
+/// 「自訂」：目前的設定不符合任何選項時顯示
+pub const CUSTOM_CHOICE: &str = "自訂";
+
 impl Field {
+    /// 目前的設定對應到哪一個選項（含 [`Field::also`] 一併寫入的欄位）；手動改過、都不符合時是 None（顯示「自訂」）
+    pub fn chosen(&self, config: &Value) -> Option<usize> {
+        let value = path_value(config, &self.path);
+        self.choices.iter().position(|c| {
+            &c.value == value
+                && c.value.as_str().is_none_or(|key| {
+                    self.also
+                        .get(key)
+                        .is_none_or(|more| more.iter().all(|(p, v)| path_value(config, p) == v))
+                })
+        })
+    }
+
+    /// 選了第 `index` 個選項要寫入的（欄位, 值），包含順便寫入的欄位；「自訂」（超出範圍）是空的
+    pub fn writes(&self, index: usize) -> Vec<(String, Value)> {
+        let Some(choice) = self.choices.get(index) else {
+            return Vec::new();
+        };
+        let mut out = vec![(self.path.clone(), choice.value.clone())];
+        if let Some(more) = choice.value.as_str().and_then(|key| self.also.get(key)) {
+            out.extend(more.iter().map(|(p, v)| (p.clone(), v.clone())));
+        }
+        out
+    }
+
     /// 依目前的設定，這個欄位被鎖定成的值；沒有鎖定是 None
     pub fn locked_value(&self, config: &Value) -> Option<&Value> {
         let lock = self.lock.as_ref()?;
@@ -125,6 +158,8 @@ fn field(
         advanced: false,
         section: String::new(),
         range: None,
+        hidden: false,
+        also: BTreeMap::new(),
     }
 }
 /// 一般頁：（欄位, 分區, 說明）。進階的欄位不分區
@@ -156,7 +191,7 @@ const GENERAL: &[(&str, &str, &str)] = &[
     (
         "mixed.english",
         "中英混打",
-        "中文優先：句首或空白後打單字表裡的英文再按空白，才當作英文（hello、repo）。英文優先：組不成注音就轉成英文（lo → love），之後的按鍵都是字元本身，空白結束這個單字。用 Shift 打過的英文會記住。",
+        "中文優先：句首或空白後打單字表裡的英文再按空白，才當作英文（hello、repo）；組字區顯示注音。英文優先：組不成注音就轉成英文（lo → love），之後的按鍵都是字元本身，空白結束這個單字；組字區顯示按下的字母，注音在旁邊的小視窗。用 Shift 打過的英文會記住。",
     ),
     (
         "mixed.english_candidate",
@@ -171,7 +206,7 @@ const GENERAL: &[(&str, &str, &str)] = &[
     (
         "mixed.typing",
         "中英混打",
-        "注音還沒打完時的顯示。字母：組字區顯示按下的字母（我 lov），注音顯示在旁邊的小視窗，打完就消失。",
+        "注音還沒打完時，組字區顯示注音或按下的字母。",
     ),
     (
         "input.output",
@@ -215,6 +250,18 @@ const RANGES: &[(&str, i64, i64, i64)] = &[
     ("theme.font_size", 8, 48, 1),
     ("sync.interval_minutes", 1, 1440, 1),
     ("ai.timeout_seconds", 1, 120, 1),
+];
+
+fn path_value<'a>(config: &'a Value, path: &str) -> &'a Value {
+    path.split('.').fold(config, |v, key| &v[key])
+}
+
+/// 設定畫面不顯示的欄位（只能改設定檔）
+const HIDDEN: &[&str] = &[
+    // 由「英文單字判斷」決定（見 also）
+    "mixed.typing",
+    "mixed.english_candidate",
+    "mixed.auto_space",
 ];
 
 pub fn catalog(platform: Platform) -> Catalog {
@@ -515,6 +562,16 @@ pub fn catalog(platform: Platform) -> Catalog {
         {
             field.section = (*section).into();
             field.help = help.replace("右 Alt", right_alt);
+        }
+        field.hidden = HIDDEN.contains(&field.path.as_str());
+        if field.path == "mixed.english" {
+            // 中文優先（與關）組字區顯示注音；英文優先顯示按下的字母、注音在旁邊的小視窗
+            let typing = |v: &str| BTreeMap::from([("mixed.typing".to_string(), json!(v))]);
+            field.also = BTreeMap::from([
+                ("off".to_string(), typing("bopomofo")),
+                ("chinese_first".to_string(), typing("bopomofo")),
+                ("english_first".to_string(), typing("keys")),
+            ]);
         }
         if let Some(&(_, min, max, step)) = RANGES.iter().find(|(p, ..)| *p == field.path) {
             field.range = Some(Range { min, max, step });

@@ -275,29 +275,19 @@ impl Default for UpdateConfig {
 }
 
 /// 中英混打（需求 4.5：B + C + E）
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// 設定畫面只有「英文單字判斷」，同時決定 `typing`（見設定目錄的 `also`）；其他只能改設定檔
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(from = "MixedFile")]
 pub struct MixedConfig {
     /// C：中文模式下打的英文單字怎麼判斷
     pub english: EnglishWords,
-    /// B：剛完成的音節按鍵也是英文單字時，候選窗附上英文
+    /// B：剛完成的音節按鍵也是英文單字時，候選窗附上英文（預設關，使用者決定 2026-11-21）
     pub english_candidate: bool,
-    /// E：中英文之間自動加空格（盤古之白）
+    /// E：中英文之間自動加空格（盤古之白）；空白由使用者自己輸入（使用者回饋），預設關
     pub auto_space: bool,
     /// 打字中（注音還沒完成）組字區與小視窗顯示什麼
     pub typing: TypingDisplay,
-}
-
-impl Default for MixedConfig {
-    fn default() -> Self {
-        MixedConfig {
-            english: EnglishWords::default(),
-            english_candidate: true,
-            // 空白由使用者自己輸入（使用者回饋）
-            auto_space: false,
-            typing: TypingDisplay::default(),
-        }
-    }
 }
 
 /// 檔案中的 `[mixed]`：0.1.4 以前的 `auto_english = false` 轉成「關」

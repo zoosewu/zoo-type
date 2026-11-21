@@ -503,6 +503,10 @@ fn field_row(
     // 被操作習慣鎖定：顯示固定值、不能編輯
     let value = locked.unwrap_or(value);
     let range = field.range.filter(|_| field.integer);
+    let chosen = match field.kind {
+        FieldKind::Choice if locked.is_none() => field.chosen(values),
+        _ => field.choices.iter().position(|c| &c.value == value),
+    };
     SharedField {
         path: field.path.clone().into(),
         label: field.label.clone().into(),
@@ -520,18 +524,20 @@ fn field_row(
             .unwrap_or_else(|| value.to_string())
             .into(),
         checked: value.as_bool().unwrap_or(false),
+        // 目前的設定不符合任何選項（手動改過設定檔）：多一個「自訂」，選著它儲存時不動
         options: ModelRc::new(VecModel::from(
             field
                 .choices
                 .iter()
                 .map(|c| SharedString::from(&c.label))
+                .chain(
+                    chosen
+                        .is_none()
+                        .then(|| zct_preferences::CUSTOM_CHOICE.into()),
+                )
                 .collect::<Vec<_>>(),
         )),
-        selected: field
-            .choices
-            .iter()
-            .position(|c| &c.value == value)
-            .unwrap_or(0) as i32,
+        selected: chosen.unwrap_or(field.choices.len()) as i32,
         number: value.as_i64().unwrap_or_default() as i32,
         minimum: range.map_or(0, |r| r.min as i32),
         maximum: range.map_or(0, |r| r.max as i32),
@@ -577,7 +583,7 @@ fn general_fields(config: &Config, advanced: bool) -> Vec<SharedField> {
     let fields = catalog
         .fields
         .iter()
-        .filter(|f| f.page == "general" && f.locked_value(&values).is_none());
+        .filter(|f| f.page == "general" && !f.hidden && f.locked_value(&values).is_none());
     let mut rows = Vec::new();
     let mut section = "";
     for field in fields.clone().filter(|f| !f.advanced) {
@@ -619,14 +625,16 @@ fn apply_rows(config: &Config, rows: &ModelRc<SharedField>) -> Result<Config, St
             .iter()
             .find(|f| f.path == row.path.as_str())
             .ok_or("設定欄位定義不一致")?;
+        if field.kind == FieldKind::Choice {
+            // 選項連同順便寫入的欄位；「自訂」不動
+            for (path, value) in field.writes(row.selected as usize) {
+                let keys: Vec<_> = path.split('.').collect();
+                json[keys[0]][keys[1]] = value;
+            }
+            continue;
+        }
         let value = match field.kind {
             FieldKind::Bool => serde_json::Value::Bool(row.checked),
-            FieldKind::Choice => field
-                .choices
-                .get(row.selected as usize)
-                .ok_or("選項不存在")?
-                .value
-                .clone(),
             FieldKind::Number if row.kind == 3 => serde_json::Value::from(row.number),
             FieldKind::Number | FieldKind::Json => serde_json::from_str(row.value.as_str())
                 .map_err(|e| format!("{}：{e}", field.label))?,
@@ -1371,6 +1379,39 @@ mod tests {
     }
 
     #[test]
+    fn english_choice_also_sets_typing_and_shows_custom_for_hand_edits() {
+        let field = |config: &Config| {
+            general_fields(config, false)
+                .into_iter()
+                .find(|r| r.path == "mixed.english")
+                .unwrap()
+        };
+        let mut config = Config::default();
+        assert_eq!(field(&config).selected, 1, "中文優先");
+        assert!(
+            general_fields(&config, true).iter().all(|r| ![
+                "mixed.typing",
+                "mixed.english_candidate",
+                "mixed.auto_space"
+            ]
+            .contains(&r.path.as_str())),
+            "這三項不在設定畫面"
+        );
+        // 選英文優先：同時寫入組字區顯示字母
+        let mut row = field(&config);
+        row.selected = 2;
+        let saved = apply_rows(&config, &rows(vec![row])).unwrap();
+        assert_eq!(saved.mixed.english, EnglishWords::EnglishFirst);
+        assert_eq!(saved.mixed.typing, TypingDisplay::Keys);
+        // 手動改成中文優先＋字母：顯示「自訂」，儲存時兩個欄位都不動
+        config.mixed.typing = TypingDisplay::KeysAndChars;
+        let row = field(&config);
+        assert_eq!(row.selected, 3);
+        assert_eq!(row.options.row_data(3).unwrap(), "自訂");
+        assert_eq!(apply_rows(&config, &rows(vec![row])).unwrap(), config);
+    }
+
+    #[test]
     fn general_page_follows_the_catalog_sections_and_advanced() {
         let config = Config::default();
         let basic = general_fields(&config, false);
@@ -1404,7 +1445,7 @@ mod tests {
         c.candidates.per_page = 7;
         c.detect.fullscreen = false;
         c.mixed.english = EnglishWords::EnglishFirst;
-        c.mixed.typing = TypingDisplay::KeysAndChars;
+        c.mixed.typing = TypingDisplay::Keys;
         c.hotkeys.output = Binding(Some("ctrl+alt+s".parse().unwrap()));
         c.hotkeys.pin = Binding(None);
         c.theme.layout = Layout::Horizontal;
@@ -1664,7 +1705,7 @@ mod ui_tests {
 mod general_page_ui {
     use super::*;
     use i_slint_backend_testing::ElementQuery;
-    use zct_core::config::EnglishWords;
+    use zct_core::config::{EnglishWords, TypingDisplay};
 
     /// 在一般頁點選單選值（事件裡會重新產生列表），存檔要寫進設定
     #[test]
@@ -1701,5 +1742,10 @@ mod general_page_ui {
             .mock_single_click(slint::platform::PointerEventButton::Left);
         let saved = collect_primary_settings(&ui, &config.borrow()).unwrap();
         assert_eq!(saved.mixed.english, EnglishWords::EnglishFirst);
+        assert_eq!(
+            saved.mixed.typing,
+            TypingDisplay::Keys,
+            "英文優先：組字區顯示字母"
+        );
     }
 }
