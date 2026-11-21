@@ -2885,3 +2885,19 @@ fn english_first_with_keys_shown_types_hello_after_chinese() {
     h.type_str("su3cl3 hello ");
     assert_eq!(h.s.preedit().text, "你好 hello ");
 }
+
+#[test]
+fn tone_turns_preceding_single_sounds_into_bopomofo() {
+    // ㄐ醫恩 + ˇ → ㄐㄧㄣˇ：游標前連續的單音（注音符號、讀音只有一個注音的字）換回注音
+    let mut h = Harness::new();
+    h.type_str("ji3u p "); // 我 + ㄧ一聲的字 + ㄣ一聲的字
+    let before = h.s.preedit().text;
+    assert_eq!(before.chars().count(), 3, "{before}");
+    h.press(Key::Char(b'3'), Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我ㄧㄣˇ", "「我」不是單音，不換");
+    // 前面不是單音：只加上聲調符號
+    let mut h = Harness::new();
+    h.type_str("ji3"); // 我
+    h.press(Key::Char(b'4'), Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我ˋ");
+}

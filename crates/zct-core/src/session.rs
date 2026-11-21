@@ -1233,6 +1233,29 @@ impl Session {
     }
 
     /// 組字區每個字的讀音（英文、符號是 None）
+    /// 游標前連續的「單音」：注音符號本身，或讀音只有一個注音符號的字（醫＝ㄧ、恩＝ㄣ），依序回傳注音
+    fn single_sounds_before_cursor(&self) -> String {
+        let is_bopomofo = |c: char| ('\u{3105}'..='\u{3129}').contains(&c);
+        let single = |s: &str| {
+            let mut chars = s.chars();
+            chars
+                .next()
+                .filter(|&c| is_bopomofo(c) && chars.next().is_none())
+        };
+        let symbols = self.editor.symbols();
+        let mut sounds: Vec<char> = (0..self.editor.cursor())
+            .rev()
+            .map_while(|i| {
+                let sym = &symbols[i];
+                sym.to_char()
+                    .and_then(|c| single(c.as_ref()))
+                    .or_else(|| sym.to_syllable().and_then(|s| single(&s.to_string())))
+            })
+            .collect();
+        sounds.reverse();
+        sounds.into_iter().collect()
+    }
+
     pub fn syllables(&self) -> Vec<Option<String>> {
         self.editor
             .symbols()
@@ -1738,7 +1761,12 @@ impl Session {
                 if self.editor.is_empty() {
                     self.join(&mut commit, tone);
                 } else {
-                    self.insert_latin(tone);
+                    // 游標前連續的單音換回注音，接上聲調：ㄐ醫恩 + ˇ → ㄐㄧㄣˇ
+                    let sounds = self.single_sounds_before_cursor();
+                    for _ in 0..sounds.chars().count() {
+                        self.chewing_key(Key::Backspace);
+                    }
+                    self.insert_latin(&format!("{sounds}{tone}"));
                 }
                 r.eaten = true;
             } else if let Some(notice) = self.learning_key(ev) {
