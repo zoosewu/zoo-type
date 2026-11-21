@@ -1222,10 +1222,7 @@ fn invalid_syllable_stays_with_bell() {
     // 換一個聲調就直接取代
     h.press(Key::Char(b'4'), Mods::NONE);
     assert_eq!(h.s.preedit().text, "ㄍㄧˋ");
-    // Backspace 退掉聲調，再退兩鍵清空後照常打字
-    h.press(Key::Backspace, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "ㄍㄧ");
-    h.press(Key::Backspace, Mods::NONE);
+    // 還沒完成：Backspace 整個清掉，之後照常打字
     h.press(Key::Backspace, Mods::NONE);
     assert_eq!(h.s.preedit().text, "");
     let r = h.press(Key::Char(b'j'), Mods::NONE); // ㄨ
@@ -1252,48 +1249,46 @@ fn backspace_discards_only_the_syllable_rejected_by_space() {
     assert_eq!(rejected.preedit.text, "你ㄑㄧㄜ");
     assert_eq!(h.press(Key::Backspace, Mods::NONE).preedit.text, "你");
     h.type_str("fu");
-    assert_eq!(h.press(Key::Backspace, Mods::NONE).preedit.text, "你ㄑ");
+    assert_eq!(h.press(Key::Backspace, Mods::NONE).preedit.text, "你");
 }
 
 #[test]
-fn backspace_removes_last_key_of_half_typed_syllable() {
-    // 相ㄑㄧㄣ：Backspace 一次退一個按鍵
+fn backspace_clears_half_typed_syllable() {
+    // 相ㄑㄧㄣ：還沒完成的注音 Backspace 整個清掉；完成的字一次刪一個
     let mut h = Harness::new();
     h.type_str("vu; ");
     let first = h.s.preedit().text;
     h.type_str("fup");
     assert_eq!(h.s.preedit().text, format!("{first}ㄑㄧㄣ"));
-    for want in ["ㄑㄧ", "ㄑ", ""] {
-        let r = h.press(Key::Backspace, Mods::NONE);
-        assert!(r.eaten);
-        assert_eq!(h.s.preedit().text, format!("{first}{want}"));
-    }
-    // 沒有注音時 Backspace 照常刪前一個字
+    let r = h.press(Key::Backspace, Mods::NONE);
+    assert!(r.eaten);
+    assert_eq!(h.s.preedit().text, first);
     h.press(Key::Backspace, Mods::NONE);
     assert_eq!(h.s.preedit().text, "");
 }
 
 #[test]
-fn backspace_fixes_typo_in_english_word_before_space() {
-    // 打錯一個字母：退一鍵、補打，按空白照樣變英文
-    for (typo, fix, want) in [("lovw", "e ", "我 love "), ("hellp", "o ", "我 hello ")] {
+fn backspace_clears_unfinished_english_word() {
+    // 還沒按空白的單字（中文優先時是按鍵）：Backspace 整個清掉，重打按空白照樣變英文
+    for typo in ["lovw", "hellp"] {
         let mut h = Harness::new();
         english_commit(&mut h, "ji3 ");
         english_commit(&mut h, typo);
         h.press(Key::Backspace, Mods::NONE);
-        english_commit(&mut h, fix);
-        assert_eq!(h.s.preedit().text, want, "{typo}");
+        assert_eq!(h.s.preedit().text, "我 ", "{typo}");
+        english_commit(&mut h, "love ");
+        assert_eq!(h.s.preedit().text, "我 love ", "{typo}");
     }
 }
 
 #[test]
-fn backspace_undoes_replaced_final_key_by_key() {
-    // 大千重打韻母會取代：ㄠ（l）再按 o 變 ㄟ；退一鍵回到 ㄠ
+fn backspace_clears_replaced_final() {
+    // 大千重打韻母會取代：ㄠ（l）再按 o 變 ㄟ；還沒完成，Backspace 整個清掉
     let mut h = Harness::new();
     h.type_str("lo");
     assert_eq!(h.s.preedit().text, "ㄟ");
     h.press(Key::Backspace, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "ㄠ");
+    assert_eq!(h.s.preedit().text, "");
 }
 
 #[test]
@@ -1333,14 +1328,15 @@ fn left_skips_whole_english_word() {
 }
 
 #[test]
-fn backspace_deletes_space_then_whole_word() {
+fn backspace_on_finished_word_deletes_one_char() {
+    // 按過空白的單字：Backspace 一次刪一個字元
     let mut h = Harness::new();
     english_commit(&mut h, "ji3 love ");
     assert_eq!(h.s.preedit().text, "我 love ");
     h.press(Key::Backspace, Mods::NONE);
     assert_eq!(h.s.preedit().text, "我 love");
     h.press(Key::Backspace, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "我 ");
+    assert_eq!(h.s.preedit().text, "我 lov");
 }
 
 #[test]
@@ -1355,14 +1351,14 @@ fn backspace_on_unfinished_word_deletes_one_letter() {
 }
 
 #[test]
-fn delete_removes_whole_word_before_cursor() {
+fn delete_on_finished_word_deletes_one_char() {
     let mut h = Harness::new();
     english_commit(&mut h, "ji3 love su3");
     h.press(Key::Home, Mods::NONE);
     h.press(Key::Right, Mods::NONE); // 我|
     h.press(Key::Right, Mods::NONE); // 空白|
     h.press(Key::Delete, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "我  你");
+    assert_eq!(h.s.preedit().text, "我 ove 你");
 }
 
 #[test]
@@ -2478,16 +2474,16 @@ fn t0_keeps_what_the_user_picked_and_pinned() {
     assert_eq!(candidates_for_qi(&mut h)[0], "汽");
 }
 
-/// 「我 love 你」各游標位置按一次 Backspace / Delete：單字整個刪，旁邊的空白先刪
+/// 「我 love 你」各游標位置按一次 Backspace / Delete：完成的單字一次一個字元
 #[test]
 fn word_delete_at_every_cursor_position() {
     let cases = [
         (Key::Backspace, 2, "我love 你"),
         (Key::Backspace, 4, "我 lve 你"),
-        (Key::Backspace, 6, "我  你"),
+        (Key::Backspace, 6, "我 lov 你"),
         (Key::Backspace, 7, "我 love你"),
         (Key::Delete, 1, "我love 你"),
-        (Key::Delete, 2, "我  你"),
+        (Key::Delete, 2, "我 ove 你"),
         (Key::Delete, 4, "我 loe 你"),
         (Key::Delete, 6, "我 love你"),
     ];
@@ -2504,7 +2500,7 @@ fn word_delete_at_every_cursor_position() {
 }
 
 #[test]
-fn delete_removes_space_then_whole_word() {
+fn delete_removes_one_char_at_a_time() {
     let mut h = Harness::new();
     english_commit(&mut h, "ji3 love su3");
     h.press(Key::Home, Mods::NONE);
@@ -2512,18 +2508,18 @@ fn delete_removes_space_then_whole_word() {
     h.press(Key::Delete, Mods::NONE);
     assert_eq!(h.s.preedit().text, "我love 你");
     h.press(Key::Delete, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "我 你");
+    assert_eq!(h.s.preedit().text, "我ove 你");
 }
 
 #[test]
-fn backspace_right_after_word_in_middle_deletes_whole_word() {
+fn backspace_right_after_finished_word_in_middle_deletes_one_char() {
     // 從最後往左跳到 love 後面再 Backspace
     let mut h = Harness::new();
     english_commit(&mut h, "ji3 love su3");
     h.press(Key::Left, Mods::NONE); // |你
     h.press(Key::Left, ctrl()); // love|
     h.press(Key::Backspace, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "我  你");
+    assert_eq!(h.s.preedit().text, "我 lov 你");
 }
 
 fn select_config(
@@ -2705,13 +2701,13 @@ fn show_keys_puts_letters_in_preedit_and_bopomofo_in_popup() {
 }
 
 #[test]
-fn show_keys_backspace_removes_one_letter() {
+fn show_keys_backspace_clears_unfinished_word() {
     let mut h = Harness::with_config(show_keys_config(false));
-    english_commit(&mut h, "lovw");
-    assert_eq!(h.s.preedit().text, "lovw");
+    english_commit(&mut h, "ji3 lovw");
+    assert_eq!(h.s.preedit().text, "我 lovw");
     h.press(Key::Backspace, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "lov");
-    assert_eq!(h.s.preedit().cursor, 3);
+    assert_eq!(h.s.preedit().text, "我 ");
+    assert!(h.s.candidates().is_none(), "小視窗也消失");
 }
 
 #[test]
@@ -2792,22 +2788,42 @@ fn english_first_switches_on_invalid_bopomofo() {
 }
 
 #[test]
-fn english_first_backspace_removes_one_char_while_typing() {
+fn english_first_backspace_clears_unfinished_word() {
     let mut h = english_first();
-    h.type_str("lov");
+    h.type_str("su3 lov");
+    assert_eq!(h.s.preedit().text, "你 lov");
     h.press(Key::Backspace, Mods::NONE);
-    assert_eq!(h.s.preedit().text, "lo");
-    h.type_str("ve ");
-    assert_eq!(h.s.preedit().text, "love ");
+    assert_eq!(h.s.preedit().text, "你 ", "還沒按空白：整個刪");
+    h.type_str("love ");
+    assert_eq!(h.s.preedit().text, "你 love ");
+    h.press(Key::Backspace, Mods::NONE);
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "你 lov", "按過空白：一次一個字元");
 
-    // 單字整個退掉後回到注音
+    // 整個刪掉後回到注音
     let mut h = english_first();
     h.type_str("lo");
-    h.press(Key::Backspace, Mods::NONE);
     h.press(Key::Backspace, Mods::NONE);
     assert_eq!(h.s.preedit().text, "");
     h.type_str("su3");
     assert_eq!(h.s.preedit().text, "你");
+}
+
+#[test]
+fn shift_english_backspace_clears_unfinished_word() {
+    // 組字中 Shift 切英文打的單字：還沒按空白時整個刪；移動過游標就是完成的字
+    let mut h = Harness::new();
+    h.type_str("ji3");
+    h.tap_shift();
+    h.type_str(" zctq");
+    assert_eq!(h.s.preedit().text, "我 zctq");
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我 ");
+    h.type_str("zctq");
+    h.press(Key::Left, Mods::NONE);
+    h.press(Key::End, Mods::NONE);
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "我 zct");
 }
 
 #[test]

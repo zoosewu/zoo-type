@@ -345,7 +345,6 @@ pub struct Session {
     mixed: MixedConfig,
     /// 目前這個音節的原始按鍵（中英混打判斷用）
     raw: String,
-    rejected_first_tone: bool,
     /// 目前這段按鍵的位置可能是英文：組字開頭，或緊接在空白之後（「我 love」可以，「我love」不行）
     raw_english_ok: bool,
     /// 英文優先：組不成注音而轉成英文的單字還在打（按鍵都是字元本身，空白結束）
@@ -374,8 +373,6 @@ pub struct Session {
     picks: Vec<Pick>,
     /// 候選清單（選字中）：詞與單字合併成同一份，由 ZCT 自己翻頁與選擇
     menu: Option<Menu>,
-    /// 剛用 Backspace / Delete 刪掉英文單字旁邊的空白：同一個鍵再按一次刪整個單字
-    word_armed: Option<Key>,
     /// 按了 `，等下一個鍵換成那個鍵帽上的符號
     symbol_prefix: bool,
 }
@@ -421,7 +418,6 @@ impl Session {
             select_rear: false,
             mixed: opts.config.mixed.clone(),
             raw: String::new(),
-            rejected_first_tone: false,
             raw_english_ok: false,
             english_word: false,
             english_alt: None,
@@ -438,7 +434,6 @@ impl Session {
             shift_words: Vec::new(),
             picks: Vec::new(),
             menu: None,
-            word_armed: None,
             symbol_prefix: false,
         })
     }
@@ -867,7 +862,7 @@ impl Session {
     }
 
     /// 英文優先轉出的單字打到一半：字母、數字、`, . / ; -`、聲調鍵都是字元本身；
-    /// 空白結束這個單字，Backspace 退一個字元，其他鍵結束單字後照常處理（回傳 false）
+    /// 空白結束這個單字，Backspace 整個刪掉，其他鍵結束單字後照常處理（回傳 false）
     fn english_word_key(&mut self, ev: &KeyEvent) -> bool {
         if !self.english_word {
             return false;
@@ -901,13 +896,8 @@ impl Session {
                 self.english_word = false;
             }
             Key::Backspace => {
-                self.chewing_key(Key::Backspace);
-                let c = self.editor.cursor();
-                let in_word = c > 0
-                    && self.editor.symbols()[c - 1]
-                        .to_char()
-                        .is_some_and(|s| s.len() == 1 && s.as_bytes()[0].is_ascii_graphic());
-                self.english_word = in_word;
+                self.delete_word_before_cursor();
+                self.english_word = false;
             }
             _ => {
                 self.english_word = false;
@@ -1116,10 +1106,9 @@ impl Session {
     }
 
     /// 組字區中英文單字、中文詞都當成一個單位：← → 跳過整個單字 / 詞（Ctrl + ← / → 逐字移動）；
-    /// Backspace / Delete 刪整個英文單字（旁邊有空白時先刪空白），中文仍然一次刪一個字。
-    /// 只有還在打的單字（在組字區最後、游標緊接在後）Backspace 一次刪一個字母。
+    /// 組字區的英文單字：← → 整個跳過，Ctrl + ← → 逐字。
+    /// Backspace / Delete 照 chewing 一次刪一個字元（還沒按空白的字另外處理，見 `clear_syllable`）
     fn word_key(&mut self, ev: &KeyEvent) -> bool {
-        let armed = self.word_armed.take() == Some(ev.key);
         if ev.mods.shift
             || self.editor.is_selecting()
             || self.editor.entering_syllable()
@@ -1132,30 +1121,12 @@ impl Session {
             return true;
         }
         let c = self.editor.cursor();
-        let len = self.editor.len();
-        let word_end = c > 0 && self.sym_letter(c - 1) && !self.sym_letter(c);
-        let word_start = self.sym_letter(c) && (c == 0 || !self.sym_letter(c - 1));
         let (key, times) = match ev.key {
             Key::Left if c > 0 && self.sym_letter(c - 1) => (Key::Left, self.letters_before(c)),
             Key::Right if self.sym_letter(c) => (Key::Right, self.letters_after(c)),
             Key::Left if self.phrase_before(c) > 1 => (Key::Left, self.phrase_before(c)),
             Key::Right if self.phrase_after(c) > 1 => (Key::Right, self.phrase_after(c)),
-            // 單字後面的空白：第一次刪空白，並記下來
-            Key::Backspace if c >= 2 && self.sym_space(c - 1) && self.sym_letter(c - 2) => {
-                self.word_armed = Some(Key::Backspace);
-                (Key::Backspace, 1)
-            }
-            // 剛刪過空白，或游標在完整單字（後面還有字）的尾端：刪整個單字
-            Key::Backspace if word_end && (armed || c < len) => {
-                (Key::Backspace, self.letters_before(c))
-            }
-            // 單字前面的空白：第一次刪空白，並記下來
-            Key::Delete if self.sym_space(c) && self.sym_letter(c + 1) => {
-                self.word_armed = Some(Key::Delete);
-                (Key::Delete, 1)
-            }
-            // 游標在單字開頭：Delete 刪整個單字
-            Key::Delete if word_start => (Key::Delete, self.letters_after(c)),
+            // 完成（按過空白）的單字：Backspace / Delete 照 chewing 一次一個字元
             _ => return false,
         };
         for _ in 0..times {
@@ -1526,29 +1497,25 @@ impl Session {
         false
     }
 
-    /// 打到一半的音節按 Backspace：退掉最後一個按鍵，剩下的按鍵重新組一次注音
-    ///
-    /// 照按鍵退（不是照畫面上的注音符號）：原始按鍵和畫面保持一致，補打完按空白一樣能判斷英文；
-    /// 大千重打韻母會取代前一個（`lo` 畫面是 ㄟ），退一鍵就回到 ㄠ。
-    /// 最後是聲調（組不成字、保留著聲調）時，連續的聲調一次退掉。
-    fn backspace_syllable_key(&mut self) {
+    /// 還沒按空白的字（注音、顯示成字母的按鍵）按 Backspace：整個清掉（使用者規格：以空白判斷輸入完成）
+    fn clear_syllable(&mut self) {
         self.english_alt = None;
-        let tone = self
-            .raw
-            .ends_with(|c: char| c.is_ascii() && is_tone(c as u8));
-        if tone {
-            while self
-                .raw
-                .ends_with(|c: char| c.is_ascii() && is_tone(c as u8))
-            {
-                self.raw.pop();
-            }
-        } else {
-            self.raw.pop();
-        }
+        self.raw.clear();
         self.editor.cancel_entering_syllable();
-        for b in self.raw.bytes() {
-            self.editor.process_keyevent(ascii_event(b));
+    }
+
+    /// 游標前還沒完成的英文單字（連續的非空白字元）整個刪掉
+    fn delete_word_before_cursor(&mut self) {
+        loop {
+            let c = self.editor.cursor();
+            let in_word = c > 0
+                && self.editor.symbols()[c - 1]
+                    .to_char()
+                    .is_some_and(|s| s.len() == 1 && s.as_bytes()[0].is_ascii_graphic());
+            if !in_word {
+                break;
+            }
+            self.chewing_key(Key::Backspace);
         }
     }
 
@@ -1621,23 +1588,41 @@ impl Session {
             {
                 self.learn_corrections();
             }
-            // 正在打的注音：Backspace 退掉最後一個按鍵（「相ㄑㄧㄣ」→「相ㄑㄧ」）；
+            // 正在打的注音（還沒按空白）：Backspace 整個清掉（「相ㄑㄧㄣ」→「相」）；
             // Enter 連同注音符號一起送出（「我ㄍㄟ」→「我ㄍㄟ」）
             let pending_syllable = !ev.mods.has_command_modifier()
                 && self.emoji.is_none()
                 && self.ai_suggestion().is_none()
                 && self.editor.entering_syllable()
                 && !self.editor.is_selecting();
-            let rejected_first_tone = std::mem::take(&mut self.rejected_first_tone);
             if pending_syllable && ev.key == Key::Backspace {
-                if rejected_first_tone {
-                    self.editor.cancel_entering_syllable();
-                    self.raw.clear();
-                    self.english_alt = None;
-                } else {
-                    self.backspace_syllable_key();
-                }
+                self.clear_syllable();
                 return self.finish(r, commit);
+            }
+            // 英文模式組字中、還沒按空白的單字：Backspace 整個刪掉；移動游標或 Delete 就算完成
+            if self.mode == InputMode::English
+                && !ev.released
+                && !ev.mods.has_command_modifier()
+                && !self.editor.is_selecting()
+            {
+                match ev.key {
+                    Key::Backspace
+                        if !ev.mods.shift
+                            && !self.latin_word.is_empty()
+                            && self.letters_before(self.editor.cursor())
+                                >= self.latin_word.len() =>
+                    {
+                        for _ in 0..self.latin_word.len() {
+                            self.chewing_key(Key::Backspace);
+                        }
+                        self.latin_word.clear();
+                        return self.finish(r, commit);
+                    }
+                    Key::Left | Key::Right | Key::Home | Key::End | Key::Delete => {
+                        self.end_latin_word()
+                    }
+                    _ => {}
+                }
             }
             if pending_syllable && ev.key == Key::Enter && !ev.mods.shift {
                 // chewing 的 Enter 先把注音變成組字區裡的符號，下面再照常送出整句
@@ -1805,7 +1790,6 @@ impl Session {
                                 return self.finish(r, commit);
                             }
                             // 原始按鍵維持和畫面上的注音一致（聲調鍵也留著）
-                            self.rejected_first_tone = key == Key::Space;
                             self.raw = raw_before;
                             if let Key::Char(c) = key {
                                 self.raw.push(c as char);
@@ -2344,7 +2328,6 @@ impl Session {
 
     /// 送出目前所有組字內容（失焦、切換中英時使用）；回傳的是 chewing 原始（繁體）文字
     pub fn flush(&mut self) -> String {
-        self.rejected_first_tone = false;
         if self.editor.is_selecting() {
             let _ = self.editor.cancel_selecting();
         }
@@ -2366,7 +2349,6 @@ impl Session {
 
     /// 丟棄組字內容與 Shift 狀態（App 中止組字時）
     pub fn reset(&mut self) {
-        self.rejected_first_tone = false;
         self.english_word = false;
         self.editor.clear();
         self.shift.reset();
@@ -2379,7 +2361,6 @@ impl Session {
         self.reconvert_original = None;
         self.ai = None;
         self.extras_page = false;
-        self.word_armed = None;
         self.latin_word.clear();
         self.shift_words.clear();
         self.picks.clear();

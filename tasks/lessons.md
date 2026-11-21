@@ -129,3 +129,8 @@
 - 現象：改完程式跑過 `cargo fmt`，之後又補了測試沒再格式化就 commit，CI 的格式檢查失敗；後面幾次推送又把舊的 CI 取消，問題晚了好幾個 commit 才發現
 - 規則：每次 commit 前依序跑 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`（開發版 features 也跑一次）、`cargo test --workspace --locked`
 - 刪掉或改名 Rust／Swift 的函式時，`grep` 整個 `macos/Sources`（含 self-test、UIPreview）找呼叫的地方；Swift 只有 CI 會編譯
+
+## Backspace 規則記反了（2026-11-21）
+- 使用者原話：「在輸入英文或是輸入注音的過程中，按下 bs 移除整個 wording，但是一旦輸入完成之後 bs 只會移除一個 char」，以空白判斷完成
+- 我卻記成相反（打字中一次退一鍵、完成後整個刪），之後的實作、測試、README、todo 都跟著錯；使用者以為功能「又不見了」
+- 規則：把使用者的規格寫進 todo 時，直接引用原話並附上「打字中／完成後」各一個例子；討論中我改寫的版本要給使用者確認，不要用我的摘要當規格

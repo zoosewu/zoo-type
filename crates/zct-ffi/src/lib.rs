@@ -1184,10 +1184,9 @@ detect = false
             "lo,./;-3467 "
         );
         let mut deletion = AcceptanceKeys::new(config);
+        // 還沒按空白的單字：Backspace 整個刪
         deletion.type_codes(&[37, 31, 9, 14]);
-        for expected in ["lov", "lo", "l", ""] {
-            assert_eq!(deletion.press(51).preedit, expected);
-        }
+        assert_eq!(deletion.press(51).preedit, "");
         assert_eq!(deletion.type_codes(&[1, 32, 20]).preedit, "你");
     }
 
