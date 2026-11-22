@@ -452,8 +452,13 @@ impl TextService_Impl {
     /// 輸入法圖示的點擊與選單
     fn on_action(&self, action: Action) {
         let command = match action {
-            Action::ToggleMode => {
-                if let Some(Response::Key(r)) = self.call(&Request::ToggleMode) {
+            Action::ToggleMode | Action::ToggleOutput => {
+                let request = if action == Action::ToggleMode {
+                    Request::ToggleMode
+                } else {
+                    Request::ToggleOutput
+                };
+                if let Some(Response::Key(r)) = self.call(&request) {
                     // 組字中切換：送出組字內容需要目前文件的 context
                     let ctx = self
                         .tsf

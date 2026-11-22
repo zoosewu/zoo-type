@@ -20,10 +20,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows::Win32::UI::TextServices::*;
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconIndirect, CreatePopupMenu, DestroyMenu, GetForegroundWindow,
-    GetSystemMetrics, HICON, ICONINFO, MF_CHECKED, MF_SEPARATOR, MF_STRING, SM_CXSMICON,
+    GetSystemMetrics, HICON, ICONINFO, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, SM_CXSMICON,
     TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
 };
 use windows::core::{BSTR, GUID, IUnknown, Interface, PCWSTR, Ref, Result, implement, w};
+
+use zct_core::menu::{self, MenuAction, MenuItem, MenuState};
 
 use crate::{CLSID_ZCT, guard};
 
@@ -31,6 +33,7 @@ use crate::{CLSID_ZCT, guard};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     ToggleMode,
+    ToggleOutput,
     OpenSettings,
     ToggleGame,
     Restart,
@@ -38,11 +41,6 @@ pub enum Action {
     Refresh,
     InstallUpdate,
 }
-
-const ID_SETTINGS: u32 = 1;
-const ID_GAME: u32 = 2;
-const ID_RESTART: u32 = 3;
-const ID_UPDATE: u32 = 4;
 
 type Handler = Box<dyn Fn(Action)>;
 
@@ -97,28 +95,45 @@ impl LangBarButton_Impl {
         }
     }
 
+    fn state(&self) -> MenuState {
+        MenuState {
+            chinese: self.chinese.get(),
+            simplified: self.simplified.get(),
+            game: self.game.get(),
+            update: self.update.borrow().clone(),
+            updating: false,
+        }
+    }
+
+    /// 右鍵選單：內容與 macOS 共用（`zct_core::menu`）
     fn menu(&self, pt: &POINT) {
         unsafe {
             self.act(Action::Refresh);
             let Ok(menu) = CreatePopupMenu() else { return };
-            if let Some(v) = self.update.borrow().as_deref() {
-                let text = windows::core::HSTRING::from(format!("更新到 {v}"));
-                let _ = AppendMenuW(menu, MF_STRING, ID_UPDATE as usize, &text);
-                let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+            for item in menu::items(&self.state()) {
+                match item {
+                    MenuItem::Separator => {
+                        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+                    }
+                    MenuItem::Action {
+                        action,
+                        label,
+                        checked,
+                        enabled,
+                    } => {
+                        let mut flags = MF_STRING;
+                        if checked {
+                            flags |= MF_CHECKED;
+                        }
+                        if !enabled {
+                            flags |= MF_GRAYED;
+                        }
+                        // 0 代表沒有選，選單項目的編號從 1 開始
+                        let id = action.code() as usize + 1;
+                        let _ = AppendMenuW(menu, flags, id, &windows::core::HSTRING::from(label));
+                    }
+                }
             }
-            let _ = AppendMenuW(menu, MF_STRING, ID_SETTINGS as usize, w!("設定…"));
-            let game = if self.game.get() {
-                MF_STRING | MF_CHECKED
-            } else {
-                MF_STRING
-            };
-            let _ = AppendMenuW(menu, game, ID_GAME as usize, w!("遊戲模式"));
-            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-            let restart = windows::core::HSTRING::from(format!(
-                "重新啟動{}",
-                zct_core::channel::CURRENT.name
-            ));
-            let _ = AppendMenuW(menu, MF_STRING, ID_RESTART as usize, &restart);
             let owner: HWND = {
                 let f = GetFocus();
                 if f.is_invalid() {
@@ -137,12 +152,18 @@ impl LangBarButton_Impl {
                 None,
             );
             let _ = DestroyMenu(menu);
-            match cmd.0 as u32 {
-                ID_SETTINGS => self.act(Action::OpenSettings),
-                ID_GAME => self.act(Action::ToggleGame),
-                ID_RESTART => self.act(Action::Restart),
-                ID_UPDATE => self.act(Action::InstallUpdate),
-                _ => {}
+            let chosen = (cmd.0 as u32)
+                .checked_sub(1)
+                .and_then(MenuAction::from_code);
+            if let Some(action) = chosen {
+                self.act(match action {
+                    MenuAction::InstallUpdate => Action::InstallUpdate,
+                    MenuAction::ToggleMode => Action::ToggleMode,
+                    MenuAction::ToggleOutput => Action::ToggleOutput,
+                    MenuAction::ToggleGame => Action::ToggleGame,
+                    MenuAction::OpenSettings => Action::OpenSettings,
+                    MenuAction::Restart => Action::Restart,
+                });
             }
         }
     }
@@ -214,14 +235,9 @@ impl ITfLangBarItem_Impl for LangBarButton_Impl {
     }
 
     fn GetTooltipString(&self) -> Result<BSTR> {
-        let state = match (self.chinese.get(), self.simplified.get()) {
-            (false, _) => "英文",
-            (true, true) => "中文・简体",
-            (true, false) => "中文",
-        };
         Ok(BSTR::from(format!(
-            "{}：{state}（左鍵切換、右鍵選單）",
-            zct_core::channel::CURRENT.name
+            "{}（左鍵切換、右鍵選單）",
+            menu::tooltip(&self.state())
         )))
     }
 }

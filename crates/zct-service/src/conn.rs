@@ -273,9 +273,13 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     .as_ref()
                     .and_then(|s| s.session().passthrough_keys()),
             },
-            Request::ToggleMode => match session.as_mut() {
+            Request::ToggleMode | Request::ToggleOutput => match session.as_mut() {
                 Some(s) => {
-                    let r = s.toggle_mode();
+                    let r = if req == Request::ToggleMode {
+                        s.toggle_mode()
+                    } else {
+                        s.toggle_output()
+                    };
                     last = Some(r.clone());
                     Response::Key(r)
                 }

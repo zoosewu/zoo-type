@@ -245,23 +245,28 @@ final class InputController: IMKInputController {
         panel?.orderOut(nil)
     }
 
+    /// 選單內容與 Windows 共用（zct_core::menu）：這裡只照清單畫
     override func menu() -> NSMenu! {
         let menu = NSMenu(title: "動物園輸入法")
         menu.autoenablesItems = false
-        let modeItem = menu.addItem(withTitle: "中文模式", action: #selector(toggleMode(_:)), keyEquivalent: "")
-        modeItem.state = mode == 0 ? .on : .off; modeItem.target = self
-        let output = menu.addItem(withTitle: "簡體輸出", action: #selector(toggleOutput(_:)), keyEquivalent: "")
-        output.state = simplified ? .on : .off; output.target = self
-        let gameItem = menu.addItem(withTitle: "遊戲模式", action: #selector(toggleGame(_:)), keyEquivalent: "")
-        gameItem.state = game ? .on : .off; gameItem.target = self
-        menu.addItem(.separator())
-        let settings = menu.addItem(withTitle: "設定…", action: #selector(editSettings(_:)), keyEquivalent: "")
-        settings.target = self
-        let reload = menu.addItem(withTitle: "重新載入設定", action: #selector(reloadSettings(_:)), keyEquivalent: "")
-        reload.target = self
-        if let version = UpdateManager.shared.available {
-            let update = menu.addItem(withTitle: "更新到 v" + version, action: #selector(installUpdate(_:)), keyEquivalent: "")
-            update.target = self; update.isEnabled = !UpdateManager.shared.busy
+        let updates = UpdateManager.shared
+        let raw = (updates.available ?? "").withCString { zct_menu_items(mode == 0, simplified, game, $0, updates.busy) }
+        guard let raw else { return menu }
+        defer { zct_string_free(raw) }
+        let items = (try? JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8))) as? [[String: Any]] ?? []
+        let actions: [String: Selector] = [
+            "install_update": #selector(installUpdate(_:)), "toggle_mode": #selector(toggleMode(_:)),
+            "toggle_output": #selector(toggleOutput(_:)), "toggle_game": #selector(toggleGame(_:)),
+            "open_settings": #selector(editSettings(_:)), "restart": #selector(restart(_:))
+        ]
+        for item in items {
+            guard item["kind"] as? String == "action", let name = item["action"] as? String, let selector = actions[name] else {
+                menu.addItem(.separator()); continue
+            }
+            let entry = menu.addItem(withTitle: item["label"] as? String ?? "", action: selector, keyEquivalent: "")
+            entry.target = self
+            entry.state = item["checked"] as? Bool == true ? .on : .off
+            entry.isEnabled = item["enabled"] as? Bool ?? true
         }
         return menu
     }
@@ -279,8 +284,14 @@ final class InputController: IMKInputController {
 
     override func showPreferences(_ sender: Any!) { editSettings(sender) }
 
-    @objc private func reloadSettings(_ sender: Any?) {
+    /// 重新啟動：存檔、重新開啟引擎（重讀詞庫）、重建 session 並重讀設定
+    @objc private func restart(_ sender: Any?) {
         guard let client = client() else { return }
+        commitComposition(client)
+        if let runtime = appRuntime {
+            runtime.save()
+            do { try runtime.recover() } catch { NSLog("ZooType restart: %@", String(describing: error)) }
+        }
         activateServer(client)
     }
 }

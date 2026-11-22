@@ -921,6 +921,37 @@ pub unsafe extern "C" fn zct_session_bar_anchor(
     }
 }
 
+/// 輸入法選單（與 Windows 共用 `zct_core::menu`）：JSON 陣列，
+/// 每項是 `{"kind": "action", "action": "toggle_mode", "label", "checked", "enabled"}` 或 `{"kind": "separator"}`。
+/// `update`：可以安裝的新版（沒有傳 NULL）。用 `zct_string_free` 釋放
+/// # Safety
+/// `update` is NULL or NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_menu_items(
+    chinese: bool,
+    simplified: bool,
+    game: bool,
+    update: *const c_char,
+    updating: bool,
+) -> *mut c_char {
+    guard(|| {
+        let update = (!update.is_null())
+            .then(|| unsafe { text(update) }.map(str::to_owned))
+            .transpose()?
+            .filter(|v| !v.is_empty());
+        let state = zct_core::menu::MenuState {
+            chinese,
+            simplified,
+            game,
+            update,
+            updating,
+        };
+        let json =
+            serde_json::to_string(&zct_core::menu::items(&state)).map_err(|e| e.to_string())?;
+        Ok(string(&json).into_raw())
+    })
+}
+
 /// 提示泡泡顯示多久（秒）
 #[unsafe(no_mangle)]
 pub extern "C" fn zct_hint_seconds() -> f64 {

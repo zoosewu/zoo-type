@@ -10,6 +10,7 @@ pub mod engine;
 pub mod hanzi;
 pub mod hotkey;
 pub mod key;
+pub mod menu;
 pub mod mixed;
 pub mod ngram;
 pub mod paths;
