@@ -1,10 +1,12 @@
-//! 候選窗與「中 / A」提示窗（Direct2D / DirectWrite）
+//! 候選窗、組字提示列與「中 / A」提示窗（Direct2D / DirectWrite）
 //!
+//! - 排版與彈出位置在共用的 `zct_core::popup`（與 macOS 相同）；這裡只量文字、照結果畫
 //! - 視窗常駐、預先建立，打字時只更新內容與位置
 //! - WS_EX_NOACTIVATE：永不搶走 App 的焦點
 //! - 所有視窗操作都在 UI 執行緒；連線執行緒透過 channel + PostMessage 送指令
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -40,27 +42,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{HSTRING, Result, w};
 use windows_numerics::Vector2;
 use zct_core::config::{Color, Layout, ThemeConfig};
+use zct_core::popup::{self, Font, Ink};
 use zct_core::{CandidatePage, Preedit};
 use zct_ipc::Rect;
 
 const WM_WAKE: u32 = WM_APP + 1;
 const HINT_TIMER: usize = 1;
-const HINT_MS: u32 = 800;
-
-/// 數字字級相對於候選字字級
-const NUM_RATIO: f32 = 0.75;
-const PAD_X: f32 = 6.0;
-const PAD_Y: f32 = 4.0;
-/// 選擇框左右內距
-const ROW_PAD_X: f32 = 6.0;
-/// 每列上下內距
-const ROW_PAD_Y: f32 = 2.0;
-/// 數字與候選字之間的距離
-const GAP_NUM: f32 = 8.0;
-/// 選擇框圓角
-const ROW_RADIUS: f32 = 4.0;
-/// 候選窗與游標之間的距離
-const OFFSET_DIP: f32 = 4.0;
 
 fn color(c: Color) -> D2D1_COLOR_F {
     let (r, g, b) = c.rgb();
@@ -173,37 +160,72 @@ thread_local! {
     static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
 }
 
-/// 排版結果：文字、選擇框、視窗大小（DIP）
-type Laid = (Vec<Run>, Option<D2D_RECT_F>, (f32, f32));
-
-/// 已排版、待繪製的一段文字
-struct Run {
-    layout: IDWriteTextLayout,
-    x: f32,
-    y: f32,
-    dim: bool,
-}
-
 struct Popup {
     hwnd: HWND,
     target: Option<ID2D1HwndRenderTarget>,
-    runs: Vec<Run>,
-    /// 選擇框（DIP）
-    highlight: Option<D2D_RECT_F>,
-    /// 游標（DIP，組字提示列用）
-    caret: Option<D2D_RECT_F>,
+    /// 共用排版的結果（DIP）
+    content: popup::Popup,
     /// 實體像素
     size: (u32, u32),
     scale: f32,
 }
 
-struct Ui {
-    d2d: ID2D1Factory,
+/// DirectWrite 的文字排版：量過的文字留著，畫的時候直接用
+struct Texts {
     dw: IDWriteFactory,
-    theme: ThemeConfig,
-    colors: Colors,
     text_fmt: IDWriteTextFormat,
     num_fmt: IDWriteTextFormat,
+    cache: HashMap<(String, Font), (IDWriteTextLayout, f32, f32)>,
+}
+
+impl Texts {
+    fn get(&mut self, text: &str, font: Font) -> Option<&(IDWriteTextLayout, f32, f32)> {
+        let key = (text.to_owned(), font);
+        if !self.cache.contains_key(&key) {
+            // 不同的字很多：滿了就整個清掉（只是要重新排版）
+            if self.cache.len() > 1024 {
+                self.cache.clear();
+            }
+            let fmt = match font {
+                Font::Text => &self.text_fmt,
+                Font::Number => &self.num_fmt,
+            };
+            let made = unsafe {
+                let wide: Vec<u16> = text.encode_utf16().collect();
+                self.dw
+                    .CreateTextLayout(&wide, fmt, 10_000.0, 1_000.0)
+                    .and_then(|layout| {
+                        let mut m = DWRITE_TEXT_METRICS::default();
+                        layout.GetMetrics(&mut m)?;
+                        Ok((layout, m.widthIncludingTrailingWhitespace, m.height))
+                    })
+            };
+            match made {
+                Ok(v) => {
+                    self.cache.insert(key.clone(), v);
+                }
+                Err(e) => {
+                    log::warn!("文字排版失敗：{e}");
+                    return None;
+                }
+            }
+        }
+        self.cache.get(&key)
+    }
+}
+
+impl popup::Measure for Texts {
+    fn measure(&mut self, text: &str, font: Font) -> (f32, f32) {
+        self.get(text, font)
+            .map_or((0.0, 0.0), |(_, w, h)| (*w, *h))
+    }
+}
+
+struct Ui {
+    d2d: ID2D1Factory,
+    theme: ThemeConfig,
+    colors: Colors,
+    texts: Texts,
     cand: Popup,
     hint: Popup,
     comp: Popup,
@@ -229,13 +251,14 @@ impl Ui {
                 w!("zh-TW"),
             )
         };
-        Ok((fmt(t.font_size)?, fmt(t.font_size * NUM_RATIO)?))
+        Ok((fmt(t.font_size)?, fmt(t.font_size * popup::NUM_RATIO)?))
     }
 
     fn set_theme(&mut self, theme: ThemeConfig) -> Result<()> {
-        let (text_fmt, num_fmt) = Self::formats(&self.dw, &theme)?;
-        self.text_fmt = text_fmt;
-        self.num_fmt = num_fmt;
+        let (text_fmt, num_fmt) = Self::formats(&self.texts.dw, &theme)?;
+        self.texts.text_fmt = text_fmt;
+        self.texts.num_fmt = num_fmt;
+        self.texts.cache.clear();
         self.colors = Colors::from(&theme);
         self.theme = theme;
         Ok(())
@@ -283,20 +306,21 @@ impl Ui {
                 Ok(Popup {
                     hwnd,
                     target: None,
-                    runs: Vec::new(),
-                    highlight: None,
-                    caret: None,
+                    content: popup::Popup::default(),
                     size: (1, 1),
                     scale: 1.0,
                 })
             };
             Ok(Ui {
                 d2d,
-                dw,
                 colors: Colors::from(&theme),
                 theme,
-                text_fmt,
-                num_fmt,
+                texts: Texts {
+                    dw,
+                    text_fmt,
+                    num_fmt,
+                    cache: HashMap::new(),
+                },
                 cand: make()?,
                 hint: make()?,
                 comp: make()?,
@@ -364,243 +388,14 @@ impl Ui {
         self.last_anchor
     }
 
-    fn layout(&self, text: &str, fmt: &IDWriteTextFormat) -> Result<(IDWriteTextLayout, f32, f32)> {
-        unsafe {
-            let wide: Vec<u16> = text.encode_utf16().collect();
-            let layout = self.dw.CreateTextLayout(&wide, fmt, 10_000.0, 1_000.0)?;
-            let mut m = DWRITE_TEXT_METRICS::default();
-            layout.GetMetrics(&mut m)?;
-            Ok((layout, m.widthIncludingTrailingWhitespace, m.height))
-        }
-    }
-
     fn show_candidates(&mut self, page: &CandidatePage, anchor: Option<Rect>) -> Result<()> {
         let Some(anchor) = self.anchor(anchor) else {
             return Ok(());
         };
-        let (runs, highlight, dip) = match self.theme.layout {
-            _ if page.is_display_only() => self.layout_plain(page)?,
-            _ if !page.columns.is_empty() => self.layout_columns(page)?,
-            Layout::Vertical => self.layout_vertical(page)?,
-            Layout::Horizontal => self.layout_horizontal(page)?,
-        };
-        let (d2d, colors, cand) = (&self.d2d, self.colors, &mut self.cand);
-        cand.runs = runs;
-        cand.highlight = highlight;
-        place(cand, anchor, dip)?;
-        render(d2d, &colors, cand)
-    }
-
-    /// 只顯示（打字時的注音小視窗）：「ㄒㄟ  誰 雖 …」一列，沒有數字與選擇框
-    fn layout_plain(&self, page: &CandidatePage) -> Result<Laid> {
-        let text = page.items.join("  ");
-        let (layout, w, h) = self.layout(&text, &self.text_fmt)?;
-        let row_h = h + ROW_PAD_Y * 2.0;
-        let runs = vec![Run {
-            layout,
-            x: PAD_X + ROW_PAD_X,
-            y: PAD_Y + ROW_PAD_Y,
-            dim: false,
-        }];
-        Ok((
-            runs,
-            None,
-            (PAD_X * 2.0 + ROW_PAD_X * 2.0 + w, row_h + PAD_Y * 2.0),
-        ))
-    }
-
-    /// 橫式：「1 天 2 添 …」排成一列，選擇框框住目前項目，最後是頁碼
-    fn layout_horizontal(&self, page: &CandidatePage) -> Result<Laid> {
-        let mut items = Vec::new();
-        let mut row_h: f32 = 0.0;
-        for (i, item) in page.items.iter().enumerate() {
-            let num = self.layout(&page.row_label(i), &self.num_fmt)?;
-            let text = self.layout(item, &self.text_fmt)?;
-            row_h = row_h.max(text.2).max(num.2);
-            items.push((num, text));
-        }
-        let row_h = row_h + ROW_PAD_Y * 2.0;
-        let mut runs = Vec::new();
-        let mut highlight = None;
-        let mut x = PAD_X;
-        for (i, ((num, nw, nh), (text, tw, th))) in items.into_iter().enumerate() {
-            let w = ROW_PAD_X + nw + GAP_NUM / 2.0 + tw + ROW_PAD_X;
-            if page.selected_row() == Some(i) {
-                highlight = Some(D2D_RECT_F {
-                    left: x,
-                    top: PAD_Y,
-                    right: x + w,
-                    bottom: PAD_Y + row_h,
-                });
-            }
-            runs.push(Run {
-                layout: num,
-                x: x + ROW_PAD_X,
-                y: PAD_Y + (row_h - nh) / 2.0,
-                dim: true,
-            });
-            runs.push(Run {
-                layout: text,
-                x: x + ROW_PAD_X + nw + GAP_NUM / 2.0,
-                y: PAD_Y + (row_h - th) / 2.0,
-                dim: false,
-            });
-            x += w;
-        }
-        if page.total_pages > 1 {
-            let (layout, w, h) = self.layout(
-                &format!("{}/{}", page.page + 1, page.total_pages),
-                &self.num_fmt,
-            )?;
-            runs.push(Run {
-                layout,
-                x: x + ROW_PAD_X,
-                y: PAD_Y + (row_h - h) / 2.0,
-                dim: true,
-            });
-            x += w + ROW_PAD_X * 2.0;
-        }
-        Ok((runs, highlight, (x + PAD_X, row_h + PAD_Y * 2.0)))
-    }
-
-    /// 展開多欄：每一頁一欄並排，目前這一欄有數字與選擇框，其他欄淡色；底部顯示頁碼
-    fn layout_columns(&self, page: &CandidatePage) -> Result<Laid> {
-        let active = page.page.saturating_sub(page.first_column);
-        let (_, num_w, _) = self.layout("0★", &self.num_fmt)?;
-        let mut cols = Vec::new();
-        let mut row_h: f32 = 0.0;
-        for (c, items) in page.visible_columns().enumerate() {
-            let mut rows = Vec::new();
-            let mut text_w: f32 = 0.0;
-            for (i, item) in items.iter().enumerate() {
-                let num = if c == active {
-                    Some(self.layout(&page.row_label(i), &self.num_fmt)?)
-                } else {
-                    None
-                };
-                let text = self.layout(item, &self.text_fmt)?;
-                row_h = row_h.max(text.2);
-                text_w = text_w.max(text.1);
-                rows.push((num, text));
-            }
-            cols.push((rows, text_w));
-        }
-        let row_h = row_h + ROW_PAD_Y * 2.0;
-
-        let mut runs = Vec::new();
-        let mut highlight = None;
-        let mut x = PAD_X;
-        let mut bottom = PAD_Y;
-        for (c, (rows, text_w)) in cols.into_iter().enumerate() {
-            let col_w = ROW_PAD_X + num_w + GAP_NUM + text_w + ROW_PAD_X;
-            let mut y = PAD_Y;
-            for (i, (num, (text, _, th))) in rows.into_iter().enumerate() {
-                if c == active && page.selected_row() == Some(i) {
-                    highlight = Some(D2D_RECT_F {
-                        left: x,
-                        top: y,
-                        right: x + col_w,
-                        bottom: y + row_h,
-                    });
-                }
-                if let Some((num, nw, nh)) = num {
-                    runs.push(Run {
-                        layout: num,
-                        x: x + ROW_PAD_X + num_w - nw,
-                        y: y + (row_h - nh) / 2.0,
-                        dim: true,
-                    });
-                }
-                runs.push(Run {
-                    layout: text,
-                    x: x + ROW_PAD_X + num_w + GAP_NUM,
-                    y: y + (row_h - th) / 2.0,
-                    dim: c != active,
-                });
-                y += row_h;
-            }
-            bottom = bottom.max(y);
-            x += col_w;
-        }
-        let width = x - PAD_X;
-        let (layout, w, h) = self.layout(
-            &format!("{}/{}", page.page + 1, page.total_pages),
-            &self.num_fmt,
-        )?;
-        runs.push(Run {
-            layout,
-            x: PAD_X + width - ROW_PAD_X - w,
-            y: bottom + ROW_PAD_Y,
-            dim: true,
-        });
-        let height = bottom + h + ROW_PAD_Y * 2.0;
-        Ok((runs, highlight, (PAD_X * 2.0 + width, height + PAD_Y)))
-    }
-
-    /// 直式：每列「數字 候選字」，選擇框標示目前項目，多頁時底部顯示頁碼
-    fn layout_vertical(&self, page: &CandidatePage) -> Result<Laid> {
-        // 數字欄寬固定，候選字才會對齊
-        let (_, num_w, _) = self.layout("0", &self.num_fmt)?;
-        let mut rows = Vec::new();
-        let mut row_h: f32 = 0.0;
-        let mut text_w: f32 = 0.0;
-        for (i, item) in page.items.iter().enumerate() {
-            let num = self.layout(&page.row_label(i), &self.num_fmt)?;
-            let text = self.layout(item, &self.text_fmt)?;
-            row_h = row_h.max(text.2).max(num.2);
-            text_w = text_w.max(text.1);
-            rows.push((num, text));
-        }
-        let row_h = row_h + ROW_PAD_Y * 2.0;
-        let row_w = ROW_PAD_X + num_w + GAP_NUM + text_w + ROW_PAD_X;
-
-        let mut runs = Vec::new();
-        let mut y = PAD_Y;
-        let mut highlight = None;
-        for (i, ((num, nw, nh), (text, _, th))) in rows.into_iter().enumerate() {
-            if page.selected_row() == Some(i) {
-                highlight = Some(D2D_RECT_F {
-                    left: PAD_X,
-                    top: y,
-                    right: PAD_X + row_w,
-                    bottom: y + row_h,
-                });
-            }
-            let x0 = PAD_X + ROW_PAD_X;
-            runs.push(Run {
-                layout: num,
-                // 數字靠右對齊數字欄
-                x: x0 + num_w - nw,
-                y: y + (row_h - nh) / 2.0,
-                dim: true,
-            });
-            runs.push(Run {
-                layout: text,
-                x: x0 + num_w + GAP_NUM,
-                y: y + (row_h - th) / 2.0,
-                dim: false,
-            });
-            y += row_h;
-        }
-        let mut width = row_w;
-        if page.total_pages > 1 {
-            let (layout, w, h) = self.layout(
-                &format!("{}/{}", page.page + 1, page.total_pages),
-                &self.num_fmt,
-            )?;
-            width = width.max(w + ROW_PAD_X * 2.0);
-            runs.push(Run {
-                layout,
-                x: PAD_X + width - ROW_PAD_X - w,
-                y: y + ROW_PAD_Y,
-                dim: true,
-            });
-            y += h + ROW_PAD_Y * 2.0;
-        }
-        if let Some(hl) = &mut highlight {
-            hl.right = PAD_X + width;
-        }
-        Ok((runs, highlight, (PAD_X * 2.0 + width, y + PAD_Y)))
+        let horizontal = self.theme.layout == Layout::Horizontal;
+        let content = popup::candidates(page, horizontal, &mut self.texts);
+        let (d2d, colors, texts) = (&self.d2d, self.colors, &mut self.texts);
+        show(d2d, &colors, texts, &mut self.cand, content, anchor, false)
     }
 
     /// 只隱藏自己顯示的視窗，避免舊連線蓋掉新連線的畫面
@@ -627,97 +422,48 @@ impl Ui {
         let Some(anchor) = self.anchor(anchor) else {
             return Ok(());
         };
-        let display = p.display();
-        let pieces = [display.before_target, display.target, display.after_target];
-        let mut runs = Vec::new();
-        let mut x = PAD_X + ROW_PAD_X;
-        let mut h: f32 = 0.0;
-        let mut highlight = None;
-        for (i, piece) in pieces.into_iter().enumerate() {
-            if piece.is_empty() {
-                continue;
-            }
-            let (layout, w, lh) = self.layout(piece, &self.text_fmt)?;
-            h = h.max(lh);
-            if i == 1 {
-                highlight = Some(D2D_RECT_F {
-                    left: x - 1.0,
-                    top: PAD_Y,
-                    right: x + w + 1.0,
-                    bottom: PAD_Y + lh + ROW_PAD_Y * 2.0,
-                });
-            }
-            runs.push(Run {
-                layout,
-                x,
-                y: PAD_Y + ROW_PAD_Y,
-                dim: false,
-            });
-            x += w;
-        }
-        let (count, cw, ch) = self.layout(&format!("{} 字", p.len), &self.num_fmt)?;
-        let row_h = h + ROW_PAD_Y * 2.0;
-        runs.push(Run {
-            layout: count,
-            x: x + GAP_NUM * 2.0,
-            y: PAD_Y + (row_h - ch) / 2.0,
-            dim: true,
-        });
-        let width = x + GAP_NUM * 2.0 + cw + ROW_PAD_X + PAD_X;
-        if let Some(hl) = &mut highlight {
-            hl.bottom = PAD_Y + row_h;
-        }
-        // 游標：游標前文字的寬度
-        let x0 = PAD_X + ROW_PAD_X;
-        let before = display.before_cursor;
-        let caret_x = if before.is_empty() {
-            x0
-        } else {
-            x0 + self.layout(before, &self.text_fmt)?.1
-        };
-        let caret = D2D_RECT_F {
-            left: caret_x - 0.5,
-            top: PAD_Y + ROW_PAD_Y,
-            right: caret_x + 1.0,
-            bottom: PAD_Y + row_h - ROW_PAD_Y,
-        };
-        let (d2d, colors, comp) = (&self.d2d, self.colors, &mut self.comp);
-        comp.runs = runs;
-        comp.highlight = highlight;
-        comp.caret = Some(caret);
-        place_at(comp, anchor, (width, row_h + PAD_Y * 2.0), true)?;
-        render(d2d, &colors, comp)
+        let content = popup::composition(p, &mut self.texts);
+        let (d2d, colors, texts) = (&self.d2d, self.colors, &mut self.texts);
+        show(d2d, &colors, texts, &mut self.comp, content, anchor, true)
     }
 
     fn show_hint(&mut self, text: &str, anchor: Option<Rect>) -> Result<()> {
         let Some(anchor) = self.anchor(anchor) else {
             return Ok(());
         };
-        let (layout, w, h) = self.layout(text, &self.text_fmt)?;
-        let (d2d, colors, hint) = (&self.d2d, self.colors, &mut self.hint);
-        hint.highlight = None;
-        hint.runs = vec![Run {
-            layout,
-            x: PAD_X,
-            y: PAD_Y,
-            dim: false,
-        }];
-        place(hint, anchor, (w + PAD_X * 2.0, h + PAD_Y * 2.0))?;
-        render(d2d, &colors, hint)?;
+        let content = popup::hint(text, &mut self.texts);
+        let (d2d, colors, texts) = (&self.d2d, self.colors, &mut self.texts);
+        show(d2d, &colors, texts, &mut self.hint, content, anchor, false)?;
         unsafe {
-            SetTimer(Some(hint.hwnd), HINT_TIMER, HINT_MS, None);
+            SetTimer(
+                Some(self.hint.hwnd),
+                HINT_TIMER,
+                popup::HINT_MS as u32,
+                None,
+            );
         }
         Ok(())
     }
 }
 
-/// 依游標位置放置視窗：預設在游標下方，超出螢幕下緣就改放上方
-fn place(p: &mut Popup, anchor: Rect, dip: (f32, f32)) -> Result<()> {
-    place_at(p, anchor, dip, false)
+/// 換上排好的內容、放到游標旁（位置規則見 `popup::place`）並畫出來
+fn show(
+    d2d: &ID2D1Factory,
+    colors: &Colors,
+    texts: &mut Texts,
+    p: &mut Popup,
+    content: popup::Popup,
+    anchor: Rect,
+    above: bool,
+) -> Result<()> {
+    let size = (content.width, content.height);
+    p.content = content;
+    place(p, anchor, size, above)?;
+    render(d2d, colors, texts, p)
 }
 
 /// `above`：優先放在游標上方（組字提示列，避免與下方的候選窗重疊）
-fn place_at(p: &mut Popup, anchor: Rect, dip: (f32, f32), above: bool) -> Result<()> {
+fn place(p: &mut Popup, anchor: Rect, dip: (f32, f32), above: bool) -> Result<()> {
     unsafe {
         let rc = RECT {
             left: anchor.left,
@@ -738,19 +484,19 @@ fn place_at(p: &mut Popup, anchor: Rect, dip: (f32, f32), above: bool) -> Result
 
         let w = (dip.0 * scale).ceil() as i32;
         let h = (dip.1 * scale).ceil() as i32;
-        let gap = (OFFSET_DIP * scale) as i32;
-        let mut y = if above {
-            rc.top - gap - h
-        } else {
-            rc.bottom + gap
+        let rect = |l: i32, t: i32, r: i32, b: i32| popup::Rect {
+            x: l as f32,
+            y: t as f32,
+            w: (r - l) as f32,
+            h: (b - t) as f32,
         };
-        if above && y < work.top {
-            y = rc.bottom + gap;
-        } else if !above && y + h > work.bottom {
-            y = rc.top - gap - h;
-        }
-        let x = rc.left.clamp(work.left, (work.right - w).max(work.left));
-        let y = y.clamp(work.top, (work.bottom - h).max(work.top));
+        let (x, y) = popup::place(
+            rect(rc.left, rc.top, rc.right, rc.bottom),
+            (w as f32, h as f32),
+            rect(work.left, work.top, work.right, work.bottom),
+            (popup::OFFSET * scale).floor(),
+            above,
+        );
 
         if (p.scale - scale).abs() > f32::EPSILON {
             p.scale = scale;
@@ -771,8 +517,8 @@ fn place_at(p: &mut Popup, anchor: Rect, dip: (f32, f32), above: bool) -> Result
         SetWindowPos(
             p.hwnd,
             Some(HWND_TOPMOST),
-            x,
-            y,
+            x as i32,
+            y as i32,
             w,
             h,
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
@@ -781,7 +527,16 @@ fn place_at(p: &mut Popup, anchor: Rect, dip: (f32, f32), above: bool) -> Result
     }
 }
 
-fn render(d2d: &ID2D1Factory, c: &Colors, p: &mut Popup) -> Result<()> {
+fn d2d_rect(r: &popup::Rect) -> D2D_RECT_F {
+    D2D_RECT_F {
+        left: r.x,
+        top: r.y,
+        right: r.right(),
+        bottom: r.bottom(),
+    }
+}
+
+fn render(d2d: &ID2D1Factory, c: &Colors, texts: &mut Texts, p: &mut Popup) -> Result<()> {
     unsafe {
         if p.target.is_none() {
             let props = D2D1_RENDER_TARGET_PROPERTIES {
@@ -808,28 +563,35 @@ fn render(d2d: &ID2D1Factory, c: &Colors, p: &mut Popup) -> Result<()> {
         let dim = t.CreateSolidColorBrush(&c.dim, None)?;
         t.BeginDraw();
         t.Clear(Some(&c.bg));
-        if let Some(rect) = p.highlight {
+        if !p.content.highlights.is_empty() {
             let hl = t.CreateSolidColorBrush(&c.hl, None)?;
-            t.FillRoundedRectangle(
-                &D2D1_ROUNDED_RECT {
-                    rect,
-                    radiusX: ROW_RADIUS,
-                    radiusY: ROW_RADIUS,
-                },
-                &hl,
-            );
+            for r in &p.content.highlights {
+                t.FillRoundedRectangle(
+                    &D2D1_ROUNDED_RECT {
+                        rect: d2d_rect(r),
+                        radiusX: popup::ROW_RADIUS,
+                        radiusY: popup::ROW_RADIUS,
+                    },
+                    &hl,
+                );
+            }
         }
-        if let Some(rect) = p.caret {
-            t.FillRectangle(&rect, &fg);
+        if let Some(r) = &p.content.caret {
+            t.FillRectangle(&d2d_rect(r), &fg);
         }
-        for run in &p.runs {
-            let brush = if run.dim { &dim } else { &fg };
-            t.DrawTextLayout(
-                Vector2 { X: run.x, Y: run.y },
-                &run.layout,
-                brush,
-                D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
-            );
+        for run in &p.content.runs {
+            let brush = match run.ink {
+                Ink::Text => &fg,
+                Ink::Dim => &dim,
+            };
+            if let Some((layout, ..)) = texts.get(&run.text, run.font) {
+                t.DrawTextLayout(
+                    Vector2 { X: run.x, Y: run.y },
+                    layout,
+                    brush,
+                    D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+                );
+            }
         }
         if let Err(e) = t.EndDraw(None, None) {
             // 顯示卡重置等情況：下次重建 render target
@@ -867,14 +629,15 @@ fn handle(hwnd: HWND, msg: u32, wparam: WPARAM) -> Option<LRESULT> {
         }
         WM_PAINT => {
             let painted = with_ui(|ui| {
-                let d2d = ui.d2d.clone();
-                let colors = ui.colors;
+                let (d2d, colors, texts) = (&ui.d2d, ui.colors, &mut ui.texts);
                 let p = if ui.cand.hwnd == hwnd {
                     &mut ui.cand
+                } else if ui.comp.hwnd == hwnd {
+                    &mut ui.comp
                 } else {
                     &mut ui.hint
                 };
-                let _ = render(&d2d, &colors, p);
+                let _ = render(d2d, &colors, texts, p);
             });
             painted.map(|_| LRESULT(0))
         }
@@ -911,23 +674,23 @@ mod tests {
             len: 3,
         };
         ui.show_composition(&preedit, anchor)?;
-        let first = ui.comp.caret.unwrap().left;
+        let first = ui.comp.content.caret.unwrap().x;
         preedit.cursor = 1;
         preedit.target = Some((1, 1));
         ui.show_composition(&preedit, anchor)?;
-        let caret = ui.comp.caret.unwrap().left;
-        let target = ui.comp.highlight.unwrap();
-        assert!(caret > first && target.left <= caret && target.right > caret);
+        let caret = ui.comp.content.caret.unwrap().x;
+        let target = ui.comp.content.highlights[0];
+        assert!(caret > first && target.x <= caret && target.right() > caret);
         let mut page = CandidatePage {
             items: vec!["氣".into(), "汽".into()],
             total_pages: 1,
             ..Default::default()
         };
         ui.show_candidates(&page, anchor)?;
-        let first = ui.cand.highlight.unwrap().top;
+        let first = ui.cand.content.highlights[0].y;
         page.highlight = 1;
         ui.show_candidates(&page, anchor)?;
-        assert!(ui.cand.highlight.unwrap().top > first);
+        assert!(ui.cand.content.highlights[0].y > first);
         Ok(())
     }
 }

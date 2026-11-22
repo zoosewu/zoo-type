@@ -13,6 +13,7 @@ pub mod key;
 pub mod mixed;
 pub mod ngram;
 pub mod paths;
+pub mod popup;
 pub mod rank;
 pub mod readings;
 pub mod session;

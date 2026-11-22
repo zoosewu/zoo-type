@@ -31,16 +31,44 @@ struct CandidateTheme {
                        green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
     }
     var font: NSFont { NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize) }
+    /// 數字：同一個字型，字級比例與 Windows 共用
+    var numberFont: NSFont {
+        let size = fontSize * CGFloat(zct_number_ratio())
+        return NSFont(name: fontName, size: size) ?? NSFont.systemFont(ofSize: size)
+    }
 }
 
-// 與 Windows 相同的字級比例、內距、顏色、數字欄與整列選取框。
+// 排版在共用層（zct_core::popup，與 Windows 相同）：這裡只量文字、照結果畫。
+private struct PopupRect: Decodable {
+    let x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat
+    var rect: NSRect { NSRect(x: x, y: y, width: w, height: h) }
+}
+private struct PopupRun: Decodable { let text: String; let x: CGFloat; let y: CGFloat; let font: String; let ink: String }
+private struct PopupHit: Decodable { let rect: PopupRect; let page: Int; let row: Int }
+private struct PopupPart: Decodable {
+    let runs: [PopupRun]; let highlights: [PopupRect]; let caret: PopupRect?; let hits: [PopupHit]
+}
+private struct PopupLayout: Decodable {
+    let width: CGFloat; let height: CGFloat
+    let composition: PopupPart; let candidates: PopupPart; let notice: PopupPart
+}
+
+/// 共用排版量文字用：候選字與數字的字型
+private final class PopupFonts {
+    let text: NSFont, number: NSFont
+    init(text: NSFont, number: NSFont) { self.text = text; self.number = number }
+    func font(_ kind: UInt32) -> NSFont { kind == 0 ? text : number }
+    static func height(_ font: NSFont) -> CGFloat { ceil(font.ascender - font.descender + font.leading) }
+}
+
 final class CandidateView: NSView {
-    struct Run { let text: String; let rect: NSRect; let font: NSFont; let color: NSColor }
+    struct Run { let text: String; let point: NSPoint; let font: NSFont; let color: NSColor }
     struct Hit { let rect: NSRect; let page: Int; let row: Int }
     private(set) var hits: [Hit] = []
     var onChoose: ((Int, Int) -> Void)?
     var onPage: ((Bool) -> Void)?
     private var runs: [Run] = []
+    private var highlights: [NSRect] = []
     private(set) var selection: NSRect?
     private(set) var compositionCaret: NSRect?
     private(set) var compositionTarget: NSRect?
@@ -51,109 +79,63 @@ final class CandidateView: NSView {
     @discardableResult
     func update(_ candidates: CandidateDisplay, composition: CompositionDisplay? = nil,
                 notice: String = "", theme: CandidateTheme) -> NSSize {
-        let items = candidates.displayOnly ? [] : candidates.items
-        let notice = candidates.displayOnly ? candidates.items.joined(separator: "  ") : notice
-        let columns = candidates.columns, labels = candidates.labels
-        let highlight = candidates.highlight, page = candidates.page
-        let firstColumn = candidates.firstColumn, totalPages = candidates.totalPages
         self.theme = theme
-        runs = []; hits = []; selection = nil
+        runs = []; hits = []; highlights = []; selection = nil
         compositionCaret = nil; compositionTarget = nil
-        let font = theme.font
-        let small = NSFont.systemFont(ofSize: theme.fontSize * 0.75)
-        func width(_ text: String, _ font: NSFont) -> CGFloat {
-            ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        var request: [String: Any] = ["horizontal": theme.horizontal, "notice": notice]
+        if !candidates.items.isEmpty || !candidates.columns.isEmpty {
+            request["page"] = [
+                "items": candidates.items, "page": candidates.page, "total_pages": candidates.totalPages,
+                "highlight": candidates.highlight ?? candidates.items.count,
+                "pinned": candidates.labels.map { $0.hasSuffix("★") },
+                "columns": candidates.columns, "first_column": candidates.firstColumn,
+                "display_only": candidates.displayOnly
+            ] as [String: Any]
         }
-        func add(_ text: String, x: CGFloat, y: CGFloat, font: NSFont, color: NSColor) {
-            let height = ceil(font.ascender - font.descender + font.leading)
-            runs.append(Run(text: text, rect: NSRect(x: x, y: y, width: width(text, font), height: height), font: font, color: color))
-        }
-        let textHeight = ceil(font.ascender - font.descender + font.leading)
-        let numberHeight = ceil(small.ascender - small.descender + small.leading)
-        let rowHeight = textHeight + 4
-        let numberWidth = max(width("0", small), labels.map { width($0, small) }.max() ?? 0)
-        var y: CGFloat = 4
-        var contentWidth: CGFloat = 0
         if let composition, !composition.text.isEmpty {
-            let preedit = composition.text, cursor = composition.cursor, target = composition.target
-            let line = CTLineCreateWithAttributedString(NSAttributedString(string: preedit, attributes: [.font: font]))
-            let length = preedit.utf16.count
-            func position(_ index: Int) -> CGFloat {
-                12 + CTLineGetOffsetForStringIndex(line, index, nil)
-            }
-            compositionCaret = NSRect(x: position(max(0, min(cursor, length))), y: y + 2, width: 1.5, height: textHeight)
-            if target.length > 0 && target.location <= length && target.length <= length - target.location {
-                let left = position(target.location), right = position(NSMaxRange(target))
-                compositionTarget = NSRect(x: min(left, right), y: y, width: abs(right - left), height: rowHeight)
-            }
-            add(preedit, x: 12, y: y + 2, font: font, color: theme.text)
-            contentWidth = width(preedit, font) + 12
-            y += rowHeight
+            var value: [String: Any] = ["text": composition.text, "cursor": composition.cursor]
+            if composition.target.length > 0 { value["target"] = [composition.target.location, composition.target.length] }
+            request["composition"] = value
         }
-        if !columns.isEmpty {
-            var x: CGFloat = 6
-            var maxRows = 0
-            for (columnIndex, column) in columns.enumerated() {
-                let columnWidth = 12 + numberWidth + 8 + (column.map { width($0, font) }.max() ?? 0)
-                for (i, item) in column.enumerated() {
-                    let rowY = y + CGFloat(i) * rowHeight
-                    hits.append(Hit(rect: NSRect(x: x, y: rowY, width: columnWidth, height: rowHeight), page: columnIndex + firstColumn, row: i))
-                    if columnIndex + firstColumn == page && i == highlight {
-                        selection = NSRect(x: x, y: rowY, width: columnWidth, height: rowHeight)
-                    }
-                    if columnIndex + firstColumn == page {
-                        add(labels[i], x: x + 6, y: rowY + (rowHeight - numberHeight) / 2, font: small, color: theme.number)
-                    }
-                    add(item, x: x + 6 + numberWidth + 8, y: rowY + 2, font: font, color: theme.text)
-                }
-                maxRows = max(maxRows, column.count)
-                x += columnWidth + 8
-            }
-            contentWidth = max(contentWidth, x - 8)
-            y += CGFloat(maxRows) * rowHeight
-        } else if theme.horizontal && !items.isEmpty {
-            var x: CGFloat = 6
-            for (i, item) in items.enumerated() {
-                let num = labels[i]
-                let nw = width(num, small)
-                let cellWidth = 12 + nw + 4 + width(item, font)
-                hits.append(Hit(rect: NSRect(x: x, y: y, width: cellWidth, height: rowHeight), page: page, row: i))
-                if i == highlight { selection = NSRect(x: x, y: y, width: cellWidth, height: rowHeight) }
-                add(num, x: x + 6, y: y + (rowHeight - numberHeight) / 2, font: small, color: theme.number)
-                add(item, x: x + 6 + nw + 4, y: y + 2, font: font, color: theme.text)
-                x += cellWidth
-            }
-            contentWidth = max(contentWidth, x)
-            y += rowHeight
-        } else if !items.isEmpty {
-            let rowWidth = 12 + numberWidth + 8 + (items.map { width($0, font) }.max() ?? 0)
-            contentWidth = max(contentWidth, rowWidth + 6)
-            for (i, item) in items.enumerated() {
-                let rowY = y + CGFloat(i) * rowHeight
-                hits.append(Hit(rect: NSRect(x: 6, y: rowY, width: rowWidth, height: rowHeight), page: page, row: i))
-                if i == highlight { selection = NSRect(x: 6, y: rowY, width: rowWidth, height: rowHeight) }
-                let number = labels[i]
-                add(number, x: 12 + numberWidth - width(number, small), y: rowY + (rowHeight - numberHeight) / 2, font: small, color: theme.number)
-                add(item, x: 12 + numberWidth + 8, y: rowY + 2, font: font, color: theme.text)
-            }
-            y += CGFloat(items.count) * rowHeight
+        let fonts = PopupFonts(text: theme.font, number: theme.numberFont)
+        guard let data = try? JSONSerialization.data(withJSONObject: request),
+              let layout = Self.layout(String(decoding: data, as: UTF8.self), fonts: fonts) else {
+            frame.size = .zero; needsDisplay = true; return .zero
         }
-        if !items.isEmpty && totalPages > 1 {
-            let footer = "\(page + 1)/\(totalPages)"
-            contentWidth = max(contentWidth, width(footer, small) + 18)
-            add(footer, x: contentWidth - width(footer, small) - 6, y: y + 2, font: small, color: theme.number)
-            y += numberHeight + 4
+        for part in [layout.composition, layout.candidates, layout.notice] {
+            for run in part.runs {
+                runs.append(Run(text: run.text, point: NSPoint(x: run.x, y: run.y),
+                                font: run.font == "number" ? fonts.number : fonts.text,
+                                color: run.ink == "dim" ? theme.number : theme.text))
+            }
+            highlights += part.highlights.map(\.rect)
         }
-        if !notice.isEmpty {
-            add(notice, x: 12, y: y + 2, font: font, color: theme.text)
-            contentWidth = max(contentWidth, width(notice, font) + 12)
-            y += rowHeight
-        }
-        let size = NSSize(width: max(36, contentWidth + 6), height: y + 4)
+        compositionCaret = layout.composition.caret?.rect
+        compositionTarget = layout.composition.highlights.first?.rect
+        selection = layout.candidates.highlights.first?.rect
+        hits = layout.candidates.hits.map { Hit(rect: $0.rect.rect, page: $0.page, row: $0.row) }
+        let size = NSSize(width: ceil(layout.width), height: ceil(layout.height))
         frame.size = size
         needsDisplay = true
         return size
     }
+
+    private static func layout(_ request: String, fonts: PopupFonts) -> PopupLayout? {
+        let measure: ZctMeasure = { context, text, font, width, height in
+            guard let context, let text, let width, let height else { return }
+            let fonts = Unmanaged<PopupFonts>.fromOpaque(context).takeUnretainedValue()
+            let f = fonts.font(font)
+            width.pointee = Float(ceil((String(cString: text) as NSString).size(withAttributes: [.font: f]).width))
+            height.pointee = Float(PopupFonts.height(f))
+        }
+        let context = Unmanaged.passUnretained(fonts).toOpaque()
+        guard let raw = request.withCString({ zct_popup_layout($0, measure, context) }) else {
+            NSLog("ZooType popup layout: %@", EngineError.current.description); return nil
+        }
+        defer { zct_string_free(raw) }
+        return try? JSONDecoder().decode(PopupLayout.self, from: Data(String(cString: raw).utf8))
+    }
+
     override var acceptsFirstResponder: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
@@ -168,16 +150,11 @@ final class CandidateView: NSView {
         NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6).fill()
         theme.number.withAlphaComponent(0.2).setStroke()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6).stroke()
-        if let compositionTarget {
-            theme.highlight.setFill()
-            compositionTarget.fill()
-        }
-        if let selection {
-            theme.highlight.setFill()
-            NSBezierPath(roundedRect: selection, xRadius: 4, yRadius: 4).fill()
-        }
+        theme.highlight.setFill()
+        let radius = CGFloat(zct_highlight_radius())
+        for rect in highlights { NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill() }
         for run in runs {
-            (run.text as NSString).draw(in: run.rect, withAttributes: [.font: run.font, .foregroundColor: run.color])
+            (run.text as NSString).draw(at: run.point, withAttributes: [.font: run.font, .foregroundColor: run.color])
         }
         if let compositionCaret {
             theme.text.setFill()
@@ -208,14 +185,13 @@ final class CandidatePanel: NSPanel {
         let size = candidateView.update(candidates, composition: composition, notice: result.notice, theme: theme)
         let screen = NSScreen.screens.first { $0.frame.intersects(caret) } ?? NSScreen.main
         let bounds = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        var origin = NSPoint(x: caret.minX, y: caret.minY - size.height - 4)
-        if origin.y < bounds.minY { origin.y = caret.maxY + 4 }
-        origin.x = max(bounds.minX, min(origin.x, bounds.maxX - size.width))
-        origin.y = max(bounds.minY, min(origin.y, bounds.maxY - size.height))
-        setFrame(NSRect(origin: origin, size: size), display: true)
+        // 位置規則與 Windows 共用：預設在游標下方，放不下改上方，不超出螢幕
+        let origin = zct_popup_place(caret.minX, caret.minY, caret.width, caret.height, size.width, size.height,
+                                     bounds.minX, bounds.minY, bounds.width, bounds.height, false)
+        setFrame(NSRect(origin: NSPoint(x: origin.x, y: origin.y), size: size), display: true)
         orderFrontRegardless()
         if composition == nil && candidates.items.isEmpty && !candidates.displayOnly {
-            noticeTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.orderOut(nil) }
+            noticeTimer = Timer.scheduledTimer(withTimeInterval: zct_hint_seconds(), repeats: false) { [weak self] _ in self?.orderOut(nil) }
         }
     }
 }

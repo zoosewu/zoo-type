@@ -6598,6 +6598,7 @@ name = "zct-ffi"
 version = "0.1.4"
 dependencies = [
  "cbindgen",
+ "serde",
  "serde_json",
  "tempfile",
  "toml 1.2.0+spec-1.1.0",

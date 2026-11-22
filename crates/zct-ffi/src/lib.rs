@@ -720,6 +720,192 @@ pub unsafe extern "C" fn zct_update_pending(runtime: *mut ZctRuntime) -> *const 
         Ok(runtime.update_file.as_ptr())
     })
 }
+/// 平台量文字：`font` 0 = 候選字、1 = 數字；寫回寬與高（點）
+pub type ZctMeasure = Option<
+    unsafe extern "C" fn(
+        context: *mut std::ffi::c_void,
+        text: *const c_char,
+        font: u32,
+        width: *mut f32,
+        height: *mut f32,
+    ),
+>;
+
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct PopupPage {
+    items: Vec<String>,
+    page: usize,
+    total_pages: usize,
+    /// 沒有選擇框時大於等於 items 的長度
+    highlight: usize,
+    pinned: Vec<bool>,
+    columns: Vec<Vec<String>>,
+    first_column: usize,
+    display_only: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct PopupComposition {
+    text: String,
+    /// UTF-16（NSRange 的單位）
+    cursor: usize,
+    target: Option<(usize, usize)>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct PopupRequest {
+    page: Option<PopupPage>,
+    composition: Option<PopupComposition>,
+    notice: String,
+    horizontal: bool,
+}
+
+/// UTF-16 位置換成第幾個字
+fn char_index(text: &str, utf16: usize) -> usize {
+    let mut units = 0;
+    for (i, c) in text.chars().enumerate() {
+        if units >= utf16 {
+            return i;
+        }
+        units += c.len_utf16();
+    }
+    text.chars().count()
+}
+
+/// 面板內容的排版（與 Windows 共用 `zct_core::popup`）。`request` 是 JSON：
+/// `{"page": {...候選頁, "display_only"}, "composition": {"text", "cursor", "target": [起點, 長度]}, "notice", "horizontal"}`
+/// （位置是 UTF-16）。回傳 JSON `{"width", "height", "composition", "candidates", "notice"}`，
+/// 各部分由上往下疊好；用 `zct_string_free` 釋放
+/// # Safety
+/// `request` is NUL-terminated UTF-8; `measure` is called synchronously on this thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_popup_layout(
+    request: *const c_char,
+    measure: ZctMeasure,
+    context: *mut std::ffi::c_void,
+) -> *mut c_char {
+    guard(|| {
+        use zct_core::popup;
+        let request: PopupRequest =
+            serde_json::from_str(unsafe { text(request)? }).map_err(|e| e.to_string())?;
+        let measure = measure.ok_or("沒有量文字的函式")?;
+        let mut m = |s: &str, font: popup::Font| {
+            let (mut w, mut h) = (0.0f32, 0.0f32);
+            let s = string(s);
+            let font = u32::from(font == popup::Font::Number);
+            unsafe { measure(context, s.as_ptr(), font, &mut w, &mut h) };
+            (w, h)
+        };
+        let composition = request.composition.map(|c| {
+            let chars = c.text.chars().count();
+            let preedit = zct_core::Preedit {
+                cursor: char_index(&c.text, c.cursor),
+                target: c.target.filter(|t| t.1 > 0).map(|(start, len)| {
+                    let s = char_index(&c.text, start);
+                    (s, char_index(&c.text, start + len) - s)
+                }),
+                len: chars,
+                text: c.text,
+            };
+            popup::composition(&preedit, &mut m)
+        });
+        let candidates = request.page.map(|p| {
+            let page = zct_core::CandidatePage {
+                highlight: if p.display_only {
+                    zct_core::CandidatePage::DISPLAY_ONLY
+                } else {
+                    p.highlight
+                },
+                items: p.items,
+                page: p.page,
+                total_pages: p.total_pages,
+                pinned: p.pinned,
+                columns: p.columns,
+                first_column: p.first_column,
+            };
+            popup::candidates(&page, request.horizontal, &mut m)
+        });
+        let notice = popup::hint(&request.notice, &mut m);
+        let ([composition, candidates, notice], (width, height)) = popup::arrange([
+            composition.unwrap_or_default(),
+            candidates.unwrap_or_default(),
+            notice,
+        ]);
+        let json = serde_json::json!({
+            "width": width,
+            "height": height,
+            "composition": composition,
+            "candidates": candidates,
+            "notice": notice,
+        });
+        Ok(string(&json.to_string()).into_raw())
+    })
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct ZctPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// 面板的位置（與 Windows 共用規則：預設在游標下方，放不下改上方，不超出螢幕）。
+/// 座標往上為正：`anchor`、`work` 與回傳值都是左下角
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn zct_popup_place(
+    anchor_x: f64,
+    anchor_y: f64,
+    anchor_w: f64,
+    anchor_h: f64,
+    width: f64,
+    height: f64,
+    work_x: f64,
+    work_y: f64,
+    work_w: f64,
+    work_h: f64,
+    above: bool,
+) -> ZctPoint {
+    use zct_core::popup::{OFFSET, Rect, place_y_up};
+    let rect = |x: f64, y: f64, w: f64, h: f64| Rect {
+        x: x as f32,
+        y: y as f32,
+        w: w as f32,
+        h: h as f32,
+    };
+    let (x, y) = place_y_up(
+        rect(anchor_x, anchor_y, anchor_w, anchor_h),
+        (width as f32, height as f32),
+        rect(work_x, work_y, work_w, work_h),
+        OFFSET,
+        above,
+    );
+    ZctPoint {
+        x: x.into(),
+        y: y.into(),
+    }
+}
+
+/// 提示泡泡顯示多久（秒）
+#[unsafe(no_mangle)]
+pub extern "C" fn zct_hint_seconds() -> f64 {
+    zct_core::popup::HINT_MS as f64 / 1000.0
+}
+
+/// 數字字級相對於候選字字級
+#[unsafe(no_mangle)]
+pub extern "C" fn zct_number_ratio() -> f64 {
+    zct_core::popup::NUM_RATIO.into()
+}
+
+/// 選擇框圓角
+#[unsafe(no_mangle)]
+pub extern "C" fn zct_highlight_radius() -> f64 {
+    zct_core::popup::ROW_RADIUS.into()
+}
+
 /// Stateless AI connection test, safe on a background thread. Caller frees result.
 /// # Safety
 /// JSON and key are NUL-terminated UTF-8.
@@ -968,6 +1154,70 @@ detect = false
             zct_session_free(g);
             zct_session_free(c);
         }
+    }
+
+    unsafe extern "C" fn fixed_measure(
+        _: *mut std::ffi::c_void,
+        text: *const c_char,
+        font: u32,
+        width: *mut f32,
+        height: *mut f32,
+    ) {
+        let n = unsafe { CStr::from_ptr(text) }
+            .to_str()
+            .unwrap()
+            .chars()
+            .count() as f32;
+        unsafe {
+            *width = n * if font == 0 { 10.0 } else { 7.0 };
+            *height = if font == 0 { 20.0 } else { 15.0 };
+        }
+    }
+
+    #[test]
+    fn popup_layout_matches_windows_and_stacks_parts() {
+        // 「天😀氣」：😀 佔兩個 UTF-16，游標 3 = 第 2 個字之後
+        let request = string(
+            &serde_json::json!({
+                "composition": {"text": "天😀氣", "cursor": 3, "target": [3, 1]},
+                "page": {"items": ["氣", "汽"], "total_pages": 1, "highlight": 1},
+                "notice": "中",
+            })
+            .to_string(),
+        );
+        let json = unsafe {
+            let raw = zct_popup_layout(request.as_ptr(), Some(fixed_measure), std::ptr::null_mut());
+            assert!(!raw.is_null());
+            let out = CStr::from_ptr(raw).to_str().unwrap().to_owned();
+            zct_string_free(raw);
+            out
+        };
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let comp = &v["composition"];
+        // 游標在兩個字後面：12 + 20 - 0.75
+        assert_eq!(comp["caret"]["x"].as_f64().unwrap(), 31.25);
+        let cands = &v["candidates"];
+        let comp_h = comp["height"].as_f64().unwrap();
+        assert_eq!(
+            cands["hits"][0]["rect"]["y"].as_f64().unwrap(),
+            comp_h + 4.0,
+            "候選窗疊在組字列下面"
+        );
+        assert_eq!(cands["highlights"][0], cands["hits"][1]["rect"]);
+        assert_eq!(v["notice"]["runs"][0]["text"], "中");
+        let total =
+            comp_h + cands["height"].as_f64().unwrap() + v["notice"]["height"].as_f64().unwrap();
+        assert_eq!(v["height"].as_f64().unwrap(), total);
+        // 只顯示的注音小視窗：沒有點擊範圍
+        let request = string(r#"{"page": {"items": ["ㄋㄧ"], "display_only": true}}"#);
+        let json = unsafe {
+            let raw = zct_popup_layout(request.as_ptr(), Some(fixed_measure), std::ptr::null_mut());
+            let out = CStr::from_ptr(raw).to_str().unwrap().to_owned();
+            zct_string_free(raw);
+            out
+        };
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v["candidates"]["hits"].as_array().unwrap().is_empty());
     }
 
     #[test]

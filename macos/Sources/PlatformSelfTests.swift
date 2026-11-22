@@ -64,7 +64,8 @@ func compositionCaretSelfTest() throws {
         try check(caret.minX > previousCaret, "組字游標隨 UTF-16 位置移動")
         previousCaret = caret.minX
         if range.length > 0 {
-            try check(view.compositionTarget?.minX == caret.minX && (view.compositionTarget?.width ?? 0) > 0, "選字目標背景")
+            let target = view.compositionTarget ?? .zero
+            try check(target.width > 0 && target.minX <= caret.midX && caret.midX < target.maxX, "選字目標背景")
         } else { try check(view.compositionTarget == nil, "句尾沒有目標字") }
     }
     for row in [0, 1] {
