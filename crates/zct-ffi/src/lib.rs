@@ -78,6 +78,17 @@ impl ZctRuntime {
 pub struct ZctSession {
     inner: HostSession,
     snapshot: Snapshot,
+    /// 組字提示列的位置（規則與 Windows 共用）
+    bar: zct_core::popup::BarAnchor<ZctRect>,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct ZctRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 #[derive(Default)]
@@ -424,6 +435,7 @@ pub unsafe extern "C" fn zct_session_new(
         Ok(Box::into_raw(Box::new(ZctSession {
             inner,
             snapshot: Snapshot::default(),
+            bar: Default::default(),
         })))
     })
 }
@@ -478,6 +490,7 @@ pub unsafe extern "C" fn zct_session_key(
 pub unsafe extern "C" fn zct_session_flush(session: *mut ZctSession) -> ZctResult {
     guard(|| {
         let session = unsafe { session.as_mut() }.ok_or("空 session")?;
+        session.bar.reset();
         let r = session.inner.flush();
         Ok(session.result(r))
     })
@@ -885,6 +898,26 @@ pub extern "C" fn zct_popup_place(
     ZctPoint {
         x: x.into(),
         y: y.into(),
+    }
+}
+
+/// 組字提示列（與面板）要放的位置：組字開始時固定，組字結束才跟著游標。
+/// `fresh`：`caret` 是 App 回報的（量不到改用滑鼠位置時是 false）
+/// # Safety
+/// `session` is live and exclusive.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_session_bar_anchor(
+    session: *mut ZctSession,
+    composing: bool,
+    caret: ZctRect,
+    fresh: bool,
+) -> ZctRect {
+    match unsafe { session.as_mut() } {
+        Some(session) => session
+            .bar
+            .update(composing, Some(caret), fresh)
+            .unwrap_or(caret),
+        None => caret,
     }
 }
 

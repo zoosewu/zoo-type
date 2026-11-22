@@ -138,6 +138,11 @@ final class EngineSession {
     var isIdle: Bool { zct_session_is_idle(handle) }
     /// 不在輸入狀態（按鍵交給 App）：規則與 Windows 共用，依這個 App 的設定與規則
     func notInput(_ s: InputSignals) -> Bool { zct_session_not_input(handle, s.secure, s.hasTextContext, s.hasCaret, s.fullscreen) }
+    /// 組字提示列要放的位置（規則與 Windows 共用）：組字開始時固定，組字結束才跟著游標
+    func barAnchor(composing: Bool, caret: NSRect, fresh: Bool) -> NSRect {
+        let r = zct_session_bar_anchor(handle, composing, ZctRect(x: caret.minX, y: caret.minY, width: caret.width, height: caret.height), fresh)
+        return NSRect(x: r.x, y: r.y, width: r.width, height: r.height)
+    }
     /// 設定變了而且沒有組字：共用層換成新設定（沿用中英等狀態）。回傳有沒有換
     func refresh() -> Bool { zct_session_refresh(handle) }
     func command(_ code: UInt32) throws -> EngineResult { try EngineResult(zct_session_command(handle, code)) }

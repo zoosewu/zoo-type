@@ -16,7 +16,6 @@ final class InputController: IMKInputController {
     private var showComposition = false
     private var aiTimer: Timer?
     private var settingsTimer: Timer?
-    private var compositionAnchor: NSRect?
     private var game = false
     private var simplified = false
     private var replacement = NSRange(location: NSNotFound, length: 0)
@@ -56,7 +55,6 @@ final class InputController: IMKInputController {
     override func deactivateServer(_ sender: Any!) {
         commitComposition(sender)
         aiTimer?.invalidate(); settingsTimer?.invalidate()
-        compositionAnchor = nil
         engine = nil
         panel?.orderOut(nil)
         modifiersDown.removeAll()
@@ -174,7 +172,9 @@ final class InputController: IMKInputController {
         if result.bell { NSSound.beep() }
         var caret = NSRect.zero
         _ = client.attributes(forCharacterIndex: result.composition.text.isEmpty ? 0 : result.composition.cursor, lineHeightRectangle: &caret)
-        if caret == .zero { caret = NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 18)) }
+        // 量不到游標：改用滑鼠位置（當成沿用的位置，App 回報後再移過去）
+        let fresh = caret != .zero
+        if !fresh { caret = NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 18)) }
         if panel == nil {
             panel = CandidatePanel()
             panel?.onChoose = { [weak self] page, row in
@@ -184,9 +184,8 @@ final class InputController: IMKInputController {
             }
             panel?.onPage = { [weak self] next in self?.performCommand(next ? 3 : 4) }
         }
-        if result.composition.text.isEmpty { compositionAnchor = nil }
-        else if showComposition && compositionAnchor == nil { compositionAnchor = caret }
-        if showComposition, let anchor = compositionAnchor { caret = anchor }
+        let anchor = engine?.barAnchor(composing: !result.composition.text.isEmpty, caret: caret, fresh: fresh) ?? caret
+        if showComposition { caret = anchor }
         panel?.show(result: result, caret: caret, theme: theme, showComposition: showComposition)
     }
 

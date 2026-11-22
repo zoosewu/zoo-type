@@ -81,10 +81,8 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let mut session: Option<HostSession> = None;
     // 最近一次按鍵結果（提示文字在 notice），等 DLL 回報游標位置後再決定候選窗怎麼顯示
     let mut last: Option<KeyResult> = None;
-    // 組字提示列的位置：組字開始時的游標位置，組字結束前不跟著游標移動
-    let mut bar_anchor: Option<zct_ipc::Rect> = None;
-    // 提示列的位置是 App 回報的（不是沿用舊位置）；沿用的話，App 回報後改用新位置
-    let mut anchor_fresh = false;
+    // 組字提示列的位置（規則與 macOS 共用）
+    let mut bar_anchor = zct_core::popup::BarAnchor::<zct_ipc::Rect>::default();
 
     loop {
         let req = match conn.recv() {
@@ -182,18 +180,11 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 }
                 if let Some(r) = last.take() {
                     let bar = session.as_ref().is_some_and(|s| s.composition_bar());
-                    if r.preedit.text.is_empty() {
-                        bar_anchor = None;
-                        anchor_fresh = false;
-                    } else if bar_anchor.is_none() || (fresh && !anchor_fresh) {
-                        // VS Code 等 Chromium App 剛輸出完常回報不出位置：先用舊位置，回報後再移過去
-                        bar_anchor = rect;
-                        anchor_fresh = fresh;
-                    }
+                    let anchor = bar_anchor.update(!r.preedit.text.is_empty(), rect, fresh);
                     shared.ui.send(UiCmd::Composition {
                         owner: id,
                         preedit: bar.then(|| r.preedit.clone()),
-                        anchor: bar_anchor.or(rect),
+                        anchor,
                     });
                     match r.candidates {
                         Some(page) => shared.ui.send(UiCmd::Show {
@@ -318,8 +309,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     }
                 }
                 last = None;
-                bar_anchor = None;
-                anchor_fresh = false;
+                bar_anchor.reset();
                 shared.ui.send(UiCmd::Hide { owner: id });
                 Response::Ok
             }

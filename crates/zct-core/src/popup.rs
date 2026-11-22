@@ -520,6 +520,46 @@ pub fn stack<const N: usize>(parts: [Popup; N]) -> Popup {
     out
 }
 
+/// 組字提示列的位置：組字開始時的游標位置，組字結束前不跟著游標移動。
+/// App 剛輸出完常回報不出位置（VS Code 等 Chromium App）：先用沿用的舊位置，App 回報後再移過去
+#[derive(Debug, Clone, Copy)]
+pub struct BarAnchor<T> {
+    anchor: Option<T>,
+    /// 固定的位置是 App 回報的（不是沿用的舊位置）
+    fresh: bool,
+}
+
+impl<T> Default for BarAnchor<T> {
+    fn default() -> Self {
+        BarAnchor {
+            anchor: None,
+            fresh: false,
+        }
+    }
+}
+
+impl<T: Copy> BarAnchor<T> {
+    /// `composing`：組字區有內容；`caret`：這次的游標位置；`fresh`：`caret` 是 App 回報的。
+    /// 回傳組字提示列要放的位置
+    pub fn update(&mut self, composing: bool, caret: Option<T>, fresh: bool) -> Option<T> {
+        if !composing {
+            self.reset();
+            return caret;
+        }
+        if caret.is_some() && (self.anchor.is_none() || (fresh && !self.fresh)) {
+            self.anchor = caret;
+            self.fresh = fresh;
+        }
+        self.anchor.or(caret)
+    }
+
+    /// 失焦、取消組字
+    pub fn reset(&mut self) {
+        self.anchor = None;
+        self.fresh = false;
+    }
+}
+
 /// [`place`] 用在座標往上為正的平台（macOS）：`anchor`、`work` 與回傳的位置都是左下角
 pub fn place_y_up(anchor: Rect, size: (f32, f32), work: Rect, gap: f32, above: bool) -> (f32, f32) {
     let flip = |r: Rect| Rect {
@@ -733,6 +773,21 @@ mod tests {
             800.0,
             "不超出右邊"
         );
+    }
+
+    #[test]
+    fn composition_bar_stays_put_until_composition_ends() {
+        let mut bar = BarAnchor::default();
+        assert_eq!(bar.update(true, Some(1), true), Some(1), "組字開始時的位置");
+        assert_eq!(bar.update(true, Some(2), true), Some(1), "組字中不跟著游標");
+        assert_eq!(bar.update(false, Some(3), true), Some(3), "組字結束放開");
+        // 先拿到沿用的舊位置：App 回報後改用新位置，之後就固定
+        assert_eq!(bar.update(true, Some(4), false), Some(4));
+        assert_eq!(bar.update(true, Some(5), true), Some(5));
+        assert_eq!(bar.update(true, Some(6), true), Some(5));
+        bar.reset();
+        assert_eq!(bar.update(true, None, true), None);
+        assert_eq!(bar.update(true, Some(7), false), Some(7));
     }
 
     #[test]
