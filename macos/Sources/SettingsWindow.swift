@@ -184,6 +184,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         default:
             let value = current is NSNull ? "" : (current as? String ?? String(describing: current))
             let control = NSTextField(string: value); control.delegate = self; control.isEnabled = enabled
+            control.placeholderString = field.placeholder.isEmpty ? nil : field.placeholder
             control.widthAnchor.constraint(equalToConstant: 300).isActive = true
             control.target = self; control.action = #selector(changed(_:))
             let integer = field.integer
@@ -198,7 +199,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
                 else { set(field.nullable && control.stringValue.isEmpty ? NSNull() : control.stringValue as Any) }
             }; row(title, control)
         }
-        if !field.help.isEmpty && field.kind != "hotkey" { note(field.help) }
+        if !field.help.isEmpty { note(field.help) }
     }
     private func isLocked(_ field: PreferenceField) -> Bool { model.lockedValue(field) != nil }
     @objc private func selectPage(_ sender: NSButton) { collect(); page = sender.tag; showPage() }
@@ -254,7 +255,6 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
             body.addArrangedSubview(button("編輯設定檔…", #selector(editFile(_:))))
         default: break
         }
-        if id == "hotkeys" { note("留空表示不綁定；ctrl、shift、alt（Option）、win（Command）加按鍵，例如 shift+space。") }
         body.layoutSubtreeIfNeeded()
         if let scroll = body.enclosingScrollView { scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView) }
     }

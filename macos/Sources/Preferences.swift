@@ -29,10 +29,13 @@ struct PreferenceField {
     let range: (min: Int, max: Int)?
     /// 設定畫面不顯示（只能改設定檔）
     let hidden: Bool
+    /// 文字欄位空白時顯示的提示
+    let placeholder: String
     /// 選了某個選項時順便寫入的其他欄位：選項值 → {欄位路徑: 值}
     let also: [String: [String: Any]]
     init(_ value: [String: Any]) {
         hidden = value["hidden"] as? Bool ?? false
+        placeholder = value["placeholder"] as? String ?? ""
         also = value["also"] as? [String: [String: Any]] ?? [:]
         advanced = value["advanced"] as? Bool ?? false
         section = value["section"] as? String ?? ""

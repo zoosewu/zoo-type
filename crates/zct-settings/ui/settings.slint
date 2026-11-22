@@ -1,31 +1,6 @@
 import { AboutSlint, Button, ComboBox, LineEdit, Switch, SpinBox, StandardTableView, ListView, ScrollView, Palette } from "std-widgets.slint";
 
-export struct AiSettings {
-    enabled: bool,
-    endpoint: string,
-    model: string,
-    timeout: int,
-}
-
-export struct SyncSettings {
-    enabled: bool,
-    remote: string,
-    interval: int,
-}
-
-export struct Hotkeys {
-    width: string,
-    output: string,
-    game: string,
-    forget: string,
-    pin: string,
-    emoji: string,
-    ai: string,
-    bar: string,
-    symbols: string,
-    reconvert: string,
-}
-
+// 外觀頁的即時預覽（值來自外觀頁的欄位）
 export struct Theme {
     layout: int,            // 0 直式 1 橫式
     font: string,
@@ -247,10 +222,12 @@ component Preview inherits Rectangle {
 component ColorField inherits HorizontalLayout {
     in-out property <string> value;
     in property <color> swatch;
+    callback edited();
     spacing: 8px;
     LineEdit {
         width: 110px;
         text <=> root.value;
+        edited => { root.edited(); }
     }
     Rectangle {
         width: 24px;
@@ -270,8 +247,9 @@ export struct SharedField {
     section: string,
     // 這一列上方的分區標題（一般頁用；和上一列同一區時是空字串）
     header: string,
-    kind: int, // 0 開關、1 選單、2 文字／JSON、3 有範圍的整數、9 「進階」展開列
+    kind: int, // 0 開關、1 選單、2 文字／JSON、3 有範圍的整數、4 快捷鍵、5 顏色、9 「進階」展開列
     value: string,
+    placeholder: string,
     checked: bool,
     options: [string],
     selected: int,
@@ -283,6 +261,42 @@ export struct SharedField {
     // 被操作習慣鎖定：顯示的是固定值，儲存時保留自己的設定
     locked: bool,
     help: string,
+}
+
+/// 由設定目錄產生的欄位（一般、快捷鍵、外觀、同步、AI 頁共用）：分區、說明、進階都照目錄
+component FieldList inherits VerticalLayout {
+    in property <[SharedField]> fields;
+    // 換了選項：重新產生列表（操作習慣決定要不要顯示選字對象等）
+    callback choice-changed();
+    // 改了值（外觀頁更新預覽）
+    callback edited();
+    callback toggle-advanced();
+    pure callback hotkey-valid(string) -> bool;
+    pure callback parse-color(string) -> color;
+    spacing: 10px;
+    alignment: start;
+    for field in root.fields: VerticalLayout {
+        spacing: 6px;
+        if field.header != "": Section { text: field.header; }
+        if field.kind == 9: HorizontalLayout {
+            alignment: start;
+            Button { text: field.label; clicked => { root.toggle-advanced(); } }
+        }
+        if field.kind != 9: Row {
+            label: field.label;
+            if field.kind == 0: Switch { checked <=> field.checked; enabled: field.enabled; toggled => { root.edited(); } }
+            if field.kind == 1: ComboBox { width: 220px; model: field.options; current-index <=> field.selected; enabled: field.enabled; selected => { root.choice-changed(); } }
+            if field.kind == 2: LineEdit { width: 360px; text <=> field.value; enabled: field.enabled; placeholder-text: field.placeholder; edited => { root.edited(); } }
+            if field.kind == 3: SpinBox { width: 160px; minimum: field.minimum; maximum: field.maximum; step-size: field.step; value <=> field.number; enabled: field.enabled; edited => { root.edited(); } }
+            if field.kind == 4: HorizontalLayout {
+                spacing: 12px;
+                LineEdit { width: 220px; text <=> field.value; enabled: field.enabled; placeholder-text: field.placeholder; }
+                Text { vertical-alignment: center; color: #d13438; text: root.hotkey-valid(field.value) ? "" : "格式錯誤"; }
+            }
+            if field.kind == 5: ColorField { value <=> field.value; swatch: root.parse-color(field.value); edited => { root.edited(); } }
+        }
+        if field.help != "" && field.kind != 9: Note { text: field.help; }
+    }
 }
 
 export component SettingsWindow inherits Window {
@@ -303,10 +317,14 @@ export component SettingsWindow inherits Window {
     default-font-family: "Microsoft JhengHei UI";
 
     in-out property <int> page: 0;
-    // 一般頁（設定目錄產生）；進階展開時包含進階的欄位
+    // 由設定目錄產生的各頁欄位；一般頁進階展開時包含進階的欄位
     in-out property <[SharedField]> general-fields;
+    in-out property <[SharedField]> hotkey-fields;
+    in-out property <[SharedField]> appearance-fields;
+    in-out property <[SharedField]> sync-fields;
+    in-out property <[SharedField]> ai-fields;
+    in property <string> hotkeys-help;
     in-out property <bool> auto-update;
-    in-out property <Hotkeys> hotkeys;
     in-out property <Theme> theme;
     in property <[AppRuleRow]> apps;
     in-out property <int> app-index: -1;
@@ -317,8 +335,6 @@ export component SettingsWindow inherits Window {
     in property <[string]> backups;
     in-out property <string> restore-pending;
     in property <string> status;
-    in-out property <SyncSettings> sync;
-    in-out property <AiSettings> ai;
     in property <bool> has-api-key;
     in property <string> ai-status;
     in property <string> sync-status;
@@ -356,6 +372,8 @@ export component SettingsWindow inherits Window {
     // 一般頁換了選項（操作習慣決定要不要顯示選字對象等）、展開或收合進階：重新產生列表
     callback general-changed();
     callback toggle-advanced();
+    // 外觀頁的欄位改了：更新預覽
+    callback appearance-edited();
     callback check-update();
     callback install-update();
     callback save-api-key(string);
@@ -396,77 +414,31 @@ export component SettingsWindow inherits Window {
             if root.page == 0: ScrollView {
                 vertical-stretch: 1;
                 VerticalLayout {
-                    spacing: 10px;
                     alignment: start;
-                    for field in root.general-fields: VerticalLayout {
-                        spacing: 6px;
-                        if field.header != "": Section { text: field.header; }
-                        if field.kind == 9: HorizontalLayout {
-                            alignment: start;
-                            Button { text: field.label; clicked => { root.toggle-advanced(); } }
-                        }
-                        if field.kind != 9: Row {
-                            label: field.label;
-                            if field.kind == 0: Switch { checked <=> field.checked; enabled: field.enabled; }
-                            if field.kind == 1: ComboBox { width: 220px; model: field.options; current-index <=> field.selected; enabled: field.enabled; selected => { root.general-changed(); } }
-                            if field.kind == 2: LineEdit { width: 360px; text <=> field.value; enabled: field.enabled; }
-                            if field.kind == 3: SpinBox { width: 160px; minimum: field.minimum; maximum: field.maximum; step-size: field.step; value <=> field.number; enabled: field.enabled; }
-                        }
-                        if field.help != "" && field.kind != 9: Note { text: field.help; }
+                    FieldList {
+                        fields: root.general-fields;
+                        choice-changed => { root.general-changed(); }
+                        toggle-advanced => { root.toggle-advanced(); }
+                        hotkey-valid(t) => { return root.hotkey-valid(t); }
+                        parse-color(t) => { return root.parse-color(t); }
                     }
                 }
             }
 
             // ---- 快捷鍵 ----
             if root.page == 1: ScrollView {
-              vertical-stretch: 1;
-              VerticalLayout {
-                spacing: 10px;
-                alignment: start;
-                Section { text: "快捷鍵"; }
-                Help { text: "格式例如 ctrl+shift+f12、shift+space，留空代表不使用。沒設定的 Ctrl / Alt 組合鍵照常交給 App。"; }
-                for item in [
-                    { label: "全形 / 半形", idx: 0, help: "切換標點的全形與半形。" },
-                    { label: "繁體 / 簡體", idx: 1, help: "切換送出的文字是繁體或簡體。" },
-                    { label: "遊戲模式", idx: 2, help: "按鍵全部交給 App，Shift 不切換中英；再按一次關閉。" },
-                    { label: "忘記學習", idx: 3, help: "候選窗中：忘記選擇框那個詞的學習紀錄與優先。游標在英文單字上：不再當英文。" },
-                    { label: "設為優先", idx: 4, help: "候選窗中：選擇框那個詞以後都排第一。" },
-                    { label: "Emoji", idx: 5, help: "用組字內容找 Emoji；沒有組字時列出常用 Emoji。" },
-                    { label: "AI 修正", idx: 6, help: "用 AI 修正組字中的同音錯字。" },
-                    { label: "組字提示列", idx: 7, help: "在游標上方顯示組字內容，給看不到組字的 App（終端機）用；每個 App 分別記住。" },
-                    { label: "符號選單", idx: 8, help: "…、※、括號、希臘字母、數學符號。" },
-                    { label: "重新選字", idx: 9, help: "在 App 選取文字後按：那段文字回到組字區，可以改選字、加詞；Esc 放棄。" },
-                ]: VerticalLayout {
-                  spacing: 2px;
-                  Row {
-                    label: item.label;
-                    property <string> value: item.idx == 0 ? root.hotkeys.width : item.idx == 1 ? root.hotkeys.output : item.idx == 2 ? root.hotkeys.game : item.idx == 3 ? root.hotkeys.forget : item.idx == 4 ? root.hotkeys.pin : item.idx == 5 ? root.hotkeys.emoji : item.idx == 6 ? root.hotkeys.ai : item.idx == 7 ? root.hotkeys.bar : item.idx == 8 ? root.hotkeys.symbols : root.hotkeys.reconvert;
-                    LineEdit {
-                        width: 220px;
-                        text: parent.value;
-                        placeholder-text: "未設定";
-                        edited(t) => {
-                            if item.idx == 0 { root.hotkeys.width = t; }
-                            if item.idx == 1 { root.hotkeys.output = t; }
-                            if item.idx == 2 { root.hotkeys.game = t; }
-                            if item.idx == 3 { root.hotkeys.forget = t; }
-                            if item.idx == 4 { root.hotkeys.pin = t; }
-                            if item.idx == 5 { root.hotkeys.emoji = t; }
-                            if item.idx == 6 { root.hotkeys.ai = t; }
-                            if item.idx == 7 { root.hotkeys.bar = t; }
-                            if item.idx == 8 { root.hotkeys.symbols = t; }
-                            if item.idx == 9 { root.hotkeys.reconvert = t; }
-                        }
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Section { text: "快捷鍵"; }
+                    Help { text: root.hotkeys-help; }
+                    FieldList {
+                        fields: root.hotkey-fields;
+                        hotkey-valid(t) => { return root.hotkey-valid(t); }
+                        parse-color(t) => { return root.parse-color(t); }
                     }
-                    Text {
-                        vertical-alignment: center;
-                        color: #d13438;
-                        text: root.hotkey-valid(parent.value) ? "" : "格式錯誤";
-                    }
-                  }
-                  Note { text: item.help; }
                 }
-              }
             }
 
             // ---- 外觀 ----
@@ -475,17 +447,12 @@ export component SettingsWindow inherits Window {
                 HorizontalLayout {
                     spacing: 48px;
                     alignment: start;
-                    VerticalLayout {
-                        spacing: 10px;
-                        alignment: start;
-                        Section { text: "候選窗"; }
-                        Row { label: "排列"; ComboBox { width: 160px; model: ["直式", "橫式"]; current-index <=> root.theme.layout; } }
-                        Row { label: "字型"; LineEdit { width: 200px; text <=> root.theme.font; } }
-                        Row { label: "字級"; SpinBox { width: 160px; minimum: 8; maximum: 48; value <=> root.theme.size; } }
-                        Row { label: "背景"; ColorField { value <=> root.theme.background; swatch: root.parse-color(root.theme.background); } }
-                        Row { label: "文字"; ColorField { value <=> root.theme.text; swatch: root.parse-color(root.theme.text); } }
-                        Row { label: "數字"; ColorField { value <=> root.theme.number; swatch: root.parse-color(root.theme.number); } }
-                        Row { label: "選擇框"; ColorField { value <=> root.theme.highlight; swatch: root.parse-color(root.theme.highlight); } }
+                    FieldList {
+                        fields: root.appearance-fields;
+                        choice-changed => { root.appearance-edited(); }
+                        edited => { root.appearance-edited(); }
+                        hotkey-valid(t) => { return root.hotkey-valid(t); }
+                        parse-color(t) => { return root.parse-color(t); }
                     }
                     VerticalLayout {
                         alignment: start;
@@ -663,15 +630,11 @@ export component SettingsWindow inherits Window {
                         Button { text: "變更位置…"; enabled: !root.data-path-locked; clicked => { root.change-data-root(); } }
                     }
                     Note { text: root.data-path-locked ? "由 ZCT_HOME 環境變數指定。" : "選空的資料夾會把目前的資料複製過去；選已有資料的資料夾會直接改用它。原本的資料會保留。"; }
-                    Section { text: "git 同步"; }
-                    Text {
-                        text: "同步設定、App 規則、詞庫與統計；學習紀錄不同步。請用私人 repo。";
-                        color: Palette.foreground.with-alpha(0.6);
-                        wrap: word-wrap;
+                    FieldList {
+                        fields: root.sync-fields;
+                        hotkey-valid(t) => { return root.hotkey-valid(t); }
+                        parse-color(t) => { return root.parse-color(t); }
                     }
-                    Row { label: "自動同步"; Switch { checked <=> root.sync.enabled; } }
-                    Row { label: "遠端 repo"; LineEdit { width: 360px; text <=> root.sync.remote; placeholder-text: "git@github.com:you/zoo-type-data.git"; } }
-                    Row { label: "間隔（分鐘）"; SpinBox { width: 160px; minimum: 1; maximum: 1440; value <=> root.sync.interval; } }
                     HorizontalLayout {
                         alignment: start;
                         spacing: 12px;
@@ -688,16 +651,11 @@ export component SettingsWindow inherits Window {
                 VerticalLayout {
                     spacing: 10px;
                     alignment: start;
-                    Section { text: "AI 同音字修正"; }
-                    Text {
-                        text: "按 AI 修正快捷鍵（目前：" + (root.hotkeys.ai == "" ? "未設定" : root.hotkeys.ai) + "）修正組字中的同音錯字，結果出現在候選窗。\n只在按快捷鍵時傳送；端點不在本機時，打字內容會離開這台電腦。";
-                        color: Palette.foreground.with-alpha(0.6);
-                        wrap: word-wrap;
+                    FieldList {
+                        fields: root.ai-fields;
+                        hotkey-valid(t) => { return root.hotkey-valid(t); }
+                        parse-color(t) => { return root.parse-color(t); }
                     }
-                    Row { label: "啟用"; Switch { checked <=> root.ai.enabled; } }
-                    Row { label: "端點（OpenAI 相容）"; LineEdit { width: 360px; text <=> root.ai.endpoint; placeholder-text: "http://localhost:1234/v1"; } }
-                    Row { label: "模型"; LineEdit { width: 240px; text <=> root.ai.model; placeholder-text: "qwen3.5:2b"; } }
-                    Row { label: "逾時（秒）"; SpinBox { width: 160px; minimum: 1; maximum: 120; value <=> root.ai.timeout; } }
                     Row {
                         label: "API Key";
                         key := LineEdit { width: 240px; input-type: password; placeholder-text: root.has-api-key ? "已儲存" : "本機服務可以留空"; accepted => { if self.text != "" { root.save-api-key(self.text); self.text = ""; } } }

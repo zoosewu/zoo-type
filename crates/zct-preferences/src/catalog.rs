@@ -52,6 +52,8 @@ pub struct Field {
     pub range: Option<Range>,
     /// 設定畫面不顯示（只能改設定檔；「全部設定」頁仍列出）
     pub hidden: bool,
+    /// 文字欄位空白時顯示的提示
+    pub placeholder: String,
     /// 選了某個選項時順便寫入的其他欄位：選項值 → {欄位路徑: 值}。
     /// 目前的設定不符合任何一個選項（手動改過設定檔）時，畫面顯示「自訂」，儲存時不動這些欄位
     pub also: BTreeMap<String, BTreeMap<String, Value>>,
@@ -159,6 +161,7 @@ fn field(
         section: String::new(),
         range: None,
         hidden: false,
+        placeholder: String::new(),
         also: BTreeMap::new(),
     }
 }
@@ -255,6 +258,131 @@ const RANGES: &[(&str, i64, i64, i64)] = &[
 fn path_value<'a>(config: &'a Value, path: &str) -> &'a Value {
     path.split('.').fold(config, |v, key| &v[key])
 }
+
+/// 快捷鍵、外觀、同步、AI 頁：（欄位, 標題, 分區, 說明, 空白時的提示）
+const PAGES: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "hotkeys.width",
+        "全形 / 半形",
+        "",
+        "切換標點的全形與半形。",
+        "未設定",
+    ),
+    (
+        "hotkeys.output",
+        "繁體 / 簡體",
+        "",
+        "切換送出的文字是繁體或簡體。",
+        "未設定",
+    ),
+    (
+        "hotkeys.game_mode",
+        "遊戲模式",
+        "",
+        "按鍵全部交給 App，Shift 不切換中英；再按一次關閉。",
+        "未設定",
+    ),
+    (
+        "hotkeys.forget",
+        "忘記學習",
+        "",
+        "候選窗中：忘記選擇框那個詞的學習紀錄與優先。游標在英文單字上：不再當英文。",
+        "未設定",
+    ),
+    (
+        "hotkeys.pin",
+        "設為優先",
+        "",
+        "候選窗中：選擇框那個詞以後都排第一。",
+        "未設定",
+    ),
+    (
+        "hotkeys.emoji",
+        "Emoji",
+        "",
+        "用組字內容找 Emoji；沒有組字時列出常用 Emoji。",
+        "未設定",
+    ),
+    (
+        "hotkeys.ai",
+        "AI 修正",
+        "",
+        "用 AI 修正組字中的同音錯字。",
+        "未設定",
+    ),
+    (
+        "hotkeys.composition_bar",
+        "組字提示列",
+        "",
+        "在游標上方顯示組字內容，給看不到組字的 App（終端機）用；每個 App 分別記住。",
+        "未設定",
+    ),
+    (
+        "hotkeys.symbols",
+        "符號選單",
+        "",
+        "…、※、括號、希臘字母、數學符號。",
+        "未設定",
+    ),
+    (
+        "hotkeys.reconvert",
+        "重新選字",
+        "",
+        "在 App 選取文字後按：那段文字回到組字區，可以改選字、加詞；Esc 放棄。",
+        "未設定",
+    ),
+    ("theme.layout", "排列", "候選窗", "", ""),
+    (
+        "theme.font",
+        "字型",
+        "候選窗",
+        "未安裝指定字型時使用系統字型。",
+        "",
+    ),
+    ("theme.font_size", "字級", "候選窗", "", ""),
+    ("theme.background", "背景", "候選窗", "", ""),
+    ("theme.text", "文字", "候選窗", "", ""),
+    ("theme.number", "數字", "候選窗", "", ""),
+    ("theme.highlight", "選擇框", "候選窗", "", ""),
+    (
+        "theme.composition_bar",
+        "組字提示列",
+        "組字提示列",
+        "在游標上方另外顯示組字內容。終端機預設開啟；每個 App 可以用快捷鍵分別切換。",
+        "",
+    ),
+    (
+        "sync.enabled",
+        "自動同步",
+        "git 同步",
+        "同步設定、App 規則、詞庫與統計；學習紀錄不同步。請用私人 repo。",
+        "",
+    ),
+    (
+        "sync.remote",
+        "遠端 repo",
+        "git 同步",
+        "",
+        "git@github.com:you/zoo-type-data.git",
+    ),
+    ("sync.interval_minutes", "間隔（分鐘）", "git 同步", "", ""),
+    (
+        "ai.enabled",
+        "啟用",
+        "AI 同音字修正",
+        "按 AI 修正快捷鍵修正組字中的同音錯字，結果出現在候選窗。只在按快捷鍵時傳送；端點不在本機時，打字內容會離開這台電腦。",
+        "",
+    ),
+    (
+        "ai.endpoint",
+        "端點（OpenAI 相容）",
+        "AI 同音字修正",
+        "",
+        "http://localhost:1234/v1",
+    ),
+    ("ai.model", "模型", "AI 同音字修正", "", "qwen3.5:2b"),
+    ("ai.timeout_seconds", "逾時（秒）", "AI 同音字修正", "", ""),
+];
 
 /// 設定畫面不顯示的欄位（只能改設定檔）
 const HIDDEN: &[&str] = &[
@@ -549,11 +677,13 @@ pub fn catalog(platform: Platform) -> Catalog {
                 values,
             });
         }
-        if field.kind == Hotkey {
-            field.help = "留空表示不綁定；ctrl、shift、alt（Option）、win（Command）加按鍵，例如 shift+space。".into();
-        }
-        if field.path == "theme.font" {
-            field.help = "未安裝指定字型時使用目前平台的系統字型。".into();
+        if let Some(&(_, label, section, help, placeholder)) =
+            PAGES.iter().find(|(p, ..)| *p == field.path)
+        {
+            field.label = label.into();
+            field.section = section.into();
+            field.help = help.into();
+            field.placeholder = placeholder.into();
         }
         if let Some((section, help)) = GENERAL
             .iter()
@@ -577,9 +707,17 @@ pub fn catalog(platform: Platform) -> Catalog {
             field.range = Some(Range { min, max, step });
         }
     }
+    let hotkeys_help = match platform {
+        Platform::Windows => {
+            "格式例如 ctrl+shift+f12、shift+space，留空代表不使用。沒設定的 Ctrl / Alt 組合鍵照常交給 App。"
+        }
+        Platform::Macos => {
+            "格式例如 ctrl+shift+f12、shift+space，留空代表不使用；alt 是 Option、win 是 Command。沒設定的組合鍵照常交給 App。"
+        }
+    };
     let pages = [
         ("general", "一般", "輸入、符號、中英混打與候選排序。"),
-        ("hotkeys", "快捷鍵", "兩平台共用相同的快捷鍵語法。"),
+        ("hotkeys", "快捷鍵", hotkeys_help),
         ("appearance", "外觀", "排列、字型、配色與即時預覽。"),
         (
             "apps",

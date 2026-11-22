@@ -22,40 +22,6 @@ slint::include_modules!();
 
 // ---- 設定檔 ↔ 介面 ----
 
-fn ai_from(c: &Config) -> AiSettings {
-    AiSettings {
-        enabled: c.ai.enabled,
-        endpoint: c.ai.endpoint.clone().into(),
-        model: c.ai.model.clone().into(),
-        timeout: c.ai.timeout_seconds as i32,
-    }
-}
-
-fn apply_ai(c: &mut Config, a: &AiSettings) {
-    c.ai.enabled = a.enabled;
-    c.ai.endpoint = a.endpoint.trim().to_string();
-    c.ai.model = a.model.trim().to_string();
-    c.ai.timeout_seconds = a.timeout.max(1) as u64;
-}
-
-fn sync_from(c: &Config) -> SyncSettings {
-    SyncSettings {
-        enabled: c.sync.enabled,
-        remote: c.sync.remote.clone().into(),
-        interval: c.sync.interval_minutes as i32,
-    }
-}
-
-fn apply_sync(c: &mut Config, s: &SyncSettings) {
-    c.sync.enabled = s.enabled;
-    c.sync.remote = s.remote.trim().to_string();
-    c.sync.interval_minutes = s.interval.max(1) as u64;
-}
-
-fn binding_text(b: &Binding) -> SharedString {
-    b.0.map(|h| h.to_string()).unwrap_or_default().into()
-}
-
 fn parse_binding(s: &str) -> Result<Binding, String> {
     if s.trim().is_empty() {
         Ok(Binding(None))
@@ -64,36 +30,7 @@ fn parse_binding(s: &str) -> Result<Binding, String> {
     }
 }
 
-fn hotkeys_from(c: &Config) -> Hotkeys {
-    let h = &c.hotkeys;
-    Hotkeys {
-        width: binding_text(&h.width),
-        output: binding_text(&h.output),
-        game: binding_text(&h.game_mode),
-        forget: binding_text(&h.forget),
-        pin: binding_text(&h.pin),
-        emoji: binding_text(&h.emoji),
-        ai: binding_text(&h.ai),
-        bar: binding_text(&h.composition_bar),
-        symbols: binding_text(&h.symbols),
-        reconvert: binding_text(&h.reconvert),
-    }
-}
-
-fn apply_hotkeys(c: &mut Config, h: &Hotkeys) -> Result<(), String> {
-    c.hotkeys.width = parse_binding(&h.width)?;
-    c.hotkeys.output = parse_binding(&h.output)?;
-    c.hotkeys.game_mode = parse_binding(&h.game)?;
-    c.hotkeys.forget = parse_binding(&h.forget)?;
-    c.hotkeys.pin = parse_binding(&h.pin)?;
-    c.hotkeys.emoji = parse_binding(&h.emoji)?;
-    c.hotkeys.ai = parse_binding(&h.ai)?;
-    c.hotkeys.composition_bar = parse_binding(&h.bar)?;
-    c.hotkeys.symbols = parse_binding(&h.symbols)?;
-    c.hotkeys.reconvert = parse_binding(&h.reconvert)?;
-    Ok(())
-}
-
+/// 外觀頁的即時預覽
 fn theme_from(c: &Config) -> Theme {
     let t = &c.theme;
     Theme {
@@ -105,24 +42,6 @@ fn theme_from(c: &Config) -> Theme {
         number: t.number.to_string().into(),
         highlight: t.highlight.to_string().into(),
     }
-}
-
-fn apply_theme(c: &mut Config, t: &Theme) -> Result<(), String> {
-    let color = |s: &SharedString| s.parse::<Color>();
-    c.theme.layout = if t.layout == 1 {
-        Layout::Horizontal
-    } else {
-        Layout::Vertical
-    };
-    c.theme.font = t.font.trim().to_string();
-    if t.size != c.theme.font_size.round() as i32 {
-        c.theme.font_size = t.size.clamp(8, 48) as f32;
-    }
-    c.theme.background = color(&t.background)?;
-    c.theme.text = color(&t.text)?;
-    c.theme.number = color(&t.number)?;
-    c.theme.highlight = color(&t.highlight)?;
-    Ok(())
 }
 
 /// 0 = 沿用全域；其餘依序對應選項
@@ -516,8 +435,11 @@ fn field_row(
             FieldKind::Bool => 0,
             FieldKind::Choice => 1,
             FieldKind::Number if range.is_some() => 3,
+            FieldKind::Hotkey => 4,
+            FieldKind::Color => 5,
             _ => 2,
         },
+        placeholder: field.placeholder.clone().into(),
         value: value
             .as_str()
             .map(str::to_owned)
@@ -573,9 +495,9 @@ fn shared_fields(config: &Config) -> Vec<SharedField> {
         .collect()
 }
 
-/// 一般頁：分區標題、說明、進階都照設定目錄（與 macOS 同一份）。
-/// 被操作習慣鎖定的欄位不顯示；`advanced`：進階展開
-fn general_fields(config: &Config, advanced: bool) -> Vec<SharedField> {
+/// 一頁的欄位：分區標題、說明、進階都照設定目錄（與 macOS 同一份）。
+/// 不在設定畫面與被操作習慣鎖定的欄位不顯示；`advanced`：進階展開
+fn page_fields(config: &Config, page: &str, advanced: bool) -> Vec<SharedField> {
     let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
     let values = serde_json::to_value(config).expect("serializable Config");
     let capabilities =
@@ -583,7 +505,7 @@ fn general_fields(config: &Config, advanced: bool) -> Vec<SharedField> {
     let fields = catalog
         .fields
         .iter()
-        .filter(|f| f.page == "general" && !f.hidden && f.locked_value(&values).is_none());
+        .filter(|f| f.page == page && !f.hidden && f.locked_value(&values).is_none());
     let mut rows = Vec::new();
     let mut section = "";
     for field in fields.clone().filter(|f| !f.advanced) {
@@ -647,37 +569,81 @@ fn apply_rows(config: &Config, rows: &ModelRc<SharedField>) -> Result<Config, St
     zct_preferences::validate(&config)
 }
 
-/// 一般頁換了選項或展開／收合進階：畫面上的值寫進 `config`（暫存，切頁不會遺失），重新產生列表
+/// 由設定目錄產生的頁面：（頁面, 讀列表, 換列表）
+type PageModel = (
+    &'static str,
+    fn(&SettingsWindow) -> ModelRc<SharedField>,
+    fn(&SettingsWindow, ModelRc<SharedField>),
+);
+
+const PAGES: [PageModel; 5] = [
+    (
+        "general",
+        SettingsWindow::get_general_fields,
+        SettingsWindow::set_general_fields,
+    ),
+    (
+        "hotkeys",
+        SettingsWindow::get_hotkey_fields,
+        SettingsWindow::set_hotkey_fields,
+    ),
+    (
+        "appearance",
+        SettingsWindow::get_appearance_fields,
+        SettingsWindow::set_appearance_fields,
+    ),
+    (
+        "sync",
+        SettingsWindow::get_sync_fields,
+        SettingsWindow::set_sync_fields,
+    ),
+    (
+        "ai",
+        SettingsWindow::get_ai_fields,
+        SettingsWindow::set_ai_fields,
+    ),
+];
+
+/// 各頁畫面上的值寫回設定
+fn apply_pages(ui: &SettingsWindow, config: &Config) -> Result<Config, String> {
+    PAGES
+        .iter()
+        .try_fold(config.clone(), |c, (_, get, _)| apply_rows(&c, &get(ui)))
+}
+
+/// 依設定重新產生各頁的列表與外觀預覽
+fn show_pages(ui: &SettingsWindow, config: &Config) {
+    for (page, _, set) in PAGES {
+        let advanced = page == "general" && ui.get_show_advanced();
+        set(
+            ui,
+            ModelRc::new(VecModel::from(page_fields(config, page, advanced))),
+        );
+    }
+    ui.set_theme(theme_from(config));
+}
+
+/// 換了選項或展開／收合進階：畫面上的值寫進 `config`（暫存，切頁不會遺失），重新產生列表
 fn rebuild_general(ui: &SettingsWindow, config: &mut Config, toggle: bool) -> Result<(), String> {
-    *config = apply_rows(config, &ui.get_general_fields())?;
+    *config = apply_pages(ui, config)?;
     if toggle {
         ui.set_show_advanced(!ui.get_show_advanced());
     }
-    ui.set_general_fields(ModelRc::new(VecModel::from(general_fields(
-        config,
-        ui.get_show_advanced(),
-    ))));
+    show_pages(ui, config);
     Ok(())
 }
 
 fn show_primary_settings(ui: &SettingsWindow, config: &Config) {
-    ui.set_general_fields(ModelRc::new(VecModel::from(general_fields(
-        config,
-        ui.get_show_advanced(),
-    ))));
+    show_pages(ui, config);
     ui.set_auto_update(config.update.auto_check);
-    ui.set_hotkeys(hotkeys_from(config));
-    ui.set_theme(theme_from(config));
-    ui.set_sync(sync_from(config));
-    ui.set_ai(ai_from(config));
+    let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
+    if let Some(page) = catalog.pages.iter().find(|p| p.id == "hotkeys") {
+        ui.set_hotkeys_help(page.help.clone().into());
+    }
 }
 fn collect_primary_settings(ui: &SettingsWindow, original: &Config) -> Result<Config, String> {
-    let mut config = apply_rows(original, &ui.get_general_fields())?;
+    let mut config = apply_pages(ui, original)?;
     config.update.auto_check = ui.get_auto_update();
-    apply_sync(&mut config, &ui.get_sync());
-    apply_ai(&mut config, &ui.get_ai());
-    apply_hotkeys(&mut config, &ui.get_hotkeys())?;
-    apply_theme(&mut config, &ui.get_theme())?;
     Ok(config)
 }
 
@@ -843,6 +809,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             ui.on_general_changed(rebuild);
         }
+    }
+
+    // 外觀頁改了值：更新預覽（不重新產生列表，打字時才不會失去焦點；格式還不對時先不更新）
+    {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        ui.on_appearance_edited(move || {
+            let ui = ui_weak.unwrap();
+            if let Ok(config) = apply_pages(&ui, &state.borrow().config) {
+                ui.set_theme(theme_from(&config));
+            }
+        });
     }
 
     // 儲存設定
@@ -1028,8 +1005,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (ui_weak, state) = (ui.as_weak(), state.clone());
         ui.on_test_ai(move || {
             let ui = ui_weak.unwrap();
-            let mut config = Config::default();
-            apply_ai(&mut config, &ui.get_ai());
+            // 用畫面上的 AI 設定測試（還沒儲存也可以）
+            let config = match apply_rows(&state.borrow().config, &ui.get_ai_fields()) {
+                Ok(config) => config,
+                Err(e) => {
+                    ui.set_ai_status(e.into());
+                    return;
+                }
+            };
             let message = match state
                 .borrow_mut()
                 .service
@@ -1327,9 +1310,12 @@ mod tests {
         let rows = ModelRc::new(VecModel::from(shared_fields(&config)));
         let roundtrip = apply_rows(&config, &rows).unwrap();
         assert_eq!(roundtrip, config);
-        let theme = theme_from(&config);
-        apply_theme(&mut config, &theme).unwrap();
-        assert_eq!(config.theme.font_size, 16.5);
+        // 外觀頁：小數的字級原樣保留
+        let appearance = ModelRc::new(VecModel::from(page_fields(&config, "appearance", false)));
+        assert_eq!(
+            apply_rows(&config, &appearance).unwrap().theme.font_size,
+            16.5
+        );
     }
 
     use super::*;
@@ -1365,14 +1351,14 @@ mod tests {
             "自己的設定不會被固定值蓋掉"
         );
         // 一般頁：不顯示，存檔保留自己的設定
-        let general = rows(general_fields(&config, true));
+        let general = rows(page_fields(&config, "general", true));
         assert!(row(&general, "candidates.select").is_none());
         assert!(row(&general, "candidates.after_select").is_none());
         assert_eq!(apply_rows(&config, &general).unwrap(), config);
         // 切回自訂：顯示自己的設定
         let mut custom = config.clone();
         custom.candidates.habit = Habit::Custom;
-        let general = rows(general_fields(&custom, false));
+        let general = rows(page_fields(&custom, "general", false));
         let select = row(&general, "candidates.select").unwrap();
         assert!(!select.locked && select.enabled);
         assert_eq!(select.selected, 0, "自己的「游標後的詞」");
@@ -1381,7 +1367,7 @@ mod tests {
     #[test]
     fn english_choice_also_sets_typing_and_shows_custom_for_hand_edits() {
         let field = |config: &Config| {
-            general_fields(config, false)
+            page_fields(config, "general", false)
                 .into_iter()
                 .find(|r| r.path == "mixed.english")
                 .unwrap()
@@ -1389,7 +1375,7 @@ mod tests {
         let mut config = Config::default();
         assert_eq!(field(&config).selected, 1, "中文優先");
         assert!(
-            general_fields(&config, true).iter().all(|r| ![
+            page_fields(&config, "general", true).iter().all(|r| ![
                 "mixed.typing",
                 "mixed.english_candidate",
                 "mixed.auto_space"
@@ -1414,7 +1400,7 @@ mod tests {
     #[test]
     fn general_page_follows_the_catalog_sections_and_advanced() {
         let config = Config::default();
-        let basic = general_fields(&config, false);
+        let basic = page_fields(&config, "general", false);
         let headers: Vec<_> = basic
             .iter()
             .filter(|r| !r.header.is_empty())
@@ -1423,7 +1409,7 @@ mod tests {
         assert_eq!(headers, ["輸入", "候選字", "中英混打"]);
         assert_eq!(basic.last().unwrap().kind, 9, "最後是進階展開列");
         assert!(basic.iter().all(|r| r.path != "input.output"), "進階收合");
-        let all = general_fields(&config, true);
+        let all = page_fields(&config, "general", true);
         assert!(all.iter().any(|r| r.path == "input.output"));
         let per_page = all
             .iter()
@@ -1459,23 +1445,29 @@ mod tests {
         c.ai.model = "qwen3.5:2b".into();
         c.hotkeys.ai = Binding(None);
 
-        let mut back = apply_rows(&Config::default(), &rows(general_fields(&c, true))).unwrap();
-        apply_sync(&mut back, &sync_from(&c));
-        apply_ai(&mut back, &ai_from(&c));
-        apply_hotkeys(&mut back, &hotkeys_from(&c)).unwrap();
-        apply_theme(&mut back, &theme_from(&c)).unwrap();
+        // 每一頁畫面上的值寫回預設設定：得到原本的設定
+        let back = PAGES.iter().fold(Config::default(), |back, (page, ..)| {
+            apply_rows(&back, &rows(page_fields(&c, page, true))).unwrap()
+        });
         assert_eq!(back, c);
     }
 
     #[test]
     fn invalid_ui_values_are_rejected() {
-        let mut c = Config::default();
-        let mut h = hotkeys_from(&c);
-        h.game = "ctrl+bogus".into();
-        assert!(apply_hotkeys(&mut c, &h).is_err());
-        let mut t = theme_from(&c);
-        t.text = "紅色".into();
-        assert!(apply_theme(&mut c, &t).is_err());
+        let c = Config::default();
+        let edited = |page: &str, path: &str, value: &str| {
+            let rows = rows(page_fields(&c, page, false));
+            let i = (0..rows.row_count())
+                .find(|&i| rows.row_data(i).unwrap().path == path)
+                .unwrap();
+            let mut row = rows.row_data(i).unwrap();
+            row.value = value.into();
+            rows.set_row_data(i, row);
+            apply_rows(&c, &rows)
+        };
+        assert!(edited("hotkeys", "hotkeys.game_mode", "ctrl+bogus").is_err());
+        assert!(edited("appearance", "theme.text", "紅色").is_err());
+        assert!(edited("hotkeys", "hotkeys.game_mode", "ctrl+shift+f9").is_ok());
     }
 
     #[test]
