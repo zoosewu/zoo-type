@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use slint::{Model, ModelRc, SharedString, StandardListViewItem, VecModel};
-use zct_core::config::{Color, GameMode, InputMode, Layout, OnFocus, Output, Width};
+use zct_core::config::{Color, Layout};
 use zct_core::hotkey::{Binding, Hotkey};
 use zct_core::paths::DataRoot;
 use zct_core::{AppRule, AppRules, Config, PhraseAction, PhraseEntry};
@@ -44,72 +44,58 @@ fn theme_from(c: &Config) -> Theme {
     }
 }
 
-/// 0 = 沿用全域；其餘依序對應選項
-fn pick<T: Copy>(i: i32, options: &[T]) -> Option<T> {
-    usize::try_from(i - 1)
-        .ok()
-        .and_then(|i| options.get(i).copied())
+/// 選中的 App 規則：設定目錄的 App 欄位（與 macOS 同一份）
+fn rule_fields(rule: &AppRule) -> Vec<SharedField> {
+    let catalog = zct_preferences::catalog(zct_preferences::Platform::Windows);
+    let values = serde_json::to_value(rule).expect("serializable AppRule");
+    let capabilities =
+        serde_json::to_value(&catalog.capabilities).expect("serializable capabilities");
+    catalog
+        .app_fields
+        .iter()
+        .map(|f| field_row(f, &values, &capabilities, ""))
+        .collect()
 }
 
-fn index_of<T: PartialEq>(v: Option<T>, options: &[T]) -> i32 {
-    v.and_then(|v| options.iter().position(|o| *o == v))
-        .map_or(0, |i| i as i32 + 1)
-}
-
-const MODES: [InputMode; 2] = [InputMode::Chinese, InputMode::English];
-const WIDTHS: [Width; 2] = [Width::Full, Width::Half];
-const OUTPUTS: [Output; 2] = [Output::Traditional, Output::Simplified];
-const FOCUS: [OnFocus; 2] = [OnFocus::Remember, OnFocus::Reset];
-const DETECT: [bool; 2] = [true, false];
-
-fn row_from(r: &AppRule) -> AppRuleRow {
-    AppRuleRow {
-        name: r.name.clone().into(),
-        windows: r.windows.clone().unwrap_or_default().into(),
-        macos: r.macos.clone().unwrap_or_default().into(),
-        default_mode: index_of(r.default_mode, &MODES),
-        punctuation: index_of(r.punctuation, &WIDTHS),
-        output: index_of(r.output, &OUTPUTS),
-        on_focus: index_of(r.on_focus, &FOCUS),
-        game: match r.game_mode {
-            Some(GameMode::English) => 1,
-            Some(GameMode::Keep) => 2,
-            _ => 0,
-        },
-        detect: index_of(r.detect, &DETECT),
-        bar: index_of(r.composition_bar, &DETECT),
+/// 畫面上的 App 欄位寫回規則（文字留空是沒設定；選項選「自訂」時不動）
+fn rule_from_fields(rule: &AppRule, rows: &ModelRc<SharedField>) -> Result<AppRule, String> {
+    use zct_preferences::FieldKind;
+    let fields = zct_preferences::app_fields();
+    let mut json = serde_json::to_value(rule).map_err(|e| e.to_string())?;
+    for row in (0..rows.row_count()).filter_map(|i| rows.row_data(i)) {
+        let field = fields
+            .iter()
+            .find(|f| f.path == row.path.as_str())
+            .ok_or("App 規則欄位定義不一致")?;
+        let value = match field.kind {
+            FieldKind::Choice => match field.choices.get(row.selected as usize) {
+                Some(choice) => choice.value.clone(),
+                None => continue,
+            },
+            FieldKind::Bool => serde_json::Value::Bool(row.checked),
+            _ => {
+                let text = row.value.trim();
+                if text.is_empty() && field.nullable {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String(text.to_owned())
+                }
+            }
+        };
+        json[field.path.as_str()] = value;
     }
+    serde_json::from_value(json).map_err(|e| e.to_string())
 }
 
-fn rule_from(r: &AppRuleRow) -> AppRule {
-    let text = |s: &SharedString| Some(s.trim().to_string()).filter(|s| !s.is_empty());
-    AppRule {
-        name: r.name.trim().to_string(),
-        windows: text(&r.windows),
-        macos: text(&r.macos),
-        default_mode: pick(r.default_mode, &MODES),
-        punctuation: pick(r.punctuation, &WIDTHS),
-        output: pick(r.output, &OUTPUTS),
-        on_focus: pick(r.on_focus, &FOCUS),
-        game_mode: match r.game {
-            1 => Some(GameMode::English),
-            2 => Some(GameMode::Keep),
-            _ => None,
-        },
-        detect: pick(r.detect, &DETECT),
-        composition_bar: pick(r.bar, &DETECT),
-    }
-}
-
-fn table_rows(rows: &VecModel<AppRuleRow>) -> ModelRc<ModelRc<StandardListViewItem>> {
-    let item = |s: &SharedString| StandardListViewItem::from(s.clone());
-    let v: Vec<ModelRc<StandardListViewItem>> = rows
+fn table_rows(rules: &[AppRule]) -> ModelRc<ModelRc<StandardListViewItem>> {
+    let item = |s: &str| StandardListViewItem::from(SharedString::from(s));
+    let v: Vec<ModelRc<StandardListViewItem>> = rules
         .iter()
         .map(|r| {
             ModelRc::new(VecModel::from(vec![
                 item(&r.name),
-                item(&r.windows),
-                item(&r.macos),
+                item(r.windows.as_deref().unwrap_or_default()),
+                item(r.macos.as_deref().unwrap_or_default()),
             ]))
         })
         .collect();
@@ -440,11 +426,13 @@ fn field_row(
             _ => 2,
         },
         placeholder: field.placeholder.clone().into(),
-        value: value
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| value.to_string())
-            .into(),
+        // 沒設定（null）顯示空白
+        value: match value {
+            serde_json::Value::Null => String::new(),
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        }
+        .into(),
         checked: value.as_bool().unwrap_or(false),
         // 目前的設定不符合任何選項（手動改過設定檔）：多一個「自訂」，選著它儲存時不動
         options: ModelRc::new(VecModel::from(
@@ -683,11 +671,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_shared_fields(ModelRc::new(VecModel::from(shared_fields(&config))));
     show_primary_settings(&ui, &config);
     ui.set_has_api_key(zct_ipc::secret::read_ai_key().is_some());
-    let apps = Rc::new(VecModel::from(
-        rules.apps.iter().map(row_from).collect::<Vec<_>>(),
-    ));
-    ui.set_apps(ModelRc::from(apps.clone()));
-    ui.set_apps_rows(table_rows(&apps));
+    let apps = Rc::new(RefCell::new(rules.apps.clone()));
+    ui.set_apps_rows(table_rows(&apps.borrow()));
 
     let service = Service::start();
     ui.set_version(env!("CARGO_PKG_VERSION").into());
@@ -837,7 +822,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let document = Document {
                     config,
                     apps: AppRules {
-                        apps: apps.iter().map(|r| rule_from(&r)).collect(),
+                        apps: apps.borrow().clone(),
                     },
                 };
                 SettingsStore::new(st.data.clone()).save(&document, Some(&st.revision))
@@ -854,13 +839,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // App 規則
+    // App 規則：表單由設定目錄的 App 欄位產生
     {
         let (ui_weak, apps) = (ui.as_weak(), apps.clone());
         ui.on_select_app(move |i| {
             let ui = ui_weak.unwrap();
-            if let Some(row) = apps.row_data(i as usize) {
-                ui.set_app_edit(row);
+            if let Some(rule) = apps.borrow().get(i as usize) {
+                ui.set_app_fields(ModelRc::new(VecModel::from(rule_fields(rule))));
             }
         });
     }
@@ -868,11 +853,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (ui_weak, apps) = (ui.as_weak(), apps.clone());
         ui.on_apply_app(move || {
             let ui = ui_weak.unwrap();
-            let i = ui.get_app_index();
-            if i >= 0 {
-                apps.set_row_data(i as usize, ui.get_app_edit());
-                ui.set_apps_rows(table_rows(&apps));
-                ui.set_status("已套用，按「儲存設定」寫入檔案".into());
+            let Ok(i) = usize::try_from(ui.get_app_index()) else {
+                return;
+            };
+            let mut rules = apps.borrow_mut();
+            let Some(rule) = rules.get_mut(i) else { return };
+            match rule_from_fields(rule, &ui.get_app_fields()) {
+                Ok(edited) => {
+                    *rule = edited;
+                    ui.set_apps_rows(table_rows(&rules));
+                    ui.set_status("已套用，按「儲存設定」寫入檔案".into());
+                }
+                Err(e) => ui.set_status(e.into()),
             }
         });
     }
@@ -880,23 +872,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (ui_weak, apps) = (ui.as_weak(), apps.clone());
         ui.on_add_app(move || {
             let ui = ui_weak.unwrap();
-            let row = row_from(&AppRule {
+            let rule = AppRule {
                 name: "新規則".into(),
                 ..Default::default()
-            });
-            apps.push(row.clone());
-            ui.set_apps_rows(table_rows(&apps));
-            ui.set_app_index(apps.row_count() as i32 - 1);
-            ui.set_app_edit(row);
+            };
+            ui.set_app_fields(ModelRc::new(VecModel::from(rule_fields(&rule))));
+            let mut rules = apps.borrow_mut();
+            rules.push(rule);
+            ui.set_apps_rows(table_rows(&rules));
+            ui.set_app_index(rules.len() as i32 - 1);
         });
     }
     {
         let (ui_weak, apps) = (ui.as_weak(), apps.clone());
         ui.on_remove_app(move |i| {
             let ui = ui_weak.unwrap();
-            if i >= 0 && (i as usize) < apps.row_count() {
-                apps.remove(i as usize);
-                ui.set_apps_rows(table_rows(&apps));
+            let mut rules = apps.borrow_mut();
+            if let Ok(i) = usize::try_from(i)
+                && i < rules.len()
+            {
+                rules.remove(i);
+                ui.set_apps_rows(table_rows(&rules));
                 ui.set_app_index(-1);
             }
         });
@@ -1320,7 +1316,8 @@ mod tests {
 
     use super::*;
     use zct_core::config::{
-        AfterSelect, EnglishWords, Habit, SelectSide, ShiftToggle, TypingDisplay,
+        AfterSelect, EnglishWords, GameMode, Habit, InputMode, OnFocus, Output, SelectSide,
+        ShiftToggle, TypingDisplay, Width,
     };
 
     fn rows(fields: Vec<SharedField>) -> ModelRc<SharedField> {
@@ -1484,11 +1481,16 @@ mod tests {
             detect: Some(false),
             composition_bar: Some(true),
         };
-        assert_eq!(rule_from(&row_from(&rule)), rule);
-        assert_eq!(
-            rule_from(&row_from(&AppRule::default())),
-            AppRule::default()
-        );
+        // 表單（設定目錄的 App 欄位）讀進來再寫回：得到原本的規則
+        let roundtrip = |r: &AppRule| {
+            rule_from_fields(
+                &AppRule::default(),
+                &ModelRc::new(VecModel::from(rule_fields(r))),
+            )
+            .unwrap()
+        };
+        assert_eq!(roundtrip(&rule), rule);
+        assert_eq!(roundtrip(&AppRule::default()), AppRule::default());
     }
 
     #[test]

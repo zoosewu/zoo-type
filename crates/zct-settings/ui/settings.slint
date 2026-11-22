@@ -11,20 +11,6 @@ export struct Theme {
     highlight: string,
 }
 
-// 0 = 沿用全域設定
-export struct AppRuleRow {
-    name: string,
-    windows: string,
-    macos: string,
-    default-mode: int,      // 0 / 1 中文 / 2 英文
-    punctuation: int,       // 0 / 1 全形 / 2 半形
-    output: int,            // 0 / 1 繁體 / 2 簡體
-    on-focus: int,          // 0 / 1 記住 / 2 重設
-    game: int,              // 0 關 / 1 鎖定英文 / 2 保留狀態
-    detect: int,            // 0 / 1 開 / 2 關
-    bar: int,               // 組字提示列：0 沿用 / 1 開 / 2 關
-}
-
 export struct Phrase {
     word: string,
     bopomofo: string,
@@ -326,9 +312,9 @@ export component SettingsWindow inherits Window {
     in property <string> hotkeys-help;
     in-out property <bool> auto-update;
     in-out property <Theme> theme;
-    in property <[AppRuleRow]> apps;
     in-out property <int> app-index: -1;
-    in-out property <AppRuleRow> app-edit;
+    // 選中的 App 規則（設定目錄的 App 欄位產生）
+    in-out property <[SharedField]> app-fields;
     in property <[Phrase]> phrases;
     in property <[Day]> days;
     in property <string> summary;
@@ -472,7 +458,7 @@ export component SettingsWindow inherits Window {
             if root.page == 3: VerticalLayout {
                 vertical-stretch: 1;
                 spacing: 10px;
-                Help { text: "對個別 App 覆寫設定。執行檔名稱在工作管理員的「詳細資料」分頁。"; }
+                Help { text: "對個別 App 覆寫設定；沒設定的沿用全域設定。"; }
                 StandardTableView {
                     min-height: 160px;
                     columns: [{ title: "名稱" }, { title: "Windows" }, { title: "macOS" }];
@@ -488,17 +474,11 @@ export component SettingsWindow inherits Window {
                 }
                 if root.app-index >= 0: VerticalLayout {
                     spacing: 8px;
-                    Row { label: "名稱"; LineEdit { width: 220px; text <=> root.app-edit.name; accepted => { root.apply-app(); } } }
-                    Row { label: "Windows 執行檔"; LineEdit { width: 220px; text <=> root.app-edit.windows; placeholder-text: "Code.exe"; accepted => { root.apply-app(); } } }
-                    Row { label: "macOS Bundle ID"; LineEdit { width: 220px; text <=> root.app-edit.macos; placeholder-text: "com.microsoft.VSCode"; accepted => { root.apply-app(); } } }
-                    Row { label: "預設模式"; ComboBox { width: 160px; model: ["沿用全域", "中文", "英文"]; current-index <=> root.app-edit.default-mode; } }
-                    Row { label: "標點"; ComboBox { width: 160px; model: ["沿用全域", "全形", "半形"]; current-index <=> root.app-edit.punctuation; } }
-                    Row { label: "輸出"; ComboBox { width: 160px; model: ["沿用全域", "繁體", "簡體"]; current-index <=> root.app-edit.output; } }
-                    Row { label: "遊戲模式"; ComboBox { width: 160px; model: ["關", "鎖定英文", "保留中英狀態"]; current-index <=> root.app-edit.game; } }
-                    Note { text: "鎖定英文：按鍵全部交給 App。保留中英狀態：可以打中文，但 Shift 不切換中英，適合遊戲聊天室。"; }
-                    Row { label: "自動偵測"; ComboBox { width: 160px; model: ["沿用全域", "開", "關"]; current-index <=> root.app-edit.detect; } }
-                    Note { text: "輸入框卻打不了中文時選「關」。"; }
-                    Row { label: "組字提示列"; ComboBox { width: 160px; model: ["沿用全域", "開", "關"]; current-index <=> root.app-edit.bar; } }
+                    FieldList {
+                        fields: root.app-fields;
+                        hotkey-valid(t) => { return root.hotkey-valid(t); }
+                        parse-color(t) => { return root.parse-color(t); }
+                    }
                     HorizontalLayout { alignment: start; Button { text: "套用"; clicked => { root.apply-app(); } } }
                 }
             }

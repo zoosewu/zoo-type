@@ -744,55 +744,86 @@ pub fn catalog(platform: Platform) -> Catalog {
         capabilities: Capabilities::for_platform(platform),
     }
 }
+/// App 規則的欄位（沒設定的沿用全域設定）
 pub fn app_fields() -> Vec<Field> {
     use FieldKind::*;
     let defaults = serde_json::to_value(AppRule::default()).expect("serializable AppRule");
+    // （欄位, 標題, 種類, 選項, 說明, 空白時的提示）
     let specs = [
-        ("name", "名稱", Text, vec![]),
-        ("windows", "Windows 執行檔", Text, vec![]),
-        ("macos", "macOS Bundle ID", Text, vec![]),
+        ("name", "名稱", Text, vec![], "", ""),
+        (
+            "windows",
+            "Windows 執行檔",
+            Text,
+            vec![],
+            "執行檔名稱在工作管理員的「詳細資料」分頁。",
+            "Code.exe",
+        ),
+        (
+            "macos",
+            "macOS Bundle ID",
+            Text,
+            vec![],
+            "",
+            "com.microsoft.VSCode",
+        ),
         (
             "default_mode",
             "預設模式",
             Choice,
             vec![("中文", "chinese"), ("英文", "english")],
+            "",
+            "",
         ),
         (
             "punctuation",
             "標點",
             Choice,
             vec![("全形", "full"), ("半形", "half")],
+            "",
+            "",
         ),
         (
             "output",
-            "文字輸出",
+            "輸出",
             Choice,
             vec![("繁體", "traditional"), ("簡體", "simplified")],
+            "",
+            "",
         ),
         (
             "on_focus",
-            "切換 App 時",
+            "切回 App 時",
             Choice,
-            vec![("記住狀態", "remember"), ("恢復預設", "reset")],
+            vec![("保留中英狀態", "remember"), ("重設為預設模式", "reset")],
+            "",
+            "",
         ),
         (
             "game_mode",
             "遊戲模式",
             Choice,
-            vec![
-                ("關閉", "off"),
-                ("鎖定英文", "english"),
-                ("保留狀態", "keep"),
-            ],
+            vec![("鎖定英文", "english"), ("保留中英狀態", "keep")],
+            "鎖定英文：按鍵全部交給 App。保留中英狀態：可以打中文，但 Shift 不切換中英，適合遊戲聊天室。",
+            "",
         ),
-        ("detect", "啟發式偵測", Choice, vec![]),
-        ("composition_bar", "組字提示列", Choice, vec![]),
+        (
+            "detect",
+            "自動偵測",
+            Choice,
+            vec![],
+            "輸入框卻打不了中文時選「關」。",
+            "",
+        ),
+        ("composition_bar", "組字提示列", Choice, vec![], "", ""),
     ];
     specs
         .into_iter()
-        .map(|(path, label, kind, options)| {
+        .map(|(path, label, kind, options, help, placeholder)| {
             let mut f = field(path, label, "apps", kind, &options, &defaults);
             f.nullable = path != "name";
+            f.help = help.into();
+            f.placeholder = placeholder.into();
             if path == "detect" {
                 f.feature = Some("game_detection".into());
             }
@@ -800,18 +831,24 @@ pub fn app_fields() -> Vec<Field> {
                 f.choices.insert(
                     0,
                     crate::Choice {
-                        label: "沿用全域設定".into(),
+                        // 遊戲模式沒有全域設定：沒設定就是關
+                        label: if path == "game_mode" {
+                            "關"
+                        } else {
+                            "沿用全域"
+                        }
+                        .into(),
                         value: Value::Null,
                     },
                 );
                 if options.is_empty() {
                     f.choices.extend([
                         crate::Choice {
-                            label: "開啟".into(),
+                            label: "開".into(),
                             value: json!(true),
                         },
                         crate::Choice {
-                            label: "關閉".into(),
+                            label: "關".into(),
                             value: json!(false),
                         },
                     ]);
