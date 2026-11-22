@@ -1749,3 +1749,51 @@ mod general_page_ui {
         );
     }
 }
+
+#[cfg(test)]
+mod scrolling {
+    use super::*;
+    use i_slint_backend_testing::ElementQuery;
+
+    /// 一般頁捲到最下面，最後一列要完整出現在狀態列上方
+    /// （換行的說明文字曾讓捲動區域少算高度，最後幾列捲不到）
+    #[test]
+    fn general_page_scrolls_to_the_last_row() {
+        i_slint_backend_testing::init_no_event_loop();
+        for height in [450.0, 500.0, 600.0, 700.0] {
+            let ui = SettingsWindow::new().unwrap();
+            ui.set_show_advanced(true);
+            show_primary_settings(&ui, &Config::default());
+            ui.set_page(0);
+            ui.window().set_size(slint::LogicalSize::new(820.0, height));
+            ui.show().unwrap();
+            let position = slint::LogicalPosition::new(500.0, height / 2.0);
+            for _ in 0..200 {
+                ui.window()
+                    .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                        position,
+                        delta_x: 0.0,
+                        delta_y: -120.0,
+                    });
+            }
+            let find = |label: &str| {
+                ElementQuery::from_root(&ui)
+                    .match_descendants()
+                    .match_predicate({
+                        let label = label.to_owned();
+                        move |e| e.accessible_label().as_deref() == Some(label.as_str())
+                    })
+                    .find_first()
+                    .unwrap_or_else(|| panic!("{height}: 看不到「{label}」"))
+            };
+            let last = find("自訂半形標點（JSON）");
+            let status = find("輸入法服務未執行，無法使用詞庫與學習");
+            let bottom = last.absolute_position().y + last.size().height;
+            assert!(
+                bottom <= status.absolute_position().y,
+                "{height}: 最後一列被擋住（{bottom} > {}）",
+                status.absolute_position().y
+            );
+        }
+    }
+}

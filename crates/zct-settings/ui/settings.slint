@@ -77,18 +77,26 @@ component Row inherits HorizontalLayout {
     @children
 }
 
-/// 說明文字（自動換行、淡色）
+/// 換行文字的寬度：由視窗寬度算出、不從版面算。
+/// 換行的文字依版面寬度算高度時，捲動區域會少算換行多出來的高度，捲不到最下面
+global TextWidth {
+    // 內容區扣掉捲軸
+    in-out property <length> full: 600px;
+}
+
+/// 說明文字（自動換行、淡色），佔滿內容區的寬度
 component Help inherits Text {
     wrap: word-wrap;
     font-size: 12px;
     color: Palette.foreground.with-alpha(0.6);
+    width: TextWidth.full;
 }
 
 /// 欄位下方的說明：與欄位的輸入框對齊（標題寬 140 + 間距 12）
 component Note inherits HorizontalLayout {
     in property <string> text;
     padding-left: 152px;
-    Help { text: root.text; horizontal-stretch: 1; }
+    Help { text: root.text; width: TextWidth.full - 152px; }
 }
 
 /// 詞庫的一列。編輯中詞與讀音變成輸入框，其他欄位留在原位（狀態暫時不能改），切換時版面不跳動
@@ -354,6 +362,10 @@ export component SettingsWindow inherits Window {
     callback test-ai();
     callback change-data-root();
 
+    // 側邊導覽 160、內容區左右邊距 20、捲軸 16
+    init => { TextWidth.full = self.width - 216px; }
+    changed width => { TextWidth.full = self.width - 216px; }
+
     HorizontalLayout {
         // 側邊導覽
         Rectangle {
@@ -458,31 +470,33 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- 外觀 ----
-            if root.page == 2: HorizontalLayout {
+            if root.page == 2: ScrollView {
                 vertical-stretch: 1;
-                spacing: 48px;
-                alignment: start;
-                VerticalLayout {
-                    spacing: 10px;
+                HorizontalLayout {
+                    spacing: 48px;
                     alignment: start;
-                    Section { text: "候選窗"; }
-                    Row { label: "排列"; ComboBox { width: 160px; model: ["直式", "橫式"]; current-index <=> root.theme.layout; } }
-                    Row { label: "字型"; LineEdit { width: 200px; text <=> root.theme.font; } }
-                    Row { label: "字級"; SpinBox { width: 160px; minimum: 8; maximum: 48; value <=> root.theme.size; } }
-                    Row { label: "背景"; ColorField { value <=> root.theme.background; swatch: root.parse-color(root.theme.background); } }
-                    Row { label: "文字"; ColorField { value <=> root.theme.text; swatch: root.parse-color(root.theme.text); } }
-                    Row { label: "數字"; ColorField { value <=> root.theme.number; swatch: root.parse-color(root.theme.number); } }
-                    Row { label: "選擇框"; ColorField { value <=> root.theme.highlight; swatch: root.parse-color(root.theme.highlight); } }
-                }
-                VerticalLayout {
-                    alignment: start;
-                    padding-top: 40px;
-                    Preview {
-                        theme: root.theme;
-                        bg: root.parse-color(root.theme.background);
-                        fg: root.parse-color(root.theme.text);
-                        num: root.parse-color(root.theme.number);
-                        hl: root.parse-color(root.theme.highlight);
+                    VerticalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        Section { text: "候選窗"; }
+                        Row { label: "排列"; ComboBox { width: 160px; model: ["直式", "橫式"]; current-index <=> root.theme.layout; } }
+                        Row { label: "字型"; LineEdit { width: 200px; text <=> root.theme.font; } }
+                        Row { label: "字級"; SpinBox { width: 160px; minimum: 8; maximum: 48; value <=> root.theme.size; } }
+                        Row { label: "背景"; ColorField { value <=> root.theme.background; swatch: root.parse-color(root.theme.background); } }
+                        Row { label: "文字"; ColorField { value <=> root.theme.text; swatch: root.parse-color(root.theme.text); } }
+                        Row { label: "數字"; ColorField { value <=> root.theme.number; swatch: root.parse-color(root.theme.number); } }
+                        Row { label: "選擇框"; ColorField { value <=> root.theme.highlight; swatch: root.parse-color(root.theme.highlight); } }
+                    }
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: 40px;
+                        Preview {
+                            theme: root.theme;
+                            bg: root.parse-color(root.theme.background);
+                            fg: root.parse-color(root.theme.text);
+                            num: root.parse-color(root.theme.number);
+                            hl: root.parse-color(root.theme.highlight);
+                        }
                     }
                 }
             }
@@ -579,51 +593,53 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- 學習 ----
-            if root.page == 5: VerticalLayout {
+            if root.page == 5: ScrollView {
                 vertical-stretch: 1;
-                spacing: 12px;
-                alignment: start;
-                Section { text: "首選正確率（近 30 天）"; }
-                Help { text: "不必選字就打對的比例。在候選窗改選的字，同一個修正送出兩次後會記住；學錯了在候選窗按忘記學習快捷鍵。"; }
-                Text { text: root.summary; }
-                Rectangle {
-                    height: 160px;
-                    border-width: 1px;
-                    border-color: Palette.border;
-                    border-radius: 6px;
-                    HorizontalLayout {
-                        padding: 10px;
-                        spacing: 4px;
-                        alignment: start;
-                        for d in root.days: VerticalLayout {
-                            width: 14px;
-                            alignment: end;
-                            Rectangle {
-                                height: max(2px, d.accuracy * 130px);
-                                border-radius: 2px;
-                                background: d.accuracy >= 0.95 ? #2b9348 : d.accuracy >= 0.85 ? #e09f3e : #d13438;
-                                TouchArea { }
+                VerticalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    Section { text: "首選正確率（近 30 天）"; }
+                    Help { text: "不必選字就打對的比例。在候選窗改選的字，同一個修正送出兩次後會記住；學錯了在候選窗按忘記學習快捷鍵。"; }
+                    Text { text: root.summary; }
+                    Rectangle {
+                        height: 160px;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        border-radius: 6px;
+                        HorizontalLayout {
+                            padding: 10px;
+                            spacing: 4px;
+                            alignment: start;
+                            for d in root.days: VerticalLayout {
+                                width: 14px;
+                                alignment: end;
+                                Rectangle {
+                                    height: max(2px, d.accuracy * 130px);
+                                    border-radius: 2px;
+                                    background: d.accuracy >= 0.95 ? #2b9348 : d.accuracy >= 0.85 ? #e09f3e : #d13438;
+                                    TouchArea { }
+                                }
                             }
                         }
                     }
-                }
-                Section { text: "從備份還原"; }
-                Text {
-                    text: "把學習紀錄還原到之前某一天。";
-                    color: Palette.foreground.with-alpha(0.6);
-                }
-                for day in root.backups: HorizontalLayout {
-                    spacing: 12px;
-                    alignment: start;
-                    Text { width: 120px; text: day; vertical-alignment: center; }
-                    Button {
-                        text: root.restore-pending == day ? "確定還原？" : "還原";
-                        enabled: root.online;
-                        clicked => {
-                            if root.restore-pending == day {
-                                root.restore(day);
-                            } else {
-                                root.restore-pending = day;
+                    Section { text: "從備份還原"; }
+                    Text {
+                        text: "把學習紀錄還原到之前某一天。";
+                        color: Palette.foreground.with-alpha(0.6);
+                    }
+                    for day in root.backups: HorizontalLayout {
+                        spacing: 12px;
+                        alignment: start;
+                        Text { width: 120px; text: day; vertical-alignment: center; }
+                        Button {
+                            text: root.restore-pending == day ? "確定還原？" : "還原";
+                            enabled: root.online;
+                            clicked => {
+                                if root.restore-pending == day {
+                                    root.restore(day);
+                                } else {
+                                    root.restore-pending = day;
+                                }
                             }
                         }
                     }
@@ -631,66 +647,70 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- 同步 ----
-            if root.page == 6: VerticalLayout {
+            if root.page == 6: ScrollView {
                 vertical-stretch: 1;
-                spacing: 10px;
-                alignment: start;
-                Section { text: "資料位置"; }
-                Help { text: "設定、App 規則、詞庫與學習紀錄都存在這裡。重灌後選同一個資料夾就能恢復；多台電腦請用 git 同步，不要共用雲端資料夾。"; }
-                Row {
-                    label: "目前位置";
-                    Text { text: root.data-path; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
-                }
-                Row {
-                    label: "";
-                    Button { text: "變更位置…"; enabled: !root.data-path-locked; clicked => { root.change-data-root(); } }
-                }
-                Note { text: root.data-path-locked ? "由 ZCT_HOME 環境變數指定。" : "選空的資料夾會把目前的資料複製過去；選已有資料的資料夾會直接改用它。原本的資料會保留。"; }
-                Section { text: "git 同步"; }
-                Text {
-                    text: "同步設定、App 規則、詞庫與統計；學習紀錄不同步。請用私人 repo。";
-                    color: Palette.foreground.with-alpha(0.6);
-                    wrap: word-wrap;
-                }
-                Row { label: "自動同步"; Switch { checked <=> root.sync.enabled; } }
-                Row { label: "遠端 repo"; LineEdit { width: 360px; text <=> root.sync.remote; placeholder-text: "git@github.com:you/zoo-type-data.git"; } }
-                Row { label: "間隔（分鐘）"; SpinBox { width: 160px; minimum: 1; maximum: 1440; value <=> root.sync.interval; } }
-                HorizontalLayout {
+                VerticalLayout {
+                    spacing: 10px;
                     alignment: start;
-                    spacing: 12px;
-                    Button { text: "立即同步"; enabled: root.online; clicked => { root.sync-now(); } }
-                    Button { text: "重新整理狀態"; clicked => { root.refresh(); } }
+                    Section { text: "資料位置"; }
+                    Help { text: "設定、App 規則、詞庫與學習紀錄都存在這裡。重灌後選同一個資料夾就能恢復；多台電腦請用 git 同步，不要共用雲端資料夾。"; }
+                    Row {
+                        label: "目前位置";
+                        Text { text: root.data-path; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
+                    }
+                    Row {
+                        label: "";
+                        Button { text: "變更位置…"; enabled: !root.data-path-locked; clicked => { root.change-data-root(); } }
+                    }
+                    Note { text: root.data-path-locked ? "由 ZCT_HOME 環境變數指定。" : "選空的資料夾會把目前的資料複製過去；選已有資料的資料夾會直接改用它。原本的資料會保留。"; }
+                    Section { text: "git 同步"; }
+                    Text {
+                        text: "同步設定、App 規則、詞庫與統計；學習紀錄不同步。請用私人 repo。";
+                        color: Palette.foreground.with-alpha(0.6);
+                        wrap: word-wrap;
+                    }
+                    Row { label: "自動同步"; Switch { checked <=> root.sync.enabled; } }
+                    Row { label: "遠端 repo"; LineEdit { width: 360px; text <=> root.sync.remote; placeholder-text: "git@github.com:you/zoo-type-data.git"; } }
+                    Row { label: "間隔（分鐘）"; SpinBox { width: 160px; minimum: 1; maximum: 1440; value <=> root.sync.interval; } }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: 12px;
+                        Button { text: "立即同步"; enabled: root.online; clicked => { root.sync-now(); } }
+                        Button { text: "重新整理狀態"; clicked => { root.refresh(); } }
+                    }
+                    Text { text: root.sync-status; wrap: word-wrap; }
                 }
-                Text { text: root.sync-status; wrap: word-wrap; }
             }
 
             // ---- AI ----
-            if root.page == 7: VerticalLayout {
+            if root.page == 7: ScrollView {
                 vertical-stretch: 1;
-                spacing: 10px;
-                alignment: start;
-                Section { text: "AI 同音字修正"; }
-                Text {
-                    text: "按 AI 修正快捷鍵（目前：" + (root.hotkeys.ai == "" ? "未設定" : root.hotkeys.ai) + "）修正組字中的同音錯字，結果出現在候選窗。\n只在按快捷鍵時傳送；端點不在本機時，打字內容會離開這台電腦。";
-                    color: Palette.foreground.with-alpha(0.6);
-                    wrap: word-wrap;
-                }
-                Row { label: "啟用"; Switch { checked <=> root.ai.enabled; } }
-                Row { label: "端點（OpenAI 相容）"; LineEdit { width: 360px; text <=> root.ai.endpoint; placeholder-text: "http://localhost:1234/v1"; } }
-                Row { label: "模型"; LineEdit { width: 240px; text <=> root.ai.model; placeholder-text: "qwen3.5:2b"; } }
-                Row { label: "逾時（秒）"; SpinBox { width: 160px; minimum: 1; maximum: 120; value <=> root.ai.timeout; } }
-                Row {
-                    label: "API Key";
-                    key := LineEdit { width: 240px; input-type: password; placeholder-text: root.has-api-key ? "已儲存" : "本機服務可以留空"; accepted => { if self.text != "" { root.save-api-key(self.text); self.text = ""; } } }
-                    Button { text: "儲存金鑰"; enabled: key.text != ""; clicked => { root.save-api-key(key.text); key.text = ""; } }
-                    Button { text: "清除"; enabled: root.has-api-key; clicked => { root.save-api-key(""); } }
-                }
-                HorizontalLayout {
+                VerticalLayout {
+                    spacing: 10px;
                     alignment: start;
-                    spacing: 12px;
-                    Button { text: "測試連線"; clicked => { root.test-ai(); } }
+                    Section { text: "AI 同音字修正"; }
+                    Text {
+                        text: "按 AI 修正快捷鍵（目前：" + (root.hotkeys.ai == "" ? "未設定" : root.hotkeys.ai) + "）修正組字中的同音錯字，結果出現在候選窗。\n只在按快捷鍵時傳送；端點不在本機時，打字內容會離開這台電腦。";
+                        color: Palette.foreground.with-alpha(0.6);
+                        wrap: word-wrap;
+                    }
+                    Row { label: "啟用"; Switch { checked <=> root.ai.enabled; } }
+                    Row { label: "端點（OpenAI 相容）"; LineEdit { width: 360px; text <=> root.ai.endpoint; placeholder-text: "http://localhost:1234/v1"; } }
+                    Row { label: "模型"; LineEdit { width: 240px; text <=> root.ai.model; placeholder-text: "qwen3.5:2b"; } }
+                    Row { label: "逾時（秒）"; SpinBox { width: 160px; minimum: 1; maximum: 120; value <=> root.ai.timeout; } }
+                    Row {
+                        label: "API Key";
+                        key := LineEdit { width: 240px; input-type: password; placeholder-text: root.has-api-key ? "已儲存" : "本機服務可以留空"; accepted => { if self.text != "" { root.save-api-key(self.text); self.text = ""; } } }
+                        Button { text: "儲存金鑰"; enabled: key.text != ""; clicked => { root.save-api-key(key.text); key.text = ""; } }
+                        Button { text: "清除"; enabled: root.has-api-key; clicked => { root.save-api-key(""); } }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: 12px;
+                        Button { text: "測試連線"; clicked => { root.test-ai(); } }
+                    }
+                    Text { text: root.ai-status; wrap: word-wrap; }
                 }
-                Text { text: root.ai-status; wrap: word-wrap; }
             }
 
             // ---- 關於 ----

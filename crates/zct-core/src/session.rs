@@ -1232,7 +1232,6 @@ impl Session {
         "AI 修正中…".into()
     }
 
-    /// 組字區每個字的讀音（英文、符號是 None）
     /// 游標前連續的「單音」：注音符號本身，或讀音只有一個注音符號的字（醫＝ㄧ、恩＝ㄣ），依序回傳注音
     fn single_sounds_before_cursor(&self) -> String {
         let is_bopomofo = |c: char| ('\u{3105}'..='\u{3129}').contains(&c);
@@ -1256,6 +1255,7 @@ impl Session {
         sounds.into_iter().collect()
     }
 
+    /// 組字區每個字的讀音（英文、符號是 None）
     pub fn syllables(&self) -> Vec<Option<String>> {
         self.editor
             .symbols()
