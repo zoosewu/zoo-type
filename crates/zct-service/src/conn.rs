@@ -277,6 +277,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     .and_then(|u| u.status().available),
                 can_update: shared.update.is_some() && !crate::version::stale(),
                 checking: shared.update.as_ref().is_some_and(|u| u.status().checking),
+                progress: shared.update.as_ref().and_then(|u| u.status().progress),
                 passthrough: session
                     .as_ref()
                     .and_then(|s| s.session().passthrough_keys()),

@@ -62,6 +62,8 @@ pub struct MenuState {
     pub update: Option<String>,
     /// 正在檢查或安裝更新（「更新到 vX」「檢查更新」暫時不能按）
     pub updating: bool,
+    /// 正在下載新版：已下載的百分比
+    pub progress: Option<u8>,
     /// 這個版本管更新（正式版；開發版、ZCT_HOME 隔離測試不管）
     pub can_update: bool,
 }
@@ -88,12 +90,11 @@ pub fn items(state: &MenuState) -> Vec<MenuItem> {
     } else if state.can_update {
         items.push(MenuItem::Action {
             action: MenuAction::CheckUpdate,
-            label: if state.updating {
-                "檢查更新中…"
-            } else {
-                "檢查更新"
-            }
-            .into(),
+            label: match (state.updating, state.progress) {
+                (true, Some(p)) => format!("下載更新 {p}%"),
+                (true, None) => "檢查更新中…".into(),
+                (false, _) => "檢查更新".into(),
+            },
             checked: false,
             enabled: !state.updating,
         });
@@ -211,6 +212,11 @@ mod tests {
             panic!()
         };
         assert_eq!((label.as_str(), *enabled), ("檢查更新中…", false));
+        state.progress = Some(42);
+        let MenuItem::Action { label, .. } = &items(&state)[0] else {
+            panic!()
+        };
+        assert_eq!(label, "下載更新 42%", "下載中看得到進度");
         // 有新版時換成更新到 vX
         state.update = Some("0.1.6".into());
         state.updating = false;

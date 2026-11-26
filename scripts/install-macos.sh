@@ -17,6 +17,20 @@ if [ ! -d "$SOURCE" ]; then
     SOURCE="$(dirname "$0")/$NAME.app"
 fi
 [ -d "$SOURCE" ] || { echo "找不到 $NAME.app，請先建置。" >&2; exit 1; }
+# 輸入法裝在目前帳號、登記在目前帳號的輸入來源清單：用 sudo 會變成 root 的，系統找不到
+if [ "$(id -u)" -eq 0 ]; then
+    echo "請不要用 sudo，直接執行：sh \"$0\" ${1:-}" >&2
+    exit 1
+fi
+# 先前用 sudo 安裝留下 root 擁有的檔案：輸入法讀寫不了，請先改回自己的
+for DIR in "$HOME/Library/Input Methods" "$HOME/Library/Application Support/ZooType" "$HOME/Library/Application Support/ZooType-dev"; do
+    if [ -e "$DIR" ] && [ -n "$(find "$DIR" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+        echo "「$DIR」裡有不屬於你的檔案（先前用 sudo 安裝留下的），請先執行：" >&2
+        echo "  sudo chown -R \"$(id -un)\" \"$DIR\"" >&2
+        echo "再重新執行 sh \"$0\" ${1:-}" >&2
+        exit 1
+    fi
+done
 codesign --verify --strict "$SOURCE"
 DEST="$HOME/Library/Input Methods/$NAME.app"
 mkdir -p "$HOME/Library/Input Methods"

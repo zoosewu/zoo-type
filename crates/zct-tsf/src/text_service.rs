@@ -420,6 +420,7 @@ impl TextService_Impl {
             update,
             can_update,
             checking,
+            progress,
             passthrough,
         }) = self.call(&Request::Status)
         else {
@@ -438,6 +439,7 @@ impl TextService_Impl {
                     available: update,
                     can_update,
                     checking,
+                    progress,
                 },
             );
         }

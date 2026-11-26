@@ -675,6 +675,8 @@ pub struct ZctUpdateStatus {
     /// 正式版才管更新（開發版、ZCT_HOME 隔離測試不管）
     pub supported: bool,
     pub checking: bool,
+    /// 正在下載新版：已下載的百分比；沒在下載是 -1
+    pub progress: i32,
     /// 已下載驗證、等使用者按更新的版本；沒有是空字串
     pub available: *const c_char,
     pub message: *const c_char,
@@ -688,6 +690,7 @@ pub unsafe extern "C" fn zct_update_status(runtime: *mut ZctRuntime) -> ZctUpdat
     let mut out = ZctUpdateStatus {
         supported: false,
         checking: false,
+        progress: -1,
         available: empty,
         message: empty,
     };
@@ -702,6 +705,7 @@ pub unsafe extern "C" fn zct_update_status(runtime: *mut ZctRuntime) -> ZctUpdat
     runtime.update_message = string(&status.message);
     out.supported = true;
     out.checking = status.checking;
+    out.progress = status.progress.map_or(-1, i32::from);
     out.available = runtime.update_available.as_ptr();
     out.message = runtime.update_message.as_ptr();
     out
@@ -933,6 +937,7 @@ pub unsafe extern "C" fn zct_menu_items(
     game: bool,
     update: *const c_char,
     updating: bool,
+    progress: i32,
     can_update: bool,
 ) -> *mut c_char {
     guard(|| {
@@ -946,6 +951,7 @@ pub unsafe extern "C" fn zct_menu_items(
             game,
             update,
             updating,
+            progress: u8::try_from(progress).ok(),
             can_update,
         };
         let json =

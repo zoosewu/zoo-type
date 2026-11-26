@@ -57,6 +57,8 @@ final class UpdateManager {
     private(set) var available: String?
     private(set) var busy = false
     private(set) var supported = false
+    /// 正在下載新版：已下載的百分比；沒在下載是 -1
+    private(set) var progress: Int32 = -1
     private var checking = false
     private var installing = false
     /// 安裝的結果等平台自己的訊息：保留到下次檢查，不被共用層的狀態蓋掉
@@ -79,8 +81,9 @@ final class UpdateManager {
         let version = String(cString: status.available)
         checking = status.checking
         let next = (local ?? text, version.isEmpty ? nil : version, checking || installing)
-        guard next.0 != message || next.1 != available || next.2 != busy else { return }
+        guard next.0 != message || next.1 != available || next.2 != busy || status.progress != progress else { return }
         (message, available, busy) = next
+        progress = status.progress
         NotificationCenter.default.post(name: .zctUpdateChanged, object: nil)
     }
     private func changed(_ message: String) {

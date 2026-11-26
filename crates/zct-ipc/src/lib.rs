@@ -12,7 +12,7 @@ pub mod secret;
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
 /// 12：程式改名為 zoo-type-*（舊版服務程序不能讓位給不同檔名的新版，改走協定不同的唯讀模式）
 /// 19：設定程式的「檢查更新」（CheckUpdate → Update）
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -126,6 +126,8 @@ pub enum Response {
         can_update: bool,
         /// 正在檢查更新
         checking: bool,
+        /// 正在下載新版：已下載的百分比
+        progress: Option<u8>,
         /// 遊戲模式鎖定英文：除了這些快捷鍵，DLL 直接放行按鍵、不再詢問服務程序
         passthrough: Option<Vec<Binding>>,
     },

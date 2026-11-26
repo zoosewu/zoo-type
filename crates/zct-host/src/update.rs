@@ -80,6 +80,8 @@ pub struct Status {
     /// 已下載、驗證過，等使用者按「更新」的版本
     pub available: Option<String>,
     pub checking: bool,
+    /// 正在下載新版：已下載的百分比
+    pub progress: Option<u8>,
     pub message: String,
 }
 
@@ -140,11 +142,13 @@ impl Updater {
         let _running = self.running.lock().unwrap_or_else(|e| e.into_inner());
         self.set(|s| {
             s.checking = true;
-            s.message = "檢查與下載更新中…".into();
+            s.progress = None;
+            s.message = "檢查更新中…".into();
         });
         let result = self.check_inner().map(|v| v.map(|v| v.to_string()));
         self.set(|s| {
             s.checking = false;
+            s.progress = None;
             match &result {
                 Ok(Some(v)) => {
                     s.available = Some(v.clone());
@@ -180,8 +184,17 @@ impl Updater {
         let sig_url = asset_url(&release, &format!("{name}.sig"))?;
         std::fs::create_dir_all(&self.target.dir)
             .map_err(|e| format!("無法建立 {}：{e}", self.target.dir.display()))?;
-        download(&file_url, &self.target.path(), MAX_FILE)?;
-        download(&sig_url, &self.target.sig(), MAX_SIG)?;
+        download(&file_url, &self.target.path(), MAX_FILE, |done, total| {
+            self.set(|s| {
+                s.progress = total.map(|t| percent(done, t));
+                s.message = match total {
+                    Some(t) => format!("下載 v{version}：{} / {}", mb(done), mb(t)),
+                    None => format!("下載 v{version}：{}", mb(done)),
+                };
+            })
+        })?;
+        download(&sig_url, &self.target.sig(), MAX_SIG, |_, _| {})?;
+        self.set(|s| s.message = format!("驗證 v{version}…"));
         match self.pending() {
             Some(v) if v == version => Ok(Some(version)),
             _ => Err("下載的檔案簽章不符，不提示更新".into()),
@@ -268,20 +281,27 @@ pub fn official_url(url: &str, tag: &str, name: &str) -> Result<(), String> {
     }
 }
 
+/// 慢的網路也能下載完：不限總時間，連線或任何一次讀取卡住太久才放棄
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(300)))
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(60)))
+        .timeout_per_read(Some(Duration::from_secs(60)))
         .build()
         .into()
 }
 
-fn get(url: &str, limit: u64) -> Result<Vec<u8>, String> {
+fn request(url: &str) -> Result<ureq::http::Response<ureq::Body>, String> {
     agent()
         .get(url)
         .header("User-Agent", "zoo-type")
         .header("Accept", "application/vnd.github+json")
         .call()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+fn get(url: &str, limit: u64) -> Result<Vec<u8>, String> {
+    request(url)?
         .body_mut()
         .with_config()
         .limit(limit)
@@ -289,11 +309,42 @@ fn get(url: &str, limit: u64) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
-fn download(url: &str, to: &Path, limit: u64) -> Result<(), String> {
-    let bytes = get(url, limit)?;
+/// 邊下載邊回報（已下載, 總大小）
+fn download(
+    url: &str,
+    to: &Path,
+    limit: u64,
+    progress: impl Fn(u64, Option<u64>),
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+    let mut response = request(url)?;
+    let total = response.body().content_length();
+    let mut reader = response.body_mut().with_config().limit(limit).reader();
     let tmp = to.with_extension("download");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    let mut buf = vec![0; 64 * 1024];
+    let mut done = 0;
+    progress(0, total);
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        done += n as u64;
+        progress(done, total);
+    }
+    file.sync_all().map_err(|e| e.to_string())?;
+    drop(file);
     std::fs::rename(&tmp, to).map_err(|e| e.to_string())
+}
+
+fn percent(done: u64, total: u64) -> u8 {
+    (done.saturating_mul(100) / total.max(1)).min(100) as u8
+}
+
+fn mb(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_048_576.0)
 }
 
 #[cfg(test)]
@@ -335,6 +386,14 @@ mod tests {
             !dir.path().join("update.zip").exists(),
             "驗證不過的檔案清掉"
         );
+    }
+
+    #[test]
+    fn download_progress_reads_as_percent_and_megabytes() {
+        assert_eq!(percent(0, 0), 0);
+        assert_eq!(percent(13, 26), 50);
+        assert_eq!(percent(30, 26), 100);
+        assert_eq!(mb(26 * 1_048_576), "26.0 MB");
     }
 
     #[test]

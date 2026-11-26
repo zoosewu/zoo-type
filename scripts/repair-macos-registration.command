@@ -1,6 +1,11 @@
 #!/bin/sh
 # Run from the logged-in user's Terminal when the calling tool cannot access cfprefsd.
 set -eu
+# 輸入來源清單是每個使用者自己的：用 sudo 會改到 root 的清單
+if [ "$(id -u)" -eq 0 ]; then
+    echo "請不要用 sudo，直接執行：sh \"$0\" ${1:-}" >&2
+    exit 1
+fi
 case "${1:-}" in
     --dev) NAME="動物園輸入法 開發版" ;;
     --official) NAME="動物園輸入法" ;;
@@ -26,7 +31,7 @@ result_path = root / 'registration-repair-result.json'
 try:
     raw = subprocess.check_output(['/usr/bin/defaults', 'export', 'com.apple.HIToolbox', '-'])
     preferences = plistlib.loads(raw)
-    previous = preferences['AppleEnabledInputSources']
+    previous = preferences.get('AppleEnabledInputSources')
     assert isinstance(previous, list) and previous, '原輸入清單無法讀取，未修改設定'
     backup_root = root / 'registration-backups'
     backup_root.mkdir(parents=True, exist_ok=True)

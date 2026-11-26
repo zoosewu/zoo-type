@@ -55,6 +55,7 @@ pub struct LangBarButton {
     /// 這個版本管更新、正在檢查更新
     can_update: Cell<bool>,
     checking: Cell<bool>,
+    progress: Cell<Option<u8>>,
     sink: RefCell<Option<ITfLangBarItemSink>>,
     handler: RefCell<Option<Handler>>,
 }
@@ -68,6 +69,7 @@ impl LangBarButton {
             update: RefCell::default(),
             can_update: Cell::new(false),
             checking: Cell::new(false),
+            progress: Cell::new(None),
             sink: RefCell::default(),
             handler: RefCell::new(Some(handler)),
         }
@@ -108,6 +110,7 @@ impl LangBarButton_Impl {
             game: self.game.get(),
             update: self.update.borrow().clone(),
             updating: self.checking.get(),
+            progress: self.progress.get(),
             can_update: self.can_update.get(),
         }
     }
@@ -184,6 +187,7 @@ pub struct Updates {
     /// 這個版本管更新（選單出現「檢查更新」）
     pub can_update: bool,
     pub checking: bool,
+    pub progress: Option<u8>,
 }
 
 /// 更新圖示狀態（中英、繁簡、遊戲模式）；有變化才通知系統重畫
@@ -200,6 +204,7 @@ pub fn set_state(
     *obj.update.borrow_mut() = updates.available;
     obj.can_update.set(updates.can_update);
     obj.checking.set(updates.checking);
+    obj.progress.set(updates.progress);
     if obj.chinese.get() != chinese || obj.simplified.get() != simplified || obj.game.get() != game
     {
         obj.chinese.set(chinese);

@@ -56,6 +56,8 @@ enum InputSourceRegistration {
         return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(p).takeUnretainedValue())
     }
     static func register(bundle: Bundle) throws {
+        // 輸入來源清單是每個使用者自己的：root 讀寫的是 root 的清單，登記不到目前登入的帳號
+        guard getuid() != 0 else { throw EngineError(description: "請不要用 sudo 安裝；直接以目前登入的帳號執行") }
         guard let bundleID = bundle.bundleIdentifier else { throw EngineError(description: "輸入法缺少 Bundle ID") }
         let status = TISRegisterInputSource(bundle.bundleURL as CFURL)
         guard status == noErr else { throw EngineError(description: "TISRegisterInputSource: \(status)") }
