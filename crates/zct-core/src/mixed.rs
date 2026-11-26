@@ -51,6 +51,21 @@ pub fn is_syllable(keys: &str) -> bool {
     last.is_some()
 }
 
+/// 這串按鍵（不含聲調）不照順序時，能不能放進「一個」音節：聲母、介音、韻母各至多一個
+///
+/// 注音的編輯區照種類放（先打 ㄧ 再打 ㄋ 也是 ㄋㄧ），所以英文優先只看有沒有衝突
+pub fn fits_one_syllable(keys: &str) -> bool {
+    let mut seen = Vec::new();
+    for b in keys.bytes() {
+        let Some(k) = kind(b) else { return false };
+        if k == Kind::Tone || seen.contains(&k) {
+            return false;
+        }
+        seen.push(k);
+    }
+    !seen.is_empty()
+}
+
 /// 常見的兩個字母英文單字；其他兩字母組合在單字表中多半是罕用字，不拿來自動判斷
 const COMMON_2: &[&str] = &[
     "am", "an", "as", "at", "be", "by", "do", "go", "he", "hi", "if", "in", "is", "it", "me", "my",
@@ -289,6 +304,12 @@ mod tests {
         assert!(!is_syllable("we")); // 兩個聲母
         assert!(!is_syllable("lo")); // 兩個韻母
         assert!(!is_syllable("us")); // 介音在聲母前
+        assert!(fits_one_syllable("us")); // 不照順序也放得進一個音節：ㄋㄧ
+        assert!(fits_one_syllable("8z")); // ㄈㄚ
+        assert!(!fits_one_syllable("we")); // 兩個聲母
+        assert!(!fits_one_syllable("lo")); // 兩個韻母
+        assert!(!fits_one_syllable("u3")); // 聲調不算
+        assert!(!fits_one_syllable(""));
         assert!(!is_syllable(""));
     }
 

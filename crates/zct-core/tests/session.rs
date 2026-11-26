@@ -2785,6 +2785,9 @@ fn english_first_switches_on_invalid_bopomofo() {
         ("hk4g4", "測試"), // 合法注音照常
         ("hk4g4 google ", "測試 google "),
         ("love su3", "love 你"), // 單字結束後回到注音
+        ("us3", "你"),           // 注音不用照順序：ㄧㄋˇ 就是 ㄋㄧˇ
+        ("8z3", "法"),           // ㄚㄈˇ → ㄈㄚˇ
+        ("uu ", "uu "),          // 同一種注音打兩次（兩個介音）才是英文
     ];
     for (keys, want) in cases {
         let mut h = english_first();

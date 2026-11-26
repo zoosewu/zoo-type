@@ -838,7 +838,7 @@ impl Session {
         ok.then(|| raw.clone())
     }
 
-    /// 英文優先：這個鍵讓目前的音節組不成注音（`l` `o` → ㄠ 後面不能再接韻母）
+    /// 英文優先：這個鍵和目前的音節衝突（`l` `o` → 兩個韻母）；不必照注音順序（`us` → ㄋㄧ）
     fn english_first_start(&self, ev: &KeyEvent, was_selecting: bool) -> bool {
         let Key::Char(c) = ev.key else { return false };
         self.mixed.english == EnglishWords::EnglishFirst
@@ -849,7 +849,7 @@ impl Session {
             && self.editor.entering_syllable()
             && !self.raw.is_empty()
             && crate::mixed::is_bopomofo_key(c)
-            && !crate::mixed::is_syllable(&format!("{}{}", self.raw, c as char))
+            && !crate::mixed::fits_one_syllable(&format!("{}{}", self.raw, c as char))
     }
 
     /// 英文優先：把這個音節的按鍵換成英文字母放進組字區，接著打的鍵都是字元本身

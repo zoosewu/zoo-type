@@ -170,6 +170,8 @@ T0 用自己訓練的字 n-gram 語言模型重新打分、選最通順的當首
 - [ ] 每項先寫測試表格；做完裝開發版實測
 
 ## macOS 待驗證（Windows 先改、CI 編譯通過；等使用者到 macOS 實測時一起看）
+- [ ] 不用 sudo 執行 install.sh 註冊成功；先前 sudo 留下 root 擁有的檔案時會提示 chown
+- [ ] 選單更新項目：檢查更新中… → 下載更新 N% → 更新到 vX → 正在安裝 vX…（`zct_menu_items` 改簽名）
 - [ ] 打字時的注音小視窗（FFI `display_only`，面板 notice 列）
 - [ ] 設定視窗：「▸ 進階」收合、操作習慣非自訂時隱藏選字對象與選字後游標、儲存後收合的值不被改掉
 - [ ] 英文優先、打字時顯示三種模式、舊設定（auto_english、legacy_fullscreen）轉換
