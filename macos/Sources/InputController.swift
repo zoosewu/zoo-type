@@ -266,8 +266,7 @@ final class InputController: IMKInputController {
     override func menu() -> NSMenu! {
         let menu = NSMenu(title: "動物園輸入法")
         menu.autoenablesItems = false
-        let updates = UpdateManager.shared
-        let raw = (updates.available ?? "").withCString { zct_menu_items(mode == 0, simplified, game, $0, updates.busy, updates.progress, updates.supported) }
+        let raw = zct_menu_items(appRuntime?.handle, mode == 0, simplified, game)
         guard let raw else { return menu }
         defer { zct_string_free(raw) }
         let items = (try? JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8))) as? [[String: Any]] ?? []

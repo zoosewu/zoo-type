@@ -675,8 +675,8 @@ pub struct ZctUpdateStatus {
     /// 正式版才管更新（開發版、ZCT_HOME 隔離測試不管）
     pub supported: bool,
     pub checking: bool,
-    /// 正在下載新版：已下載的百分比；沒在下載是 -1
-    pub progress: i32,
+    /// 正在檢查、下載或安裝
+    pub busy: bool,
     /// 已下載驗證、等使用者按更新的版本；沒有是空字串
     pub available: *const c_char,
     pub message: *const c_char,
@@ -690,7 +690,7 @@ pub unsafe extern "C" fn zct_update_status(runtime: *mut ZctRuntime) -> ZctUpdat
     let mut out = ZctUpdateStatus {
         supported: false,
         checking: false,
-        progress: -1,
+        busy: false,
         available: empty,
         message: empty,
     };
@@ -705,10 +705,20 @@ pub unsafe extern "C" fn zct_update_status(runtime: *mut ZctRuntime) -> ZctUpdat
     runtime.update_message = string(&status.message);
     out.supported = true;
     out.checking = status.checking;
-    out.progress = status.progress.map_or(-1, i32::from);
+    out.busy = status.state().busy();
     out.available = runtime.update_available.as_ptr();
     out.message = runtime.update_message.as_ptr();
     out
+}
+
+/// 平台開始（`true`）或放棄（`false`）安裝新版：選單顯示「正在安裝 vX…」
+/// # Safety
+/// `runtime` is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_update_installing(runtime: *mut ZctRuntime, on: bool) {
+    if let Some(updater) = unsafe { runtime.as_ref() }.and_then(|r| r.updater.as_ref()) {
+        updater.set_installing(on);
+    }
 }
 
 /// 在背景立刻檢查更新；結果看 `zct_update_status`
@@ -927,32 +937,25 @@ pub unsafe extern "C" fn zct_session_bar_anchor(
 
 /// 輸入法選單（與 Windows 共用 `zct_core::menu`）：JSON 陣列，
 /// 每項是 `{"kind": "action", "action": "toggle_mode", "label", "checked", "enabled"}` 或 `{"kind": "separator"}`。
-/// `update`：可以安裝的新版（沒有傳 NULL）。用 `zct_string_free` 釋放
+/// 更新項目照 `runtime` 的更新狀態。用 `zct_string_free` 釋放
 /// # Safety
-/// `update` is NULL or NUL-terminated UTF-8.
+/// `runtime` is NULL or live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zct_menu_items(
+    runtime: *const ZctRuntime,
     chinese: bool,
     simplified: bool,
     game: bool,
-    update: *const c_char,
-    updating: bool,
-    progress: i32,
-    can_update: bool,
 ) -> *mut c_char {
     guard(|| {
-        let update = (!update.is_null())
-            .then(|| unsafe { text(update) }.map(str::to_owned))
-            .transpose()?
-            .filter(|v| !v.is_empty());
+        let update = unsafe { runtime.as_ref() }
+            .and_then(|r| r.updater.as_ref())
+            .map_or(zct_core::menu::UpdateState::Off, |u| u.status().state());
         let state = zct_core::menu::MenuState {
             chinese,
             simplified,
             game,
             update,
-            updating,
-            progress: u8::try_from(progress).ok(),
-            can_update,
         };
         let json =
             serde_json::to_string(&zct_core::menu::items(&state)).map_err(|e| e.to_string())?;

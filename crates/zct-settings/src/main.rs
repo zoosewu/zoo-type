@@ -962,7 +962,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_backups(ModelRc::new(VecModel::from(b)));
             }
             if let Ok(Response::Status { update, .. }) = st.service.call(Request::Status) {
-                ui.set_update_version(update.unwrap_or_default().into());
+                show_update(&ui, &update);
             }
             ui.set_online(st.service.client.is_some());
             let sync_status = std::fs::read_to_string(st.data.local().join("sync-status.txt"))
@@ -1034,52 +1034,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         });
     }
-    {
-        // 查詢加上下載可能要一陣子：另開連線在背景等，不卡住視窗
-        let ui_weak = ui.as_weak();
-        ui.on_check_update(move || {
-            let ui = ui_weak.unwrap();
-            ui.set_checking_update(true);
-            ui.set_update_status("".into());
-            let ui_weak = ui_weak.clone();
-            std::thread::spawn(move || {
-                let result = match Service::connect() {
-                    Some(mut c) => c
-                        .call(&Request::CheckUpdate, Duration::from_secs(10 * 60))
-                        .map_err(|e| e.to_string()),
-                    None => Err("輸入法服務未執行".into()),
-                };
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(ui) = ui_weak.upgrade() else { return };
-                    ui.set_checking_update(false);
-                    let status = match result {
-                        Ok(Response::Update(Some(v))) => {
-                            ui.set_update_version(v.into());
-                            String::new()
-                        }
-                        Ok(Response::Update(None)) => "已是最新版".into(),
-                        Ok(Response::Error(e)) | Err(e) => format!("檢查失敗：{e}"),
-                        Ok(_) => "檢查失敗：回應種類錯誤".into(),
-                    };
-                    ui.set_update_status(status.into());
-                });
-            });
-        });
-    }
+    // 檢查、下載、安裝都在服務程序背景進行：送出後每秒問一次走到哪一步（與輸入法圖示選單同一份狀態）
+    let update_poll = slint::Timer::default();
     {
         let (ui_weak, state) = (ui.as_weak(), state.clone());
-        ui.on_install_update(move || {
-            let r = state
-                .borrow_mut()
-                .service
-                .call(Request::Command(Command::InstallUpdate));
-            ui_weak.unwrap().set_update_status(
-                match r {
-                    Ok(_) => "正在背景安裝新版".to_string(),
-                    Err(e) => e,
+        update_poll.start(
+            slint::TimerMode::Repeated,
+            Duration::from_secs(1),
+            move || {
+                let Some(ui) = ui_weak.upgrade() else { return };
+                if !ui.get_checking_update() {
+                    return;
                 }
-                .into(),
-            );
+                match state.borrow_mut().service.call(Request::Status) {
+                    Ok(Response::Status { update, .. }) => show_update(&ui, &update),
+                    Ok(_) => {}
+                    Err(e) => {
+                        ui.set_checking_update(false);
+                        ui.set_update_status(e.into());
+                    }
+                }
+            },
+        );
+    }
+    for (command, on) in [
+        (
+            Command::CheckUpdate,
+            SettingsWindow::on_check_update as fn(_, _),
+        ),
+        (Command::InstallUpdate, SettingsWindow::on_install_update),
+    ] {
+        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        on(&ui, move || {
+            let ui = ui_weak.unwrap();
+            match state.borrow_mut().service.call(Request::Command(command)) {
+                // 狀態由上面的計時器接手
+                Ok(_) => ui.set_checking_update(true),
+                Err(e) => ui.set_update_status(e.into()),
+            }
         });
     }
     refresh();
@@ -1287,6 +1279,20 @@ fn pick_folder(_start: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 /// 首選正確率：沒有修正的字數比例
+/// 更新走到哪一步（與輸入法圖示選單同一份狀態）
+fn show_update(ui: &SettingsWindow, update: &zct_core::menu::UpdateState) {
+    use zct_core::menu::UpdateState;
+    let ready = match update {
+        UpdateState::Ready(v) => v.trim_start_matches('v'),
+        _ => "",
+    };
+    ui.set_update_version(ready.into());
+    ui.set_checking_update(update.busy());
+    // 可以更新時按鈕已經寫了版號
+    let text = (ready.is_empty()).then(|| update.text()).flatten();
+    ui.set_update_status(text.unwrap_or_default().into());
+}
+
 fn accuracy(chars: u64, corrections: u64) -> f32 {
     zct_preferences::accuracy(chars, corrections) as f32
 }

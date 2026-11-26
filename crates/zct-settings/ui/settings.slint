@@ -663,8 +663,8 @@ export component SettingsWindow inherits Window {
                 if root.official: Note { text: "每天檢查一次；有新版時，輸入法圖示的選單會出現「更新到」。"; }
                 if root.official: Row {
                     label: "";
-                    Button { text: root.checking-update ? "檢查中…" : "立即檢查"; enabled: root.online && !root.checking-update; clicked => { root.check-update(); } }
-                    if root.update-version != "": Button { text: "更新到 " + root.update-version; primary: true; clicked => { root.install-update(); } }
+                    Button { text: "立即檢查"; enabled: root.online && !root.checking-update; clicked => { root.check-update(); } }
+                    if root.update-version != "": Button { text: "更新到 v" + root.update-version; primary: true; clicked => { root.install-update(); } }
                     Text { text: root.update-status; vertical-alignment: center; }
                 }
                 Help { text: "注音輸入法，以 GNU AGPL-3.0 授權。\n原始碼與問題回報：https://github.com/zoosewu/zoo-type"; }

@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BSTR, GUID, IUnknown, Interface, PCWSTR, Ref, Result, implement, w};
 
-use zct_core::menu::{self, MenuAction, MenuItem, MenuState};
+use zct_core::menu::{self, MenuAction, MenuItem, MenuState, UpdateState};
 
 use crate::{CLSID_ZCT, guard};
 
@@ -50,12 +50,7 @@ pub struct LangBarButton {
     chinese: Cell<bool>,
     simplified: Cell<bool>,
     game: Cell<bool>,
-    /// 可以安裝的新版
-    update: RefCell<Option<String>>,
-    /// 這個版本管更新、正在檢查更新
-    can_update: Cell<bool>,
-    checking: Cell<bool>,
-    progress: Cell<Option<u8>>,
+    update: RefCell<UpdateState>,
     sink: RefCell<Option<ITfLangBarItemSink>>,
     handler: RefCell<Option<Handler>>,
 }
@@ -67,9 +62,6 @@ impl LangBarButton {
             simplified: Cell::new(false),
             game: Cell::new(false),
             update: RefCell::default(),
-            can_update: Cell::new(false),
-            checking: Cell::new(false),
-            progress: Cell::new(None),
             sink: RefCell::default(),
             handler: RefCell::new(Some(handler)),
         }
@@ -109,9 +101,6 @@ impl LangBarButton_Impl {
             simplified: self.simplified.get(),
             game: self.game.get(),
             update: self.update.borrow().clone(),
-            updating: self.checking.get(),
-            progress: self.progress.get(),
-            can_update: self.can_update.get(),
         }
     }
 
@@ -180,31 +169,18 @@ impl LangBarButton_Impl {
     }
 }
 
-/// 選單裡更新相關的狀態
-pub struct Updates {
-    /// 可以安裝的新版（選單出現「更新到 vX」）
-    pub available: Option<String>,
-    /// 這個版本管更新（選單出現「檢查更新」）
-    pub can_update: bool,
-    pub checking: bool,
-    pub progress: Option<u8>,
-}
-
 /// 更新圖示狀態（中英、繁簡、遊戲模式）；有變化才通知系統重畫
 pub fn set_state(
     button: &ITfLangBarItemButton,
     chinese: bool,
     simplified: bool,
     game: bool,
-    updates: Updates,
+    update: UpdateState,
 ) {
     let Ok(obj) = button.cast_object_ref::<LangBarButton>() else {
         return;
     };
-    *obj.update.borrow_mut() = updates.available;
-    obj.can_update.set(updates.can_update);
-    obj.checking.set(updates.checking);
-    obj.progress.set(updates.progress);
+    *obj.update.borrow_mut() = update;
     if obj.chinese.get() != chinese || obj.simplified.get() != simplified || obj.game.get() != game
     {
         obj.chinese.set(chinese);

@@ -8,8 +8,9 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use zct_core::menu::UpdateState;
 use zct_update::{PUBLIC_KEY, Version, verify};
 
 use crate::Host;
@@ -82,7 +83,34 @@ pub struct Status {
     pub checking: bool,
     /// 正在下載新版：已下載的百分比
     pub progress: Option<u8>,
+    /// 開始安裝的時間（安裝程式在背景跑，沒有回報）
+    pub installing: Option<Instant>,
+    /// 上次檢查的結果：已是最新版（`Ok`）或失敗原因
+    pub last: Option<Result<(), String>>,
     pub message: String,
+}
+
+/// 背景安裝超過這麼久還沒換版，當作失敗：選單恢復「更新到 vX」可以再按
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+
+impl Status {
+    /// 選單、圖示提示與設定畫面要顯示的步驟
+    pub fn state(&self) -> UpdateState {
+        let installing = self
+            .installing
+            .is_some_and(|t| t.elapsed() < INSTALL_TIMEOUT);
+        match (&self.available, self.progress) {
+            (Some(v), _) if installing => UpdateState::Installing(v.clone()),
+            (_, Some(p)) => UpdateState::Downloading(p),
+            _ if self.checking => UpdateState::Checking,
+            (Some(v), _) => UpdateState::Ready(v.clone()),
+            (None, None) => match &self.last {
+                Some(Ok(())) => UpdateState::Latest,
+                Some(Err(e)) => UpdateState::Failed(e.clone()),
+                None => UpdateState::Idle,
+            },
+        }
+    }
 }
 
 pub struct Updater {
@@ -123,6 +151,11 @@ impl Updater {
             .clone()
     }
 
+    /// 平台開始（或放棄）安裝新版
+    pub fn set_installing(&self, on: bool) {
+        self.set(|s| s.installing = on.then(Instant::now));
+    }
+
     fn set(&self, f: impl FnOnce(&mut Status)) {
         f(&mut self.status.lock().unwrap_or_else(|e| e.into_inner()));
     }
@@ -149,6 +182,7 @@ impl Updater {
         self.set(|s| {
             s.checking = false;
             s.progress = None;
+            s.last = Some(result.as_ref().map(|_| ()).map_err(Clone::clone));
             match &result {
                 Ok(Some(v)) => {
                     s.available = Some(v.clone());
@@ -386,6 +420,30 @@ mod tests {
             !dir.path().join("update.zip").exists(),
             "驗證不過的檔案清掉"
         );
+    }
+
+    #[test]
+    fn status_reads_as_one_update_step() {
+        let mut s = Status::default();
+        assert_eq!(s.state(), UpdateState::Idle);
+        s.last = Some(Ok(()));
+        assert_eq!(s.state(), UpdateState::Latest);
+        s.last = Some(Err("離線".into()));
+        assert_eq!(s.state(), UpdateState::Failed("離線".into()));
+        s.checking = true;
+        assert_eq!(s.state(), UpdateState::Checking);
+        s.progress = Some(30);
+        assert_eq!(s.state(), UpdateState::Downloading(30));
+        s = Status {
+            available: Some("0.1.6".into()),
+            ..Default::default()
+        };
+        assert_eq!(s.state(), UpdateState::Ready("0.1.6".into()));
+        s.installing = Some(Instant::now());
+        assert_eq!(s.state(), UpdateState::Installing("0.1.6".into()));
+        // 安裝程式沒換版就停了：可以再按一次
+        s.installing = Instant::now().checked_sub(INSTALL_TIMEOUT);
+        assert_eq!(s.state(), UpdateState::Ready("0.1.6".into()));
     }
 
     #[test]

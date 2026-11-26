@@ -11,20 +11,22 @@
 //! 連線名稱與單一實例的 mutex 都帶協定版本，所以不同協定的服務程序可以同時存在。
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use zct_ipc::PROTOCOL_VERSION;
 
 static READ_ONLY: AtomicBool = AtomicBool::new(false);
-static STALE: AtomicBool = AtomicBool::new(false);
+/// 已經裝好的新版版號（這個程序是還在服務舊 App 的舊版）
+static INSTALLED: Mutex<Option<String>> = Mutex::new(None);
 
-/// 已經裝了更新的版本（這個程序是還在服務舊 App 的舊版）：不再提示「更新到 vX」
-pub fn stale() -> bool {
-    STALE.load(Ordering::Relaxed)
+/// 已經裝了更新的版本：選單提示重新開啟 App，不再出現「更新到 vX」
+pub fn installed() -> Option<String> {
+    INSTALLED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-pub fn set_stale() {
-    STALE.store(true, Ordering::Relaxed);
+pub fn set_installed(version: String) {
+    *INSTALLED.lock().unwrap_or_else(|e| e.into_inner()) = Some(version);
 }
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 

@@ -34,6 +34,18 @@ fn debug_key(shared: &Shared, id: u64, stage: &str, ev: &zct_core::KeyEvent, res
     );
 }
 
+/// 更新走到哪一步；新版已經裝好、這是還在服務舊 App 的舊版時，提示重新開啟 App
+fn update_state(shared: &Shared) -> zct_core::menu::UpdateState {
+    use zct_core::menu::UpdateState;
+    let Some(updater) = &shared.update else {
+        return UpdateState::Off;
+    };
+    match crate::version::installed() {
+        Some(v) => UpdateState::Installed(v),
+        None => updater.status().state(),
+    }
+}
+
 /// 輸入法圖示右鍵選單
 fn run_command(cmd: Command, shared: &Shared) {
     match cmd {
@@ -61,8 +73,14 @@ fn run_command(cmd: Command, shared: &Shared) {
         }
         Command::InstallUpdate => {
             log::info!("輸入法圖示：安裝更新");
+            let Some(updater) = &shared.update else {
+                return;
+            };
+            // 安裝程式在背景跑、沒有回報：先顯示「正在安裝」，換版後舊服務程序改顯示「已更新」
+            updater.set_installing(true);
             if let Err(e) = crate::update::install() {
                 log::warn!("{e}");
+                updater.set_installing(false);
             }
         }
         Command::Restart => {
@@ -269,15 +287,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                 right_alt: session
                     .as_ref()
                     .is_some_and(|s| s.session().right_alt_enabled()),
-                // 新版已經裝好、這是還在服務舊 App 的舊版：選單不再出現「更新到 vX」
-                update: shared
-                    .update
-                    .as_ref()
-                    .filter(|_| !crate::version::stale())
-                    .and_then(|u| u.status().available),
-                can_update: shared.update.is_some() && !crate::version::stale(),
-                checking: shared.update.as_ref().is_some_and(|u| u.status().checking),
-                progress: shared.update.as_ref().and_then(|u| u.status().progress),
+                update: update_state(shared),
                 passthrough: session
                     .as_ref()
                     .and_then(|s| s.session().passthrough_keys()),

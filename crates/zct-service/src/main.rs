@@ -133,9 +133,12 @@ mod app {
             }
             version::State::Stale {
                 same_protocol: false,
-                ..
+                current_exe,
             } => {
-                version::set_stale();
+                // 版本資料夾的名稱就是版號
+                if let Some(v) = current_exe.parent().and_then(|d| d.file_name()) {
+                    version::set_installed(v.to_string_lossy().into_owned());
+                }
                 if !version::read_only() {
                     log::info!("已有新版（協定不同），繼續服務舊 App，但不再寫入使用者資料");
                     version::set_read_only();

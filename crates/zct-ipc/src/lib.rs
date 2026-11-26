@@ -120,14 +120,8 @@ pub enum Response {
         game: bool,
         /// 「右 Alt 照鍵帽輸出」開啟：DLL 要向 TSF 登記保留按鍵
         right_alt: bool,
-        /// 已下載、可以安裝的新版版號（輸入法圖示選單顯示「更新到 vX」）
-        update: Option<String>,
-        /// 這個服務程序管更新（選單顯示「檢查更新」）
-        can_update: bool,
-        /// 正在檢查更新
-        checking: bool,
-        /// 正在下載新版：已下載的百分比
-        progress: Option<u8>,
+        /// 更新走到哪一步（輸入法圖示選單、設定畫面照這個顯示）
+        update: zct_core::menu::UpdateState,
         /// 遊戲模式鎖定英文：除了這些快捷鍵，DLL 直接放行按鍵、不再詢問服務程序
         passthrough: Option<Vec<Binding>>,
     },
