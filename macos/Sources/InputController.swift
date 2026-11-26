@@ -101,6 +101,7 @@ final class InputController: IMKInputController {
         do {
             let result = try engine.key(code: event.keyCode, modifiers: mods, released: released,
                                         time: UInt64(max(0, event.timestamp * 1000)))
+            Self.debugKey(event, mods: mods, released: released, result: result)
             render(result, client: client, handledKeyDown: event.type == .keyDown && result.eaten)
             if result.aiPending { pollAI(engine) }
             if result.reconvert { reconvert(client: client) }
@@ -197,6 +198,22 @@ final class InputController: IMKInputController {
             catch { timer.invalidate(); NSLog("ZooType AI: %@", String(describing: error)) }
         }
     }
+    /// 按鍵診斷（資料資料夾的 local/ 下有 debug-keys 檔案時，記在系統記錄，用 Console 看「ZooType key」）：
+    /// 和 Windows 一樣不記打的內容：一般字元鍵只記「字元鍵」，修飾鍵與功能鍵記鍵碼
+    private static let debugKeys: Bool = {
+        guard let config = appRuntime?.configURL else { return false }
+        return FileManager.default.fileExists(atPath: config.deletingLastPathComponent().appendingPathComponent("local/debug-keys").path)
+    }()
+    private static let functionKeys: Set<UInt16> = [36, 48, 49, 51, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 96, 97, 98, 99, 100, 101, 103,
+                                                     109, 111, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126]
+    private static func debugKey(_ event: NSEvent, mods: UInt32, released: Bool, result: EngineResult) {
+        guard debugKeys else { return }
+        let key = functionKeys.contains(event.keyCode) ? "鍵碼 \(event.keyCode)" : "字元鍵"
+        let kind = event.type == .flagsChanged ? "flagsChanged" : event.type == .keyDown ? "keyDown" : "keyUp"
+        NSLog("ZooType key %@ %@ %@ mods=%u t=%.0f eaten=%@ mode=%u", kind, key, released ? "放開" : "按下", mods,
+              event.timestamp * 1000, result.eaten ? "y" : "n", result.mode)
+    }
+
     /// 終端機清單在共用層（與 Windows 同一份）
     static func isTerminal(_ bundleID: String) -> Bool { bundleID.withCString { zct_is_terminal($0) } }
 
