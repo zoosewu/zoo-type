@@ -53,6 +53,12 @@ fn run_command(cmd: Command, shared: &Shared) {
         Command::ToggleGame => {
             shared.host.toggle_game();
         }
+        Command::CheckUpdate => {
+            log::info!("輸入法圖示：檢查更新");
+            if let Some(u) = &shared.update {
+                u.check_in_background();
+            }
+        }
         Command::InstallUpdate => {
             log::info!("輸入法圖示：安裝更新");
             if let Err(e) = crate::update::install() {
@@ -269,6 +275,8 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     .as_ref()
                     .filter(|_| !crate::version::stale())
                     .and_then(|u| u.status().available),
+                can_update: shared.update.is_some() && !crate::version::stale(),
+                checking: shared.update.as_ref().is_some_and(|u| u.status().checking),
                 passthrough: session
                     .as_ref()
                     .and_then(|s| s.session().passthrough_keys()),

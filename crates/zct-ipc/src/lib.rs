@@ -30,6 +30,8 @@ pub enum Command {
     PrepareMove,
     /// 安裝已下載的新版（啟動以 SYSTEM 執行的更新工作）
     InstallUpdate,
+    /// 在背景立即檢查更新（輸入法圖示選單）
+    CheckUpdate,
 }
 
 /// 螢幕座標（實體像素）
@@ -120,6 +122,10 @@ pub enum Response {
         right_alt: bool,
         /// 已下載、可以安裝的新版版號（輸入法圖示選單顯示「更新到 vX」）
         update: Option<String>,
+        /// 這個服務程序管更新（選單顯示「檢查更新」）
+        can_update: bool,
+        /// 正在檢查更新
+        checking: bool,
         /// 遊戲模式鎖定英文：除了這些快捷鍵，DLL 直接放行按鍵、不再詢問服務程序
         passthrough: Option<Vec<Binding>>,
     },

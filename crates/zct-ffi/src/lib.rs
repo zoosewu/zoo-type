@@ -933,6 +933,7 @@ pub unsafe extern "C" fn zct_menu_items(
     game: bool,
     update: *const c_char,
     updating: bool,
+    can_update: bool,
 ) -> *mut c_char {
     guard(|| {
         let update = (!update.is_null())
@@ -945,6 +946,7 @@ pub unsafe extern "C" fn zct_menu_items(
             game,
             update,
             updating,
+            can_update,
         };
         let json =
             serde_json::to_string(&zct_core::menu::items(&state)).map_err(|e| e.to_string())?;
@@ -1282,6 +1284,66 @@ detect = false
         };
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["candidates"]["hits"].as_array().unwrap().is_empty());
+    }
+
+    /// 使用者在 macOS 回報的四個問題，照 IMK 送來的事件順序（flagsChanged 也會送進來）重現
+    #[test]
+    fn macos_reported_shift_width_and_backspace_follow_shared_rules() {
+        let (_dir, mut runtime) = runtime(Config::default());
+        let app = string("com.apple.TextEdit");
+        unsafe {
+            let s = zct_session_new(&mut *runtime, app.as_ptr());
+            let mut t = 1000;
+            let mut ev = |code: u16, mods: u32, released: bool| {
+                t += 40;
+                zct_session_key(s, code, mods, released, t)
+            };
+            let mode = |s| zct_session_command(s, 5).mode;
+            // 1. 按住 Shift 打 $（Shift + 4）：不切換中英
+            assert_eq!(mode(s), 0);
+            ev(56, 1, false); // flagsChanged：左 Shift 按下
+            ev(21, 1, false); // 4 按下（帶 Shift）
+            ev(21, 1, true);
+            ev(56, 0, true); // 放開 Shift
+            assert_eq!(mode(s), 0, "Shift + 4 不能切換中英");
+            assert_eq!(text(zct_session_flush(s).commit).unwrap(), "＄");
+            // 單按 Shift 才切換
+            ev(56, 1, false);
+            ev(56, 0, true);
+            assert_eq!(mode(s), 1);
+            ev(56, 1, false);
+            ev(56, 0, true);
+            assert_eq!(mode(s), 0);
+            // 2. Shift + 空白切換全形半形
+            ev(56, 1, false);
+            let r = ev(49, 1, false);
+            assert!(r.eaten, "Shift + 空白要吃掉");
+            assert_eq!(text(r.notice).unwrap(), "半形");
+            ev(49, 1, true);
+            ev(56, 0, true);
+            assert_eq!(mode(s), 0, "Shift + 空白不切換中英");
+            // 3. ㄐㄧㄣ（r u p）按 Backspace：整個刪
+            for code in [15, 32, 35] {
+                ev(code, 0, false);
+                ev(code, 0, true);
+            }
+            assert_eq!(text(zct_session_command(s, 5).preedit).unwrap(), "ㄐㄧㄣ");
+            let r = ev(51, 0, false);
+            assert_eq!(text(r.preedit).unwrap(), "", "還沒完成的注音整個刪");
+            ev(51, 0, true);
+            // 4. 打完的英文單字（hello + 空白）按 Backspace：一次一個字元
+            for code in [4, 14, 37, 37, 31, 49] {
+                ev(code, 0, false);
+                ev(code, 0, true);
+            }
+            assert_eq!(text(zct_session_command(s, 5).preedit).unwrap(), "hello ");
+            for want in ["hello", "hell"] {
+                let r = ev(51, 0, false);
+                assert_eq!(text(r.preedit).unwrap(), want);
+                ev(51, 0, true);
+            }
+            zct_session_free(s);
+        }
     }
 
     #[test]

@@ -418,6 +418,8 @@ impl TextService_Impl {
             game,
             right_alt,
             update,
+            can_update,
+            checking,
             passthrough,
         }) = self.call(&Request::Status)
         else {
@@ -427,7 +429,17 @@ impl TextService_Impl {
         self.passthrough.replace(passthrough);
         let button = self.tsf.borrow().langbar.clone();
         if let Some(button) = button {
-            langbar::set_state(&button, chinese, simplified, game, update);
+            langbar::set_state(
+                &button,
+                chinese,
+                simplified,
+                game,
+                langbar::Updates {
+                    available: update,
+                    can_update,
+                    checking,
+                },
+            );
         }
         self.sync_right_alt(right_alt);
     }
@@ -485,6 +497,7 @@ impl TextService_Impl {
             Action::ToggleGame => Command::ToggleGame,
             Action::Restart => Command::Restart,
             Action::InstallUpdate => Command::InstallUpdate,
+            Action::CheckUpdate => Command::CheckUpdate,
             Action::Refresh => {
                 self.refresh_langbar();
                 return;

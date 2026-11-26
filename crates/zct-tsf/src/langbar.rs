@@ -40,6 +40,7 @@ pub enum Action {
     /// 打開選單前重新查詢狀態（例如背景下載好的新版）
     Refresh,
     InstallUpdate,
+    CheckUpdate,
 }
 
 type Handler = Box<dyn Fn(Action)>;
@@ -51,6 +52,9 @@ pub struct LangBarButton {
     game: Cell<bool>,
     /// 可以安裝的新版
     update: RefCell<Option<String>>,
+    /// 這個版本管更新、正在檢查更新
+    can_update: Cell<bool>,
+    checking: Cell<bool>,
     sink: RefCell<Option<ITfLangBarItemSink>>,
     handler: RefCell<Option<Handler>>,
 }
@@ -62,6 +66,8 @@ impl LangBarButton {
             simplified: Cell::new(false),
             game: Cell::new(false),
             update: RefCell::default(),
+            can_update: Cell::new(false),
+            checking: Cell::new(false),
             sink: RefCell::default(),
             handler: RefCell::new(Some(handler)),
         }
@@ -101,7 +107,8 @@ impl LangBarButton_Impl {
             simplified: self.simplified.get(),
             game: self.game.get(),
             update: self.update.borrow().clone(),
-            updating: false,
+            updating: self.checking.get(),
+            can_update: self.can_update.get(),
         }
     }
 
@@ -158,6 +165,7 @@ impl LangBarButton_Impl {
             if let Some(action) = chosen {
                 self.act(match action {
                     MenuAction::InstallUpdate => Action::InstallUpdate,
+                    MenuAction::CheckUpdate => Action::CheckUpdate,
                     MenuAction::ToggleMode => Action::ToggleMode,
                     MenuAction::ToggleOutput => Action::ToggleOutput,
                     MenuAction::ToggleGame => Action::ToggleGame,
@@ -169,18 +177,29 @@ impl LangBarButton_Impl {
     }
 }
 
-/// 更新圖示狀態（中英、繁簡、遊戲模式）；有變化才通知系統重畫。`update`：選單要不要出現「更新到 vX」
+/// 選單裡更新相關的狀態
+pub struct Updates {
+    /// 可以安裝的新版（選單出現「更新到 vX」）
+    pub available: Option<String>,
+    /// 這個版本管更新（選單出現「檢查更新」）
+    pub can_update: bool,
+    pub checking: bool,
+}
+
+/// 更新圖示狀態（中英、繁簡、遊戲模式）；有變化才通知系統重畫
 pub fn set_state(
     button: &ITfLangBarItemButton,
     chinese: bool,
     simplified: bool,
     game: bool,
-    update: Option<String>,
+    updates: Updates,
 ) {
     let Ok(obj) = button.cast_object_ref::<LangBarButton>() else {
         return;
     };
-    *obj.update.borrow_mut() = update;
+    *obj.update.borrow_mut() = updates.available;
+    obj.can_update.set(updates.can_update);
+    obj.checking.set(updates.checking);
     if obj.chinese.get() != chinese || obj.simplified.get() != simplified || obj.game.get() != game
     {
         obj.chinese.set(chinese);

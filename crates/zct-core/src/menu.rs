@@ -8,6 +8,8 @@ use serde::Serialize;
 #[serde(rename_all = "snake_case")]
 pub enum MenuAction {
     InstallUpdate,
+    /// 立即檢查更新（在背景查；有新版時選單換成「更新到 vX」）
+    CheckUpdate,
     ToggleMode,
     ToggleOutput,
     ToggleGame,
@@ -26,6 +28,7 @@ impl MenuAction {
         use MenuAction::*;
         [
             InstallUpdate,
+            CheckUpdate,
             ToggleMode,
             ToggleOutput,
             ToggleGame,
@@ -57,8 +60,10 @@ pub struct MenuState {
     pub game: bool,
     /// 已下載、可以安裝的新版
     pub update: Option<String>,
-    /// 正在檢查或安裝更新（「更新到 vX」暫時不能按）
+    /// 正在檢查或安裝更新（「更新到 vX」「檢查更新」暫時不能按）
     pub updating: bool,
+    /// 這個版本管更新（正式版；開發版、ZCT_HOME 隔離測試不管）
+    pub can_update: bool,
 }
 
 fn action(action: MenuAction, label: impl Into<String>, checked: bool) -> MenuItem {
@@ -76,6 +81,19 @@ pub fn items(state: &MenuState) -> Vec<MenuItem> {
         items.push(MenuItem::Action {
             action: MenuAction::InstallUpdate,
             label: format!("更新到 v{}", version.trim_start_matches('v')),
+            checked: false,
+            enabled: !state.updating,
+        });
+        items.push(MenuItem::Separator);
+    } else if state.can_update {
+        items.push(MenuItem::Action {
+            action: MenuAction::CheckUpdate,
+            label: if state.updating {
+                "檢查更新中…"
+            } else {
+                "檢查更新"
+            }
+            .into(),
             checked: false,
             enabled: !state.updating,
         });
@@ -170,10 +188,52 @@ mod tests {
     }
 
     #[test]
+    fn official_builds_can_check_for_updates_by_hand() {
+        let mut state = MenuState {
+            can_update: true,
+            ..Default::default()
+        };
+        let MenuItem::Action {
+            action,
+            label,
+            enabled,
+            ..
+        } = &items(&state)[0]
+        else {
+            panic!()
+        };
+        assert_eq!(
+            (*action, label.as_str(), *enabled),
+            (MenuAction::CheckUpdate, "檢查更新", true)
+        );
+        state.updating = true;
+        let MenuItem::Action { label, enabled, .. } = &items(&state)[0] else {
+            panic!()
+        };
+        assert_eq!((label.as_str(), *enabled), ("檢查更新中…", false));
+        // 有新版時換成更新到 vX
+        state.update = Some("0.1.6".into());
+        state.updating = false;
+        let MenuItem::Action { action, .. } = &items(&state)[0] else {
+            panic!()
+        };
+        assert_eq!(*action, MenuAction::InstallUpdate);
+        // 開發版沒有更新項目
+        let dev = MenuState::default();
+        assert!(items(&dev).iter().all(|i| !matches!(
+            i,
+            MenuItem::Action {
+                action: MenuAction::CheckUpdate | MenuAction::InstallUpdate,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn action_codes_round_trip() {
-        for code in 0..6 {
+        for code in 0..7 {
             assert_eq!(MenuAction::from_code(code).unwrap().code(), code);
         }
-        assert!(MenuAction::from_code(6).is_none());
+        assert!(MenuAction::from_code(7).is_none());
     }
 }

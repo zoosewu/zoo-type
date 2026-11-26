@@ -250,12 +250,13 @@ final class InputController: IMKInputController {
         let menu = NSMenu(title: "動物園輸入法")
         menu.autoenablesItems = false
         let updates = UpdateManager.shared
-        let raw = (updates.available ?? "").withCString { zct_menu_items(mode == 0, simplified, game, $0, updates.busy) }
+        let raw = (updates.available ?? "").withCString { zct_menu_items(mode == 0, simplified, game, $0, updates.busy, updates.supported) }
         guard let raw else { return menu }
         defer { zct_string_free(raw) }
         let items = (try? JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8))) as? [[String: Any]] ?? []
         let actions: [String: Selector] = [
-            "install_update": #selector(installUpdate(_:)), "toggle_mode": #selector(toggleMode(_:)),
+            "install_update": #selector(installUpdate(_:)), "check_update": #selector(checkUpdate(_:)),
+            "toggle_mode": #selector(toggleMode(_:)),
             "toggle_output": #selector(toggleOutput(_:)), "toggle_game": #selector(toggleGame(_:)),
             "open_settings": #selector(editSettings(_:)), "restart": #selector(restart(_:))
         ]
@@ -274,6 +275,7 @@ final class InputController: IMKInputController {
     @objc private func settingsDidChange(_ sender: Any?) { refreshIdleSettings() }
     @objc private func prepareUpdate(_ sender: Any?) { commitComposition(client()); aiTimer?.invalidate() }
     @objc private func installUpdate(_ sender: Any?) { UpdateManager.shared.install() }
+    @objc private func checkUpdate(_ sender: Any?) { UpdateManager.shared.check() }
     @objc private func toggleMode(_ sender: Any?) { performCommand(0) }
     @objc private func toggleOutput(_ sender: Any?) { performCommand(1) }
     @objc private func toggleGame(_ sender: Any?) { performCommand(2) }
