@@ -9,7 +9,7 @@
 安裝檔沒有程式碼簽章，Windows 可能顯示「Windows 已保護您的電腦」：按「其他資訊」→「仍要執行」。可以用同一頁的 `.sha256` 檔核對下載的檔案。
 
 同一個 Release 也提供 macOS 15 以上 Apple Silicon / Intel 的輸入法 `.zip` 與 SHA256。
-解壓後執行 `sh install.sh`，再到系統設定的鍵盤輸入方式加入「動物園輸入法」。安裝、設定與發布簽章說明見 [macOS 說明](docs/macos.md)。
+解壓後雙擊「安裝.command」（或執行 `sh install.sh`），再到系統設定的鍵盤輸入方式加入「動物園輸入法」。安裝、設定與發布簽章說明見 [macOS 說明](docs/macos.md)。
 
 - 需求：[docs/requirements.md](docs/requirements.md)
 - 架構：[docs/architecture.md](docs/architecture.md)

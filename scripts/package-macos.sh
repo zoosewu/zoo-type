@@ -53,6 +53,12 @@ mkdir -p "$APP_PACKAGE"
 ditto "$APP" "$APP_PACKAGE/動物園輸入法.app"
 cp scripts/install-macos.sh "$APP_PACKAGE/install.sh"
 cp scripts/repair-macos-registration.command "$APP_PACKAGE/repair-macos-registration.command"
+# 直接執行、在 Finder 雙擊都要能跑（zip 不一定保留 git 的執行權限）
+cat > "$APP_PACKAGE/安裝.command" <<'INSTALL'
+#!/bin/sh
+exec /bin/sh "$(dirname -- "$0")/install.sh" "$@"
+INSTALL
+chmod +x "$APP_PACKAGE/install.sh" "$APP_PACKAGE/repair-macos-registration.command" "$APP_PACKAGE/安裝.command"
 cat > "$APP_PACKAGE/開啟設定.command" <<'SETTINGS'
 #!/bin/sh
 set -eu
@@ -75,7 +81,7 @@ cat > "$APP_PACKAGE/README.txt" <<EOF
 這個壓縮包包含 InputMethodKit 輸入法 .app 與內建詞庫。
 
 安裝：
-1. 解壓後，在終端機進入這個資料夾，執行 sh install.sh（不需要 sudo）。
+1. 解壓後，雙擊「安裝.command」，或在終端機執行 sh install.sh（不需要 sudo）。
    也可自行把「動物園輸入法.app」放到 ~/Library/Input Methods/。
 2. 在系統設定 → 鍵盤 → 文字輸入 → 編輯 → ＋ → 繁體中文，加入「動物園輸入法」。
 3. 若清單尚未出現，請登出再登入。

@@ -85,7 +85,7 @@ Windows、macOS Apple Silicon 和 Intel 分別測試與建置；全部成功後�
 - Intel 輸入法：`zoo-type-<版本>-macos-x64.zip`
 - 另附 `-tools.tar.gz` 命令列工具包；每個壓縮包皆附 `.sha256`。
 
-輸入法壓縮包內包含 .app、`install.sh` 與 README，執行 `sh install.sh` 安裝到目前使用者的 Input Methods。
+輸入法壓縮包內包含 .app、`install.sh` 與 README，雙擊「安裝.command」或執行 `sh install.sh` 安裝到目前使用者的 Input Methods。
 正式版在「設定 → 關於」可檢查更新；啟用自動檢查後，啟動約五分鐘進行第一次檢查，此後每天檢查。安裝前會驗證 ZIP 的 Ed25519 簽章、版本、App 身分、程式碼簽章與架構，再替換使用者 Input Methods 內的 App 並重新啟動。
 
 發布者需配置現有的 `ZOO_TYPE_SIGNING_KEY`，工作流程會為兩種 Mac 架構各產生一份 `.zip.sig`。Apple 的發行簽章另用以下 GitHub Secrets：
