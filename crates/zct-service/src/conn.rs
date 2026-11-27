@@ -105,8 +105,8 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
     let mut session: Option<HostSession> = None;
     // 最近一次按鍵結果（提示文字在 notice），等 DLL 回報游標位置後再決定候選窗怎麼顯示
     let mut last: Option<KeyResult> = None;
-    // 組字提示列的位置（規則與 macOS 共用）
-    let mut bar_anchor = zct_core::popup::BarAnchor::<zct_ipc::Rect>::default();
+    // 三個彈出視窗怎麼顯示（規則與 macOS 共用）
+    let mut popups = zct_core::popup::Popups::<zct_ipc::Rect>::default();
 
     loop {
         let req = match conn.recv() {
@@ -203,23 +203,36 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     log::info!("[{id}] 游標位置 {rect:?} fresh={fresh}");
                 }
                 if let Some(r) = last.take() {
-                    let bar = session.as_ref().is_some_and(|s| s.composition_bar());
-                    let anchor = bar_anchor.update(!r.preedit.text.is_empty(), rect, fresh);
-                    shared.ui.send(UiCmd::Composition {
-                        owner: id,
-                        preedit: bar.then(|| r.preedit.clone()),
-                        anchor,
-                    });
-                    match r.candidates {
-                        Some(page) => shared.ui.send(UiCmd::Show {
+                    use zct_core::popup::{PopupAction, PopupContent};
+                    let content = PopupContent {
+                        composing: !r.preedit.text.is_empty(),
+                        composition_bar: session.as_ref().is_some_and(|s| s.composition_bar()),
+                        candidates: r.candidates.is_some(),
+                        notice: r.notice.is_some(),
+                    };
+                    let plan = popups.plan(content, rect, fresh);
+                    match plan.bar {
+                        PopupAction::Show(anchor) => shared.ui.send(UiCmd::Composition {
                             owner: id,
-                            page,
+                            preedit: Some(r.preedit.clone()),
+                            anchor,
+                        }),
+                        _ => shared.ui.send(UiCmd::Composition {
+                            owner: id,
+                            preedit: None,
                             anchor: rect,
                         }),
-                        None => shared.ui.send(UiCmd::HideCandidates { owner: id }),
                     }
-                    if let Some(text) = r.notice {
-                        shared.ui.send(UiCmd::Hint { text, anchor: rect });
+                    match (plan.candidates, r.candidates) {
+                        (PopupAction::Show(anchor), Some(page)) => shared.ui.send(UiCmd::Show {
+                            owner: id,
+                            page,
+                            anchor,
+                        }),
+                        _ => shared.ui.send(UiCmd::HideCandidates { owner: id }),
+                    }
+                    if let (PopupAction::Show(anchor), Some(text)) = (plan.hint, r.notice) {
+                        shared.ui.send(UiCmd::Hint { text, anchor });
                     }
                 }
                 Response::Ok
@@ -332,7 +345,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     }
                 }
                 last = None;
-                bar_anchor.reset();
+                popups.reset();
                 shared.ui.send(UiCmd::Hide { owner: id });
                 Response::Ok
             }

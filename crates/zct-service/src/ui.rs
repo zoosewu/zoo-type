@@ -395,7 +395,15 @@ impl Ui {
         let horizontal = self.theme.layout == Layout::Horizontal;
         let content = popup::candidates(page, horizontal, &mut self.texts);
         let (d2d, colors, texts) = (&self.d2d, self.colors, &mut self.texts);
-        show(d2d, &colors, texts, &mut self.cand, content, anchor, false)
+        show(
+            d2d,
+            &colors,
+            texts,
+            &mut self.cand,
+            content,
+            anchor,
+            popup::PopupKind::Candidates.above(),
+        )
     }
 
     /// 只隱藏自己顯示的視窗，避免舊連線蓋掉新連線的畫面
@@ -424,7 +432,15 @@ impl Ui {
         };
         let content = popup::composition(p, &mut self.texts);
         let (d2d, colors, texts) = (&self.d2d, self.colors, &mut self.texts);
-        show(d2d, &colors, texts, &mut self.comp, content, anchor, true)
+        show(
+            d2d,
+            &colors,
+            texts,
+            &mut self.comp,
+            content,
+            anchor,
+            popup::PopupKind::Bar.above(),
+        )
     }
 
     fn show_hint(&mut self, text: &str, anchor: Option<Rect>) -> Result<()> {
@@ -433,7 +449,15 @@ impl Ui {
         };
         let content = popup::hint(text, &mut self.texts);
         let (d2d, colors, texts) = (&self.d2d, self.colors, &mut self.texts);
-        show(d2d, &colors, texts, &mut self.hint, content, anchor, false)?;
+        show(
+            d2d,
+            &colors,
+            texts,
+            &mut self.hint,
+            content,
+            anchor,
+            popup::PopupKind::Hint.above(),
+        )?;
         unsafe {
             SetTimer(
                 Some(self.hint.hwnd),

@@ -560,6 +560,97 @@ impl<T: Copy> BarAnchor<T> {
     }
 }
 
+/// 三個彈出視窗（兩平台都是各自獨立的視窗，不互相推擠）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PopupKind {
+    /// 組字提示列：固定在組字開始的位置
+    Bar,
+    /// 候選窗（含打字時的注音小視窗）
+    Candidates,
+    /// 提示文字（例如切換中英）：自己計時消失
+    Hint,
+}
+
+impl PopupKind {
+    /// 優先放在位置的上方（組字提示列，避開下方的候選窗）；其他放下方
+    pub const fn above(self) -> bool {
+        matches!(self, PopupKind::Bar)
+    }
+}
+
+/// 一個視窗這次要怎麼處理
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PopupAction<T> {
+    /// 顯示在這個位置（None：App 回報不出位置，平台沿用上次的位置）
+    Show(Option<T>),
+    Hide,
+    /// 不動（提示照自己的時間消失，之後的按鍵不會提早收掉）
+    Keep,
+}
+
+/// 這次按鍵結果的內容
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PopupContent {
+    /// 組字區有內容
+    pub composing: bool,
+    /// 設定要顯示組字提示列
+    pub composition_bar: bool,
+    /// 有候選字（或注音小視窗）
+    pub candidates: bool,
+    /// 有提示文字
+    pub notice: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PopupPlan<T> {
+    pub bar: PopupAction<T>,
+    pub candidates: PopupAction<T>,
+    pub hint: PopupAction<T>,
+}
+
+/// 每次按鍵後三個視窗要怎麼顯示（兩平台共用，平台只負責畫和量游標）
+#[derive(Debug, Clone, Copy)]
+pub struct Popups<T> {
+    bar: BarAnchor<T>,
+}
+
+impl<T> Default for Popups<T> {
+    fn default() -> Self {
+        Popups {
+            bar: BarAnchor::default(),
+        }
+    }
+}
+
+impl<T: Copy> Popups<T> {
+    /// `caret`：這次的游標位置；`fresh`：`caret` 是 App 回報的（不是沿用的舊位置）
+    pub fn plan(&mut self, content: PopupContent, caret: Option<T>, fresh: bool) -> PopupPlan<T> {
+        let bar_anchor = self.bar.update(content.composing, caret, fresh);
+        PopupPlan {
+            bar: if content.composing && content.composition_bar {
+                PopupAction::Show(bar_anchor)
+            } else {
+                PopupAction::Hide
+            },
+            candidates: if content.candidates {
+                PopupAction::Show(caret)
+            } else {
+                PopupAction::Hide
+            },
+            hint: if content.notice {
+                PopupAction::Show(caret)
+            } else {
+                PopupAction::Keep
+            },
+        }
+    }
+
+    /// 失焦、取消組字
+    pub fn reset(&mut self) {
+        self.bar.reset();
+    }
+}
+
 /// [`place`] 用在座標往上為正的平台（macOS）：`anchor`、`work` 與回傳的位置都是左下角
 pub fn place_y_up(anchor: Rect, size: (f32, f32), work: Rect, gap: f32, above: bool) -> (f32, f32) {
     let flip = |r: Rect| Rect {
@@ -788,6 +879,55 @@ mod tests {
         bar.reset();
         assert_eq!(bar.update(true, None, true), None);
         assert_eq!(bar.update(true, Some(7), false), Some(7));
+    }
+
+    #[test]
+    fn popup_plan_keeps_windows_independent() {
+        use PopupAction::*;
+        let mut popups = Popups::default();
+        let typing = PopupContent {
+            composing: true,
+            composition_bar: true,
+            candidates: true,
+            notice: false,
+        };
+        let plan = popups.plan(typing, Some(1), true);
+        assert_eq!(plan.bar, Show(Some(1)), "組字提示列在組字開始的位置");
+        assert_eq!(plan.candidates, Show(Some(1)), "候選窗在游標");
+        assert_eq!(plan.hint, Keep, "沒有新提示時舊提示照自己的時間消失");
+        let plan = popups.plan(typing, Some(2), true);
+        assert_eq!(plan.bar, Show(Some(1)), "組字中提示列不動");
+        assert_eq!(plan.candidates, Show(Some(2)), "候選窗跟著游標");
+        // 英文優先打字時只有注音小視窗、關掉組字提示列：提示列收起，候選窗照樣顯示
+        let plan = popups.plan(
+            PopupContent {
+                composition_bar: false,
+                ..typing
+            },
+            Some(3),
+            true,
+        );
+        assert_eq!((plan.bar, plan.candidates), (Hide, Show(Some(3))));
+        // 切換中英：組字結束，只顯示提示
+        let plan = popups.plan(
+            PopupContent {
+                notice: true,
+                ..PopupContent::default()
+            },
+            Some(4),
+            true,
+        );
+        assert_eq!(
+            plan,
+            PopupPlan {
+                bar: Hide,
+                candidates: Hide,
+                hint: Show(Some(4))
+            }
+        );
+        assert!(
+            PopupKind::Bar.above() && !PopupKind::Candidates.above() && !PopupKind::Hint.above()
+        );
     }
 
     #[test]

@@ -12,6 +12,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     private var jsonDrafts: [String: String] = [:]
     private var page = 0
     private var showAdvanced = false
+    private var shownPage = -1
     private var selectedApp = 0
     private var nav: [NSButton] = []
     private let body = FlippedStackView()
@@ -205,6 +206,9 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     @objc private func selectPage(_ sender: NSButton) { collect(); page = sender.tag; showPage() }
     @objc private func toggleAdvanced(_ sender: Any?) { collect(); showAdvanced.toggle(); showPage() }
     private func showPage() {
+        // 同一頁重畫（換選項、展開進階…）保留捲動位置；換頁才回到最上面
+        let scrollY = shownPage == page ? body.enclosingScrollView?.contentView.bounds.origin.y ?? 0 : 0
+        shownPage = page
         bindings = []; phraseTable = nil
         for view in body.arrangedSubviews { body.removeArrangedSubview(view); view.removeFromSuperview() }
         for button in nav { button.state = button.tag == page ? .on : .off }
@@ -256,7 +260,10 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         default: break
         }
         body.layoutSubtreeIfNeeded()
-        if let scroll = body.enclosingScrollView { scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView) }
+        if let scroll = body.enclosingScrollView {
+            let bottom = max(0, body.frame.height - scroll.contentView.bounds.height)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: min(scrollY, bottom))); scroll.reflectScrolledClipView(scroll.contentView)
+        }
     }
     private func updatePreview() {
         preview.update(CandidateDisplay(items: ["天氣", "天汽", "添氣"], labels: ["1", "2", "3"], highlight: 0, page: 0, totalPages: 3), theme: CandidateTheme(config: model.config))

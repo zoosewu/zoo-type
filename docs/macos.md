@@ -62,7 +62,7 @@ sh scripts/install-macos.sh --dev
 
 Release 解壓後也提供「開啟設定.command」。同一個輸入法程序已執行時會將設定視窗叫到前面，不會另開引擎寫入學習資料。
 輸入法使用獨立的 16 點 TIFF（含 Retina）；淺色與深色選單皆為正方形白底、黑色「動」字，接近 Windows 的樣式。Finder 使用 ICNS，不把大尺寸 App 圖示用於選單。
-只更新既有開發版的圖示可用 `sh scripts/update-macos-icons.sh --dev`，保留原執行檔與輸入法登記，不需要再次修改啟用清單。
+開發版圖示右下角有橘色 DEV 標籤（選單列小圖示只放 D），與 Windows 開發版相同。只更新既有開發版的圖示可用 `sh scripts/update-macos-icons.sh --dev`，保留原執行檔與輸入法登記，不需要再次修改啟用清單。
 註冊時會先啟用父輸入法，再啟用注音模式，最後驗證 `com.apple.HIToolbox` 的 `AppleEnabledInputSources`。
 部分 macOS 環境會讓 TIS 啟用 API 回報成功卻沒有更新清單；這時只補入動物園缺少的項目，保留其他輸入來源與順序，
 並在 `~/Library/Application Support/ZooType[-dev]/local/registration-backups` 儲存修改前的清單。

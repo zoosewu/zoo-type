@@ -118,6 +118,18 @@ private func settingsAcceptanceTest(runtime: EngineRuntime, capture: (NSView, St
     }
     try choose("candidates.habit", "custom")
     try check(try selected("candidates.select") == "游標前的詞" && selected("candidates.after_select") == "移到詞前面", "切回自訂必須保留原值")
+    // 同一頁換選項會重畫整頁：捲動位置要保留，不能跳回最上面
+    settings.window?.setContentSize(NSSize(width: 860, height: 360))
+    try root().layoutSubtreeIfNeeded()
+    guard let scroll = descendants(try root()).compactMap({ $0 as? NSScrollView }).first(where: { $0.documentView is NSStackView }),
+          let page = scroll.documentView else { throw EngineError(description: "設定頁捲動區不存在") }
+    let scrolled = min(120, page.frame.height - scroll.contentView.bounds.height)
+    try check(scrolled > 0, "設定頁要長到可以捲動")
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: scrolled)); scroll.reflectScrolledClipView(scroll.contentView)
+    try choose("candidates.habit", "macos")
+    try check(abs(scroll.contentView.bounds.origin.y - scrolled) < 1, "換選項後捲動位置應保留")
+    try choose("candidates.habit", "custom")
+    settings.window?.setContentSize(NSSize(width: 860, height: 1100))
     // Save while the custom controls and advanced controls are both hidden.
     try choose("candidates.habit", "windows")
     guard let count = try field("candidates.per_page") as? NSTextField else { throw EngineError(description: "每頁候選字數欄位不存在") }
@@ -179,18 +191,38 @@ private func typingPopupAcceptanceTest(runtime: EngineRuntime, capture: (NSView,
         if display == "keys" { try check(partial.candidatePage.items == ["ㄋㄧ"], "只顯示注音") }
         else { for word in ["你", "妳", "尼"] { try check(partial.candidatePage.items.contains(word), "應列出常用字 " + word) } }
         let theme = CandidateTheme(config: preferences.config)
-        panel.show(result: partial, caret: NSRect(x: 300, y: 500, width: 1, height: 18), theme: theme, showComposition: false)
-        try check(panel.isVisible, "打字時應顯示原生小視窗")
-        if let view = panel.contentView { try capture(view, "typing-popup-" + display + ".png") }
+        let caret = NSRect(x: 300, y: 500, width: 1, height: 18)
+        panel.show(result: partial, plan: session.popupPlan(partial, compositionBar: false, caret: caret, fresh: true), theme: theme)
+        try check(panel.candidates.isVisible && !panel.bar.isVisible, "打字時應顯示原生小視窗")
+        try capture(panel.candidates.view, "typing-popup-" + display + ".png")
+        let alone = panel.candidates.frame
+        // 終端機的組字提示列：注音在自己的視窗，大小與位置和沒有提示列時一樣（不會一行兩行地跳）；提示列放在游標上方
+        panel.show(result: partial, plan: session.popupPlan(partial, compositionBar: true, caret: caret, fresh: true), theme: theme)
+        try check(panel.bar.isVisible && panel.candidates.isVisible, "提示列與注音各自一個視窗")
+        try check(panel.candidates.frame == alone, "有提示列時注音視窗不變")
+        try check(panel.bar.frame.minY >= caret.maxY && panel.candidates.frame.maxY <= caret.minY, "提示列在游標上方、注音在下方")
+        try capture(panel.bar.view, "typing-popup-" + display + "-bar.png")
         let toned = try press(20) // 3
         try check(toned.composition.text == "你" && !toned.candidatePage.displayOnly && toned.candidatePage.items.isEmpty, "打完聲調應結束提示")
-        panel.show(result: toned, caret: .zero, theme: theme, showComposition: false)
-        try check(!panel.isVisible, "打完聲調小視窗應立即消失")
+        panel.show(result: toned, plan: session.popupPlan(toned, compositionBar: false, caret: caret, fresh: true), theme: theme)
+        try check(!panel.candidates.isVisible && !panel.bar.isVisible, "打完聲調小視窗應立即消失")
+        // 切換中英等提示：自己一個視窗，放在游標下方，不影響其他視窗
+        time += 100
+        _ = try session.key(code: 56, modifiers: 1, time: time) // 單按左 Shift
+        let toggle = try session.key(code: 56, modifiers: 0, released: true, time: time + 50)
+        time += 100
+        try check(!toggle.notice.isEmpty, "切換中英應有提示")
+        panel.show(result: toggle, plan: session.popupPlan(toggle, compositionBar: true, caret: caret, fresh: true), theme: theme)
+        try check(panel.hint.isVisible && !panel.candidates.isVisible && panel.hint.frame.maxY <= caret.minY, "提示在游標下方自己的視窗")
+        try capture(panel.hint.view, "typing-popup-" + display + "-hint.png")
+        panel.orderOut(nil)
+        _ = try session.key(code: 56, modifiers: 1, time: time)
+        _ = try session.key(code: 56, modifiers: 0, released: true, time: time + 50) // 切回中文
     }
     try wezTermInlineAcceptance(runtime: runtime) { result in
-        panel.show(result: result, caret: NSRect(x: 200, y: 300, width: 1, height: 18),
-                   theme: CandidateTheme(), showComposition: true)
-        try check(panel.isVisible, "WezTerm 組字提示列")
+        let caret = NSRect(x: 200, y: 300, width: 1, height: 18)
+        panel.show(result: result, plan: EngineSession.popupPlan(nil, result, compositionBar: true, caret: caret, fresh: true), theme: CandidateTheme())
+        try check(panel.bar.isVisible, "WezTerm 組字提示列")
     }
     print("macOS typing popup acceptance passed")
 }

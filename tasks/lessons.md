@@ -139,3 +139,9 @@
 - macOS 的 /bin/sh（bash 3.2）在 UTF-8 環境會把中文的位元組當成變數名稱的一部分：`"「$DIR」"` 變成讀 `DIR\xe3`，配合 `set -u` 直接中止（0.1.7 install.sh）。
 - 規則：腳本裡變數後面接非 ASCII 字元一律寫 `${VAR}`；改完用 `grep -nP '\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]' scripts/*` 檢查。
 - 打包進壓縮包要直接執行的腳本，git 要設執行權限（`git update-index --chmod=+x`），打包時再 chmod 一次。
+
+## macOS：先看真實按鍵記錄，不要只靠核心測試
+- Shift+句號誤切換：核心模擬「按下→句號→放開」一直正確，問題在平台層。T3（Chromium）每個 flagsChanged 都送兩次，舊判斷把「已按著又收到」當成放開，句號還沒按就切換。
+- IMK 的 flagsChanged 不保證一次；修飾鍵按下或放開要看左右位元（NX_DEVICE*KEYMASK）的實際狀態，狀態沒變就略過。
+- `NSLog` 的參數在統一記錄裡是 `<private>`；診斷用 `os.Logger` 的 `.notice` 加上 `privacy: .public`（只記鍵的種類，不記內容），用 `/usr/bin/log show` 讀（zsh 有內建的 `log`）。
+- IMK 轉送的 `firstRect` 會回垃圾值；Chromium 的 `attributes` 位置是整份文件的。重裝開發版後要 `pkill` 輸入法程序才會生效。

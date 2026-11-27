@@ -78,8 +78,8 @@ impl ZctRuntime {
 pub struct ZctSession {
     inner: HostSession,
     snapshot: Snapshot,
-    /// 組字提示列的位置（規則與 Windows 共用）
-    bar: zct_core::popup::BarAnchor<ZctRect>,
+    /// 三個彈出視窗怎麼顯示（規則與 Windows 共用）
+    popups: zct_core::popup::Popups<ZctRect>,
 }
 
 #[repr(C)]
@@ -435,7 +435,7 @@ pub unsafe extern "C" fn zct_session_new(
         Ok(Box::into_raw(Box::new(ZctSession {
             inner,
             snapshot: Snapshot::default(),
-            bar: Default::default(),
+            popups: Default::default(),
         })))
     })
 }
@@ -490,7 +490,7 @@ pub unsafe extern "C" fn zct_session_key(
 pub unsafe extern "C" fn zct_session_flush(session: *mut ZctSession) -> ZctResult {
     guard(|| {
         let session = unsafe { session.as_mut() }.ok_or("空 session")?;
-        session.bar.reset();
+        session.popups.reset();
         let r = session.inner.flush();
         Ok(session.result(r))
     })
@@ -915,23 +915,66 @@ pub extern "C" fn zct_popup_place(
     }
 }
 
-/// 組字提示列（與面板）要放的位置：組字開始時固定，組字結束才跟著游標。
-/// `fresh`：`caret` 是 App 回報的（量不到改用滑鼠位置時是 false）
+/// 一個彈出視窗這次怎麼處理：`action` 0 收起、1 顯示在 `anchor`、2 不動；`above` 優先放上方
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct ZctPopupWindow {
+    pub action: u8,
+    pub anchor: ZctRect,
+    pub above: bool,
+}
+
+/// 這次按鍵後三個彈出視窗怎麼顯示（與 Windows 共用 `zct_core::popup::Popups`）
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct ZctPopupPlan {
+    pub bar: ZctPopupWindow,
+    pub candidates: ZctPopupWindow,
+    pub hint: ZctPopupWindow,
+}
+
+/// `caret`：App 的游標；`fresh`：`caret` 是 App 回報的（量不到改用沿用的位置時是 false）
 /// # Safety
 /// `session` is live and exclusive.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zct_session_bar_anchor(
+pub unsafe extern "C" fn zct_session_popup_plan(
     session: *mut ZctSession,
     composing: bool,
+    composition_bar: bool,
+    candidates: bool,
+    notice: bool,
     caret: ZctRect,
     fresh: bool,
-) -> ZctRect {
-    match unsafe { session.as_mut() } {
-        Some(session) => session
-            .bar
-            .update(composing, Some(caret), fresh)
-            .unwrap_or(caret),
-        None => caret,
+) -> ZctPopupPlan {
+    use zct_core::popup::{PopupAction, PopupContent, PopupKind, Popups};
+    let content = PopupContent {
+        composing,
+        composition_bar,
+        candidates,
+        notice,
+    };
+    let mut scratch = Popups::default();
+    let popups = match unsafe { session.as_mut() } {
+        Some(session) => &mut session.popups,
+        None => &mut scratch,
+    };
+    let plan = popups.plan(content, Some(caret), fresh);
+    let window = |action: PopupAction<ZctRect>, kind: PopupKind| {
+        let (action, anchor) = match action {
+            PopupAction::Hide => (0, caret),
+            PopupAction::Show(anchor) => (1, anchor.unwrap_or(caret)),
+            PopupAction::Keep => (2, caret),
+        };
+        ZctPopupWindow {
+            action,
+            anchor,
+            above: kind.above(),
+        }
+    };
+    ZctPopupPlan {
+        bar: window(plan.bar, PopupKind::Bar),
+        candidates: window(plan.candidates, PopupKind::Candidates),
+        hint: window(plan.hint, PopupKind::Hint),
     }
 }
 
@@ -1135,6 +1178,37 @@ mod tests {
     unsafe fn press(session: *mut ZctSession, code: u16, mods: u32, time: u64) -> ZctResult {
         // Capture the down result only. The ABI's strings expire on the next call.
         unsafe { zct_session_key(session, code, mods, false, time) }
+    }
+
+    #[test]
+    fn abi_popup_plan_matches_shared_rules() {
+        let (_dir, mut runtime) = runtime(Config::default());
+        let app = string("com.apple.TextEdit");
+        let rect = |x: f64| ZctRect {
+            x,
+            y: 0.0,
+            width: 1.0,
+            height: 16.0,
+        };
+        unsafe {
+            let s = zct_session_new(&mut *runtime, app.as_ptr());
+            let plan = zct_session_popup_plan(s, true, true, true, false, rect(10.0), true);
+            assert_eq!(
+                (plan.bar.action, plan.candidates.action, plan.hint.action),
+                (1, 1, 2)
+            );
+            assert!(plan.bar.above && !plan.candidates.above && !plan.hint.above);
+            let plan = zct_session_popup_plan(s, true, true, true, false, rect(20.0), true);
+            assert_eq!(plan.bar.anchor.x, 10.0, "組字中提示列不動");
+            assert_eq!(plan.candidates.anchor.x, 20.0, "候選窗跟著游標");
+            let plan = zct_session_popup_plan(s, false, true, false, true, rect(30.0), true);
+            assert_eq!(
+                (plan.bar.action, plan.candidates.action, plan.hint.action),
+                (0, 0, 1)
+            );
+            assert_eq!(plan.hint.anchor.x, 30.0);
+            zct_session_free(s);
+        }
     }
 
     #[test]

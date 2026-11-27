@@ -67,7 +67,7 @@ final class CandidateView: NSView {
     private(set) var hits: [Hit] = []
     var onChoose: ((Int, Int) -> Void)?
     var onPage: ((Bool) -> Void)?
-    private var runs: [Run] = []
+    private(set) var runs: [Run] = []
     private var highlights: [NSRect] = []
     private(set) var selection: NSRect?
     private(set) var compositionCaret: NSRect?
@@ -163,35 +163,63 @@ final class CandidateView: NSView {
     }
 }
 
-final class CandidatePanel: NSPanel {
-    private let candidateView = CandidateView()
-    var onChoose: ((Int, Int) -> Void)? { didSet { candidateView.onChoose = onChoose } }
-    var onPage: ((Bool) -> Void)? { didSet { candidateView.onPage = onPage } }
-    private var noticeTimer: Timer?
+/// 一個彈出視窗，只放一種內容
+final class PopupPanel: NSPanel {
+    let view = CandidateView()
     init() {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         level = .popUpMenu; isFloatingPanel = true; hasShadow = true; hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isOpaque = false; backgroundColor = .clear
-        contentView = candidateView
+        contentView = view
     }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-    func show(result: EngineResult, caret: NSRect, theme: CandidateTheme, showComposition: Bool) {
-        noticeTimer?.invalidate()
-        let composition = showComposition && !result.composition.text.isEmpty ? result.composition : nil
-        let candidates = result.candidatePage
-        guard composition != nil || !candidates.items.isEmpty || !result.notice.isEmpty else { orderOut(nil); return }
-        let size = candidateView.update(candidates, composition: composition, notice: result.notice, theme: theme)
-        let screen = NSScreen.screens.first { $0.frame.intersects(caret) } ?? NSScreen.main
+    /// 位置規則與 Windows 共用：預設在 `anchor` 下方，放不下改上方，不超出螢幕；`above` 優先放上方
+    func show(size: NSSize, at window: ZctPopupWindow) {
+        guard size.width > 0 else { orderOut(nil); return }
+        let anchor = NSRect(x: window.anchor.x, y: window.anchor.y, width: window.anchor.width, height: window.anchor.height), above = window.above
+        let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? NSScreen.main
         let bounds = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        // 位置規則與 Windows 共用：預設在游標下方，放不下改上方，不超出螢幕
-        let origin = zct_popup_place(caret.minX, caret.minY, caret.width, caret.height, size.width, size.height,
-                                     bounds.minX, bounds.minY, bounds.width, bounds.height, false)
+        let origin = zct_popup_place(anchor.minX, anchor.minY, anchor.width, anchor.height, size.width, size.height,
+                                     bounds.minX, bounds.minY, bounds.width, bounds.height, above)
         setFrame(NSRect(origin: NSPoint(x: origin.x, y: origin.y), size: size), display: true)
         orderFrontRegardless()
-        if composition == nil && candidates.items.isEmpty && !candidates.displayOnly {
-            noticeTimer = Timer.scheduledTimer(withTimeInterval: zct_hint_seconds(), repeats: false) { [weak self] _ in self?.orderOut(nil) }
+    }
+}
+
+/// 和 Windows 一樣分成三個視窗：組字提示列、候選窗（含打字時的注音小視窗）、提示。
+/// 各自出現、消失，不會互相推擠；顯示哪幾個、放在哪裡由共用層決定（zct_core::popup::Popups）
+final class CandidatePanel {
+    let bar = PopupPanel(), candidates = PopupPanel(), hint = PopupPanel()
+    var onChoose: ((Int, Int) -> Void)? { didSet { candidates.view.onChoose = onChoose } }
+    var onPage: ((Bool) -> Void)? { didSet { candidates.view.onPage = onPage } }
+    private var hintTimer: Timer?
+    private static let empty = CandidateDisplay(items: [], labels: [], highlight: 0, page: 0, totalPages: 0)
+    var isVisible: Bool { bar.isVisible || candidates.isVisible || hint.isVisible }
+    func orderOut(_ sender: Any?) {
+        hintTimer?.invalidate()
+        for panel in [bar, candidates, hint] { panel.orderOut(sender) }
+    }
+    /// `plan` 的 action：0 收起、1 顯示、2 不動（提示自己計時消失，之後的按鍵不會提早收掉）
+    func show(result: EngineResult, plan: ZctPopupPlan, theme: CandidateTheme) {
+        switch plan.bar.action {
+        case 1: bar.show(size: bar.view.update(Self.empty, composition: result.composition, theme: theme), at: plan.bar)
+        case 0: bar.orderOut(nil)
+        default: break
+        }
+        switch plan.candidates.action {
+        case 1: candidates.show(size: candidates.view.update(result.candidatePage, theme: theme), at: plan.candidates)
+        case 0: candidates.orderOut(nil)
+        default: break
+        }
+        switch plan.hint.action {
+        case 1:
+            hintTimer?.invalidate()
+            hint.show(size: hint.view.update(Self.empty, notice: result.notice, theme: theme), at: plan.hint)
+            hintTimer = Timer.scheduledTimer(withTimeInterval: zct_hint_seconds(), repeats: false) { [weak self] _ in self?.hint.orderOut(nil) }
+        case 0: hintTimer?.invalidate(); hint.orderOut(nil)
+        default: break
         }
     }
 }

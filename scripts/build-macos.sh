@@ -40,10 +40,12 @@ set -- -p zct-core -p zct-ai -p zct-eval -p zct-ffi -p zct-preferences -p zct-up
 OUTPUT=target/macos
 APP_NAME="動物園輸入法"
 BUNDLE_ID=com.zoosewu.inputmethod.ZooType
+ICON_BADGE=""
 if [ "$DEV" = true ]; then
     OUTPUT=target/macos-dev
     APP_NAME="動物園輸入法 開發版"
     BUNDLE_ID=com.zoosewu.inputmethod.ZooType.dev
+    ICON_BADGE=DEV
     set -- "$@" --features zct-ffi/dev
 fi
 set -- "$@" --target-dir "$OUTPUT"
@@ -77,7 +79,7 @@ if [ ! -f assets/dict/ngram.bin ]; then
 fi
 ditto assets/dict "$APP/Contents/Resources/dict"
 cp LICENSE Cargo.lock macos/THIRD-PARTY-NOTICES.txt "$APP/Contents/Resources/"
-xcrun swift -module-cache-path "$ROOT/$OUTPUT/swift-module-cache" scripts/macos-icons.swift "$APP/Contents/Resources"
+xcrun swift -module-cache-path "$ROOT/$OUTPUT/swift-module-cache" scripts/macos-icons.swift "$APP/Contents/Resources" "$ICON_BADGE"
 ICONSET="$ROOT/$OUTPUT/AppIcon.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
