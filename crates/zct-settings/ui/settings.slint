@@ -293,7 +293,7 @@ export component SettingsWindow inherits Window {
     in property <bool> official: true;
     // 各操作習慣固定的選字對象、選字後游標（以 general.habit 為索引，自訂那格不用）
     in-out property <bool> show-advanced: false;
-    // 檢查更新：已下載、可以安裝的新版版號（空字串是沒有）
+    // 檢查更新：可以安裝的新版版號（空字串是沒有；按更新才下載）
     in property <string> update-version;
     in property <string> update-status;
     in property <bool> checking-update;

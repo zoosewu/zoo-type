@@ -52,7 +52,6 @@ pub struct ZctRuntime {
     updater: Option<Arc<zct_host::update::Updater>>,
     update_available: CString,
     update_message: CString,
-    update_file: CString,
 }
 
 impl ZctRuntime {
@@ -66,7 +65,6 @@ impl ZctRuntime {
             updater: None,
             update_available: CString::default(),
             update_message: CString::default(),
-            update_file: CString::default(),
         }
     }
 
@@ -734,19 +732,34 @@ pub unsafe extern "C" fn zct_update_check(runtime: *mut ZctRuntime) -> bool {
     })
 }
 
-/// 要安裝的檔案（重新驗證過簽章與版號）；沒有可安裝的版本是 NULL 並設定錯誤
+/// 使用者按「更新」：下載（已下載就略過）並驗證，回傳要安裝的檔案路徑（用 `zct_string_free` 釋放）。
+/// 會等下載完，請在背景執行緒呼叫；下載進度看 `zct_update_status`。失敗是 NULL 並設定錯誤
 /// # Safety
-/// `runtime` is live; the path is borrowed until the next update call.
+/// `runtime` is live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zct_update_pending(runtime: *mut ZctRuntime) -> *const c_char {
-    guard(|| {
-        let runtime = unsafe { runtime.as_mut() }.ok_or("空 runtime")?;
+pub unsafe extern "C" fn zct_update_prepare(runtime: *const ZctRuntime) -> *mut c_char {
+    let path = guard(|| {
+        let runtime = unsafe { runtime.as_ref() }.ok_or("空 runtime")?;
         let updater = runtime.updater.as_ref().ok_or("只有正式版會更新")?;
-        let (_, file) = updater.pending_file().ok_or("沒有驗證過的更新檔")?;
-        runtime.update_file = string(&file.to_string_lossy());
-        Ok(runtime.update_file.as_ptr())
-    })
+        let (_, file) = updater.prepare()?;
+        Ok(Some(string(&file.to_string_lossy())))
+    });
+    path.map_or(std::ptr::null_mut(), CString::into_raw)
 }
+
+/// 平台安裝失敗：顯示原因，可以再按一次
+/// # Safety
+/// `runtime` is live; `reason` is NULL or a C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_update_failed(runtime: *const ZctRuntime, reason: *const c_char) {
+    if let Some(updater) = unsafe { runtime.as_ref() }.and_then(|r| r.updater.as_ref()) {
+        let reason = unsafe { reason.as_ref() }
+            .map(|r| unsafe { CStr::from_ptr(r) }.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        updater.failed(&reason);
+    }
+}
+
 /// 平台量文字：`font` 0 = 候選字、1 = 數字；寫回寬與高（點）
 pub type ZctMeasure = Option<
     unsafe extern "C" fn(

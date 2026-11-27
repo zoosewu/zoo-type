@@ -28,7 +28,7 @@ pub enum Command {
     Restart,
     /// 設定程式要變更資料位置：立即存檔，之後不再寫入（搬移完成後再送 Restart）
     PrepareMove,
-    /// 安裝已下載的新版（啟動以 SYSTEM 執行的更新工作）
+    /// 下載驗證新版，再啟動以 SYSTEM 執行的更新工作
     InstallUpdate,
     /// 在背景立即檢查更新（輸入法圖示選單）
     CheckUpdate,
@@ -126,7 +126,7 @@ pub enum Response {
         passthrough: Option<Vec<Binding>>,
     },
     Error(String),
-    /// 回應 `CheckUpdate`：已下載、可以安裝的新版版號；`None` 是已經最新
+    /// 回應 `CheckUpdate`：可以安裝的新版版號（按更新才下載）；`None` 是已經最新
     Update(Option<String>),
 }
 

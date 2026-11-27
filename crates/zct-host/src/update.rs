@@ -1,7 +1,7 @@
 //! 自動更新（只有正式版）：兩個平台共用「查、下載、驗證、排程」，平台只負責安裝
 //!
 //! - 開機 5 分鐘後、之後每天查 GitHub Releases 的最新正式版（設定 `[update] auto_check`）；設定畫面可以立即檢查
-//! - 比目前新就下載這個平台的檔案與 `.sig` 到固定位置，驗證簽章與版號（不能降版）
+//! - 檢查只看版號；使用者按「更新」才下載這個平台的檔案與 `.sig` 到固定位置，驗證簽章與版號（不能降版），再交給平台安裝
 //! - 只接受官方 Release 的下載網址（`https://github.com/zoosewu/zoo-type/releases/download/<tag>/<檔名>`）
 //!
 //! 只連到 GitHub，不送出任何使用者資料。
@@ -78,7 +78,7 @@ pub fn manages_updates() -> bool {
 /// 設定畫面與輸入法選單顯示的狀態
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Status {
-    /// 已下載、驗證過，等使用者按「更新」的版本
+    /// 比目前新、等使用者按「更新」的版本（還沒下載，或已下載驗證過）
     pub available: Option<String>,
     pub checking: bool,
     /// 正在下載新版：已下載的百分比
@@ -113,9 +113,18 @@ impl Status {
     }
 }
 
+/// 檢查時找到的新版：按「更新」才下載
+#[derive(Clone)]
+struct Found {
+    version: Version,
+    file_url: String,
+    sig_url: String,
+}
+
 pub struct Updater {
     target: Target,
     status: Mutex<Status>,
+    found: Mutex<Option<Found>>,
     /// 每天的檢查與手動檢查可能同時發生：一次只查一個，免得同時寫下載資料夾
     running: Mutex<()>,
 }
@@ -129,12 +138,13 @@ impl Updater {
                 message: "尚未檢查更新".into(),
                 ..Default::default()
             }),
+            found: Mutex::new(None),
             running: Mutex::new(()),
         };
         match u.pending() {
             Some(v) => u.set(|s| {
                 s.available = Some(v.to_string());
-                s.message = format!("更新已驗證：v{v}");
+                s.message = format!("可以更新到 v{v}");
             }),
             None => {
                 let _ = std::fs::remove_file(u.target.path());
@@ -170,7 +180,7 @@ impl Updater {
         self.pending().map(|v| (v.to_string(), self.target.path()))
     }
 
-    /// 立刻查一次；有新版就下載驗證，回傳版號
+    /// 立刻查一次（只看版號，不下載）；有新版回傳版號
     pub fn check(&self) -> Result<Option<String>, String> {
         let _running = self.running.lock().unwrap_or_else(|e| e.into_inner());
         self.set(|s| {
@@ -186,9 +196,12 @@ impl Updater {
             match &result {
                 Ok(Some(v)) => {
                     s.available = Some(v.clone());
-                    s.message = format!("更新已驗證：v{v}");
+                    s.message = format!("可以更新到 v{v}");
                 }
-                Ok(None) => s.message = "目前已是最新版".into(),
+                Ok(None) => {
+                    s.available = None;
+                    s.message = "目前已是最新版".into();
+                }
                 Err(e) => s.message = format!("檢查更新失敗：{e}"),
             }
         });
@@ -210,28 +223,89 @@ impl Updater {
         if !version.is_newer_than(&Version::current()) {
             return Ok(None);
         }
-        if self.pending().as_ref() == Some(&version) {
-            return Ok(Some(version));
-        }
         let name = (self.target.asset)(&version);
-        let file_url = asset_url(&release, &name)?;
-        let sig_url = asset_url(&release, &format!("{name}.sig"))?;
+        let found = Found {
+            file_url: asset_url(&release, &name)?,
+            sig_url: asset_url(&release, &format!("{name}.sig"))?,
+            version: version.clone(),
+        };
+        *self.found.lock().unwrap_or_else(|e| e.into_inner()) = Some(found);
+        Ok(Some(version))
+    }
+
+    /// 使用者按「更新」：下載（已下載驗證過就略過）並驗證，回傳要安裝的（版號, 檔案）。會等下載完
+    pub fn prepare(&self) -> Result<(String, PathBuf), String> {
+        let _running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        let found = self.found.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let result = match (self.pending(), found) {
+            (Some(v), f) if f.as_ref().is_none_or(|f| f.version == v) => Ok(()),
+            (_, Some(f)) => self.download(&f),
+            (_, None) => Err("請先檢查更新".into()),
+        };
+        self.set(|s| s.progress = None);
+        match result.and_then(|()| self.pending_file().ok_or("下載的檔案簽章不符".to_string()))
+        {
+            Ok(file) => Ok(file),
+            Err(e) => {
+                self.failed(&e);
+                Err(e)
+            }
+        }
+    }
+
+    fn download(&self, f: &Found) -> Result<(), String> {
+        let version = &f.version;
         std::fs::create_dir_all(&self.target.dir)
             .map_err(|e| format!("無法建立 {}：{e}", self.target.dir.display()))?;
-        download(&file_url, &self.target.path(), MAX_FILE, |done, total| {
+        self.set(|s| s.progress = Some(0));
+        download(&f.file_url, &self.target.path(), MAX_FILE, |done, total| {
             self.set(|s| {
-                s.progress = total.map(|t| percent(done, t));
+                s.progress = Some(total.map_or(0, |t| percent(done, t)));
                 s.message = match total {
                     Some(t) => format!("下載 v{version}：{} / {}", mb(done), mb(t)),
                     None => format!("下載 v{version}：{}", mb(done)),
                 };
             })
         })?;
-        download(&sig_url, &self.target.sig(), MAX_SIG, |_, _| {})?;
+        download(&f.sig_url, &self.target.sig(), MAX_SIG, |_, _| {})?;
         self.set(|s| s.message = format!("驗證 v{version}…"));
         match self.pending() {
-            Some(v) if v == version => Ok(Some(version)),
-            _ => Err("下載的檔案簽章不符，不提示更新".into()),
+            Some(v) if v == *version => Ok(()),
+            _ => Err("下載的檔案簽章不符".into()),
+        }
+    }
+
+    /// 更新失敗：顯示原因，可以再按一次
+    pub fn failed(&self, reason: &str) {
+        log::warn!("更新失敗：{reason}");
+        self.set(|s| {
+            s.installing = None;
+            s.progress = None;
+            s.message = format!("更新失敗：{reason}");
+        });
+    }
+
+    /// 在背景下載驗證，再交給平台安裝（`install` 收到版號與檔案）
+    pub fn install_in_background(
+        self: &Arc<Self>,
+        install: impl FnOnce(&str, &Path) -> Result<(), String> + Send + 'static,
+    ) {
+        let me = self.clone();
+        me.set(|s| s.progress = Some(0));
+        let spawned = std::thread::Builder::new()
+            .name("update-install".into())
+            .spawn(move || {
+                let Ok((version, file)) = me.prepare() else {
+                    return;
+                };
+                // 安裝程式在背景跑、沒有回報：先顯示「正在安裝」
+                me.set_installing(true);
+                if let Err(e) = install(&version, &file) {
+                    me.failed(&e);
+                }
+            });
+        if let Err(e) = spawned {
+            self.failed(&e.to_string());
         }
     }
 
@@ -420,6 +494,21 @@ mod tests {
             !dir.path().join("update.zip").exists(),
             "驗證不過的檔案清掉"
         );
+    }
+
+    #[test]
+    fn install_downloads_only_after_a_check_found_a_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let u = Updater::new(Target {
+            dir: dir.path().join("update"),
+            file: "update.zip".into(),
+            asset: |v| format!("zoo-type-{v}.zip"),
+        });
+        assert_eq!(u.prepare().unwrap_err(), "請先檢查更新");
+        assert!(!dir.path().join("update").exists(), "沒按更新不建立下載資料夾");
+        let s = u.status();
+        assert_eq!((s.progress, s.installing), (None, None), "失敗後可以再按");
+        assert!(s.message.starts_with("更新失敗"));
     }
 
     #[test]

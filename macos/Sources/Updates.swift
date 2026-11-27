@@ -58,7 +58,7 @@ enum UpdateFiles {
     }
 }
 
-// 查、下載、驗證、排程在共用層（與 Windows 相同）；這裡只顯示狀態與安裝（解壓、驗 App、替換、重新啟動）。
+// 查、下載、驗證、排程在共用層（與 Windows 相同；檢查只看版號，按「更新」才下載）；這裡只顯示狀態與安裝（解壓、驗 App、替換、重新啟動）。
 // All state belongs to the main thread. Extraction uses a background queue.
 final class UpdateManager {
     static let shared = UpdateManager()
@@ -108,32 +108,36 @@ final class UpdateManager {
         let installed = Bundle.main.bundleURL.standardizedFileURL
         let expected = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Input Methods/動物園輸入法.app").standardizedFileURL
         guard installed == expected else { changed("請先將正式版安裝至 Library/Input Methods，再使用自動更新"); return }
-        // 共用層重新驗證過簽章與版號的檔案
-        guard let pending = zct_update_pending(runtime.handle) else { changed("更新失敗：" + EngineError.current.description); return }
-        let file = URL(fileURLWithPath: String(cString: pending))
-        let directory = file.deletingLastPathComponent()
-        installing = true; busy = true; changed("準備安裝…")
-        zct_update_installing(runtime.handle, true)
+        // 按下才下載：共用層在背景下載並驗證簽章與版號（進度在共用層的狀態裡）
+        local = nil
+        installing = true; busy = true
+        refresh()
         let bundleID = Bundle.main.bundleIdentifier!
+        let handle = runtime.handle
         queue.async { [weak self] in
-            let work = directory.appendingPathComponent("staged-" + UUID().uuidString)
+            var work: URL?
             let result = Result { () throws -> URL in
-                try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-                try UpdateFiles.run("/usr/bin/ditto", ["-x", "-k", file.path, work.path])
-                let app = work.appendingPathComponent("zoo-type-\(version)-macos-\(UpdateFiles.architecture)/動物園輸入法.app")
+                guard let pending = zct_update_prepare(handle) else { throw EngineError.current }
+                let file = URL(fileURLWithPath: String(cString: pending)); zct_string_free(pending)
+                let staging = file.deletingLastPathComponent().appendingPathComponent("staged-" + UUID().uuidString)
+                work = staging
+                try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+                try UpdateFiles.run("/usr/bin/ditto", ["-x", "-k", file.path, staging.path])
+                let app = staging.appendingPathComponent("zoo-type-\(version)-macos-\(UpdateFiles.architecture)/動物園輸入法.app")
                 try UpdateFiles.validateApp(app, version: version, bundleID: bundleID)
                 return app
             }
             DispatchQueue.main.async {
-                guard let self else { try? FileManager.default.removeItem(at: work); return }
+                defer { if let work { try? FileManager.default.removeItem(at: work) } }
+                guard let self else { return }
                 defer {
                     self.installing = false; self.busy = self.checking
                     zct_update_installing(runtime.handle, false)
-                    try? FileManager.default.removeItem(at: work)
                 }
                 var frozen = false
                 do {
                     let staged = try result.get()
+                    zct_update_installing(runtime.handle, true)
                     NotificationCenter.default.post(name: .zctWillInstallUpdate, object: nil)
                     try runtime.freeze()
                     frozen = true
@@ -162,7 +166,8 @@ final class UpdateManager {
                         do { try runtime.recover() } catch { self.changed("更新失敗，請重新啟動輸入法：" + String(describing: error)); return }
                         NotificationCenter.default.post(name: .zctSettingsChanged, object: nil)
                     }
-                    self.changed("更新失敗：" + String(describing: error))
+                    zct_update_failed(runtime.handle, String(describing: error))
+                    self.refresh()
                 }
             }
         }

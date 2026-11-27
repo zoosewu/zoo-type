@@ -109,7 +109,7 @@ impl Session {
 
 `Backend` 以 `Action` / `Reply` 抽象詞庫、讀音、統計、備份、還原、同步與 AI 憑證操作。Windows 設定程式透過 named pipe 轉送引擎操作，Windows 服務與 macOS FFI 共用 `EngineBackend`；憑證與網路工作留在平台實作。macOS Swift `PreferencesClient` 透過 C ABI 的 JSON 請求呼叫共用 `Manager`。UI 不自行解析或寫入 TOML。
 
-設定目錄是唯一來源：欄位的標題、分區、說明、選項、進階、數字範圍、被操作習慣鎖定的規則都在 `catalog`。macOS 的 AppKit 設定頁與 Windows 的「一般」「全部設定」頁都由它產生，新增設定只要寫一次；數字範圍由共用的 `validate` 在儲存時檢查。兩平台只有顯示文字可以不同（右 Alt／右 Option）。Mac 的 AI 修正由 Rust 背景執行緒呼叫共用的 `zct-ai`，IMK 在主執行緒取得結果，金鑰由 Keychain 管理。「不在輸入狀態」的判斷規則在 `zct_core::detect`，兩平台共用；平台只收集訊號（Windows：TSF compartment、transitory context、游標、螢幕；macOS：安全輸入、選取範圍、游標、視窗）。組字提示列快捷鍵透過共用設定層寫入目前 App 的規則。正式版更新的查詢、下載（只接受官方 Release 網址）、簽章與版號驗證、排程都在 `zct-host::update`，兩平台共用；平台只負責安裝：Windows 啟動以 SYSTEM 執行的更新排程工作，macOS 驗證 App 身分、程式碼簽章與架構後替換使用者安裝的 .app。
+設定目錄是唯一來源：欄位的標題、分區、說明、選項、進階、數字範圍、被操作習慣鎖定的規則都在 `catalog`。macOS 的 AppKit 設定頁與 Windows 的「一般」「全部設定」頁都由它產生，新增設定只要寫一次；數字範圍由共用的 `validate` 在儲存時檢查。兩平台只有顯示文字可以不同（右 Alt／右 Option）。Mac 的 AI 修正由 Rust 背景執行緒呼叫共用的 `zct-ai`，IMK 在主執行緒取得結果，金鑰由 Keychain 管理。「不在輸入狀態」的判斷規則在 `zct_core::detect`，兩平台共用；平台只收集訊號（Windows：TSF compartment、transitory context、游標、螢幕；macOS：安全輸入、選取範圍、游標、視窗）。組字提示列快捷鍵透過共用設定層寫入目前 App 的規則。組字提示列、候選窗、提示三個彈出視窗各自獨立，每次按鍵後顯示哪幾個、放在哪裡由 `zct_core::popup::Popups` 決定，兩平台共用。正式版更新的查詢（只看版號；按「更新」才下載）、下載（只接受官方 Release 網址）、簽章與版號驗證、排程都在 `zct-host::update`，兩平台共用；平台只負責安裝：Windows 啟動以 SYSTEM 執行的更新排程工作，macOS 驗證 App 身分、程式碼簽章與架構後替換使用者安裝的 .app。
 
 還原會凍結舊引擎；主機須重新開啟引擎，現有輸入 session 須重新啟用，避免舊學習資料覆寫還原結果。
 

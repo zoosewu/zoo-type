@@ -76,12 +76,8 @@ fn run_command(cmd: Command, shared: &Shared) {
             let Some(updater) = &shared.update else {
                 return;
             };
-            // 安裝程式在背景跑、沒有回報：先顯示「正在安裝」，換版後舊服務程序改顯示「已更新」
-            updater.set_installing(true);
-            if let Err(e) = crate::update::install() {
-                log::warn!("{e}");
-                updater.set_installing(false);
-            }
+            // 下載驗證完才啟動安裝工作；換版後舊服務程序改顯示「已更新」
+            updater.install_in_background(|_, _| crate::update::install());
         }
         Command::Restart => {
             log::info!("重新啟動");

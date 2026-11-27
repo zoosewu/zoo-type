@@ -63,7 +63,6 @@ mod app {
         /// 診斷用：資料夾 local/ 下有 `debug-keys` 檔案時，記錄非字元鍵（Shift、Delete…）的事件；
         /// 字母、數字、符號一律不記，避免記下使用者打的內容
         pub debug_keys: bool,
-        /// 已下載、可以安裝的新版
         /// 自動更新（只有正式版，而且不是用 ZCT_HOME 另開的服務程序）
         pub update: Option<Arc<zct_host::update::Updater>>,
     }
