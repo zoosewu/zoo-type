@@ -96,7 +96,9 @@ scripts/uninstall-dev.ps1         # 移除開發版（資料保留）
 
 ## 授權
 
-程式碼以 [GNU AGPL-3.0](LICENSE) 授權。下列第三方元件與資料依其各自的授權。
+本專案以 [AGPL-3.0](LICENSE) 授權。如需以 AGPL-3.0 以外的條款使用（例如閉源的商業產品），可另外取得商業授權，請透過 [GitHub Issues](https://github.com/zoosewu/zoo-type/issues) 聯絡。
+
+下列第三方元件與資料依其各自的授權。
 
 第三方元件：
 - [libchewing](https://codeberg.org/chewing/libchewing)：LGPL-2.1-or-later
