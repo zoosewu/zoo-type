@@ -1648,12 +1648,11 @@ detect = false
         let mut english = AcceptanceKeys::new(config.clone());
         assert_eq!(english.type_codes(&[37, 31, 9, 14, 49]).preedit, "love ");
         assert_eq!(english.type_codes(&[1, 32, 20]).preedit, "love 你");
+        // 標點完成單字，之後回到注音：lo , su3
         let mut punctuation = AcceptanceKeys::new(config.clone());
         assert_eq!(
-            punctuation
-                .type_codes(&[37, 31, 43, 47, 44, 41, 27, 20, 21, 22, 26, 49])
-                .preedit,
-            "lo,./;-3467 "
+            punctuation.type_codes(&[37, 31, 43, 1, 32, 20]).preedit,
+            "lo,你"
         );
         let mut deletion = AcceptanceKeys::new(config);
         // 還沒按空白的單字：Backspace 整個刪

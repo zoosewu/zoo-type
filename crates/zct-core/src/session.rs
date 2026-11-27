@@ -861,8 +861,9 @@ impl Session {
         self.english_word = !ended;
     }
 
-    /// 英文優先轉出的單字打到一半：字母、數字、`, . / ; -`、聲調鍵都是字元本身；
-    /// 空白結束這個單字，Backspace 整個刪掉，其他鍵結束單字後照常處理（回傳 false）
+    /// 英文優先轉出的單字打到一半：字母、數字（含聲調鍵）都是字元本身；
+    /// 空白或標點（`, . / ; -` 等，照打出來）結束這個單字，Backspace 整個刪掉，
+    /// 其他鍵結束單字後照常處理（回傳 false）
     fn english_word_key(&mut self, ev: &KeyEvent) -> bool {
         if !self.english_word {
             return false;
@@ -889,6 +890,10 @@ impl Session {
                     c
                 };
                 self.insert_latin(&(c as char).to_string());
+                // 標點也完成這個單字（「hello,」），之後的鍵回到注音
+                if c.is_ascii_punctuation() {
+                    self.english_word = false;
+                }
             }
             Key::Numpad(c) => self.insert_latin(&(c as char).to_string()),
             Key::Space => {

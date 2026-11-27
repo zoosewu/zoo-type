@@ -2776,10 +2776,10 @@ fn english_first() -> Harness {
 fn english_first_switches_on_invalid_bopomofo() {
     // （按鍵, 組字區）
     let cases = [
-        ("love ", "love "),               // ㄠ 後面接 ㄟ：結構不可能
-        ("lovr ", "lovr "),               // 打錯的字照打
-        ("lo,./;-3467 ", "lo,./;-3467 "), // 注音與聲調鍵是字元本身
-        ("eu3", "eu3"),                   // ㄍㄧˇ 沒有字
+        ("love ", "love "),       // ㄠ 後面接 ㄟ：結構不可能
+        ("lovr ", "lovr "),       // 打錯的字照打
+        ("lov3467 ", "lov3467 "), // 聲調鍵（數字）是字元本身
+        ("eu3", "eu3"),           // ㄍㄧˇ 沒有字
         ("eu3x ", "eu3x "),
         ("eu ", "eu "),    // ㄍㄧ 一聲也沒有字：空白結束單字
         ("hk4g4", "測試"), // 合法注音照常
@@ -2846,6 +2846,43 @@ fn english_first_word_keeps_shift_case_and_ends_on_other_keys() {
     let r = h.press(Key::Enter, Mods::NONE);
     assert_eq!(r.commit.as_deref(), Some("loV"));
     assert_eq!(h.s.mode(), InputMode::Chinese);
+}
+
+/// 英文優先：標點也完成單字，之後的鍵回到注音；Backspace 一次只刪一個字元
+#[test]
+fn english_first_punctuation_finishes_the_word() {
+    for p in [",", ".", "/", ";", "-"] {
+        let mut h = english_first();
+        h.type_str(&format!("love{p}su3"));
+        assert_eq!(h.s.preedit().text, format!("love{p}你"), "{p}");
+    }
+    let mut h = english_first();
+    h.type_str("love");
+    h.press(Key::Char(b'1'), Mods::shift());
+    assert_eq!(h.s.preedit().text, "love!");
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(
+        h.s.preedit().text,
+        "love",
+        "標點之後是完成的單字：只刪一個字元"
+    );
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(h.s.preedit().text, "lov");
+}
+
+#[test]
+fn shift_english_punctuation_finishes_the_word() {
+    let mut h = Harness::new();
+    h.type_str("ji3");
+    h.tap_shift();
+    h.type_str(" zct,");
+    assert_eq!(h.s.preedit().text, "我 zct,");
+    h.press(Key::Backspace, Mods::NONE);
+    assert_eq!(
+        h.s.preedit().text,
+        "我 zct",
+        "標點之後是完成的單字：只刪一個字元"
+    );
 }
 
 #[test]
