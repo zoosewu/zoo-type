@@ -78,17 +78,20 @@ Release 解壓後也提供「開啟設定.command」。同一個輸入法程序�
 
 ## GitHub Release
 
-推送與 `Cargo.toml` workspace 版本一致的 `v*` 標籤會觸發 Release workflow。
-Windows、macOS Apple Silicon 和 Intel 分別測試與建置；全部成功後統一發布同一個 Release。
+推送 `v*` 標籤會觸發 Release workflow（版號以標籤為準，建置時寫進 `Cargo.toml`）。
+Windows、macOS Apple Silicon 和 Intel 分別測試與建置，全部成功後交給
+[zoo-release](https://github.com/zoosewu/zoo-release) 的共用 workflow 發布：產生 `.sha256`、用共用金鑰簽章、
+Release 說明（慣例式提交）與 `latest.json`。
 
-- Apple Silicon 輸入法：`zoo-type-<版本>-macos-arm64.zip`
-- Intel 輸入法：`zoo-type-<版本>-macos-x64.zip`
-- 另附 `-tools.tar.gz` 命令列工具包；每個壓縮包皆附 `.sha256`。
+- Apple Silicon 輸入法：`zoo-type-macos-arm64.zip`
+- Intel 輸入法：`zoo-type-macos-x64.zip`
+- 過渡期另附含版號的同一份檔案（`zoo-type-<版本>-macos-<架構>.zip`＋舊格式 `.sig`），給 0.1.10 以前的版本自動更新
+- 另附 `-tools.tar.gz` 命令列工具包；每個檔案皆附 `.sha256`。
 
 輸入法壓縮包內包含 .app、`install.sh` 與 README，雙擊「安裝.command」或執行 `sh install.sh` 安裝到目前使用者的 Input Methods。
 正式版在「設定 → 關於」可檢查更新；啟用自動檢查後，啟動約五分鐘進行第一次檢查，此後每天檢查。安裝前會驗證 ZIP 的 Ed25519 簽章、版本、App 身分、程式碼簽章與架構，再替換使用者 Input Methods 內的 App 並重新啟動。
 
-發布者需配置現有的 `ZOO_TYPE_SIGNING_KEY`，工作流程會為兩種 Mac 架構各產生一份 `.zip.sig`。Apple 的發行簽章另用以下 GitHub Secrets：
+更新檔的簽章用 zoo-release 的 `ZOO_SIGNING_KEY`、`ZOO_SIGNING_PASSWORD`；過渡期的舊格式 `.sig` 用 `ZOO_TYPE_SIGNING_KEY`。Apple 的發行簽章另用以下 GitHub Secrets：
 
 | 用途 | GitHub Secrets |
 | --- | --- |

@@ -1,7 +1,11 @@
-name: Release
+name: release
 
-# 推送 v* 標籤：所有平台建置成功後，統一發布同一個 GitHub Release
-# 標籤有 -（例如 v0.2.0-rc.1）時標成 pre-release
+# 推送 v* 標籤：建置各平台、上傳 release-* artifact，發布交給 zoo-release（docs/RELEASE.md）
+# 版本以 tag 為準：建置前把 tag 的版號寫進 Cargo.toml
+#
+# 更新檔（過渡期兩種都發）：
+# - 不含版號的檔名：zoo-release 用共用金鑰簽章、寫進 latest.json（0.1.11 起的版本讀這個）
+# - 含版號的檔名＋舊格式 .sig（ZOO_TYPE_SIGNING_KEY）：給已安裝的 0.1.x 自動更新，過幾版後移除
 on:
   push:
     tags: ['v*']
@@ -23,21 +27,15 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
-      - name: 標籤與版號一致
+      - name: tag 的版號
         id: version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          python3 - <<'PYTHON'
-          import os, tomllib
-          from pathlib import Path
-          version = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
-          if os.environ["RELEASE_TAG"] != f"v{version}":
-              raise SystemExit("標籤與 Cargo.toml workspace 版本不一致")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write(f"version={version}\n")
-          PYTHON
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $RELEASE_TAG 的格式需為 v主.次.修補"; exit 1
+          fi
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
   macos:
     needs: version
@@ -53,8 +51,13 @@ jobs:
     timeout-minutes: 60
     env:
       MACOSX_DEPLOYMENT_TARGET: '15.0'
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
+      - name: 版號以 tag 為準
+        run: |
+          python3 scripts/set-version.py "$VERSION"
+          cargo update --workspace
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -88,12 +91,14 @@ jobs:
         run: sh scripts/build-macos.sh --check
       - name: 打包與 SHA256
         run: sh scripts/package-macos.sh
-      - name: 簽署 macOS 自動更新壓縮包
+      # 0.1.x 的自動更新讀含版號的檔名與舊格式簽章；新版讀 latest.json（不含版號的檔名，zoo-release 簽章）
+      - name: 更新檔
         env:
           ZOO_TYPE_SIGNING_KEY: ${{ secrets.ZOO_TYPE_SIGNING_KEY }}
-          VERSION: ${{ needs.version.outputs.version }}
           ARCH: ${{ matrix.arch }}
-        run: cargo run -p zct-update --bin zct-release --release --locked --target-dir target/macos -- sign "target/installer/zoo-type-$VERSION-macos-$ARCH.zip" "$VERSION"
+        run: |
+          cargo run -p zct-update --bin zct-release --release --locked --target-dir target/macos -- sign "target/installer/zoo-type-$VERSION-macos-$ARCH.zip" "$VERSION"
+          cp "target/installer/zoo-type-$VERSION-macos-$ARCH.zip" "target/installer/zoo-type-macos-$ARCH.zip"
       - name: 設定視窗、候選窗與選單圖示驗證
         run: '"target/macos/動物園輸入法.app/Contents/MacOS/zoo-type" --ui-self-test target/macos/ui-preview'
       - name: 保存 UI 預覽
@@ -108,10 +113,8 @@ jobs:
           name: release-macos-${{ matrix.arch }}
           path: |
             target/installer/*-macos-${{ matrix.arch }}.zip
-            target/installer/*-macos-${{ matrix.arch }}.zip.sha256
             target/installer/*-macos-${{ matrix.arch }}.zip.sig
             target/installer/*-macos-${{ matrix.arch }}-tools.tar.gz
-            target/installer/*-macos-${{ matrix.arch }}-tools.tar.gz.sha256
           if-no-files-found: error
 
       - name: 清理 Apple 憑證
@@ -129,6 +132,11 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+
+      - name: 版號以 tag 為準
+        run: |
+          python scripts/set-version.py $env:VERSION
+          cargo update --workspace
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -169,20 +177,20 @@ jobs:
         shell: pwsh
         run: ./scripts/build-installer.ps1
 
-      # 自動更新只安裝簽章正確的安裝檔（crates/zct-update）；沒有私鑰就不發布
-      - name: 簽章
+      # 0.1.x 的自動更新讀含版號的檔名與舊格式簽章；新版讀 latest.json（不含版號的檔名，zoo-release 簽章）
+      - name: 更新檔
         shell: pwsh
         env:
           ZOO_TYPE_SIGNING_KEY: ${{ secrets.ZOO_TYPE_SIGNING_KEY }}
-        run: cargo run -p zct-update --bin zct-release --release --locked -- sign "target/installer/zoo-type-$env:VERSION-windows-x64-setup.exe" $env:VERSION
+        run: |
+          cargo run -p zct-update --bin zct-release --release --locked -- sign "target/installer/zoo-type-$env:VERSION-windows-x64-setup.exe" $env:VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item "target/installer/zoo-type-$env:VERSION-windows-x64-setup.exe" "target/installer/zoo-type-windows-x64-setup.exe"
 
-      # 這次打包的模型附到新版 Release 上，下一版建置時從這裡取得
+      # 這次打包的模型附到新版 Release 上，下一版建置時從這裡取得（sha256 由 zoo-release 產生）
       - name: 智慧選字模型
         shell: bash
-        run: |
-          cp assets/dict/ngram.bin target/installer/
-          # 固定寫成「雜湊、兩個空白、檔名」：Git Bash 會在檔名前加 *
-          echo "$(sha256sum assets/dict/ngram.bin | cut -d' ' -f1)  ngram.bin" > target/installer/ngram.bin.sha256
+        run: cp assets/dict/ngram.bin target/installer/
 
       - name: 保存 Windows 發布檔案
         uses: actions/upload-artifact@v4
@@ -190,73 +198,16 @@ jobs:
           name: release-windows-x64
           path: |
             target/installer/*.exe
-            target/installer/*.exe.sha256
             target/installer/*.exe.sig
             target/installer/ngram.bin
-            target/installer/ngram.bin.sha256
           if-no-files-found: error
 
-  publish:
-    needs: [version, windows, macos]
-    runs-on: ubuntu-latest
+  release:
+    needs: [windows, macos]
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.ref_name }}
-      VERSION: ${{ needs.version.outputs.version }}
-    steps:
-      - name: 取得所有平台發布檔案
-        uses: actions/download-artifact@v4
-        with:
-          pattern: release-*
-          merge-multiple: true
-          path: release-assets
-      - name: 驗證發布檔案
-        working-directory: release-assets
-        run: |
-          test -s "zoo-type-$VERSION-windows-x64-setup.exe.sig"
-          test -s "zoo-type-$VERSION-macos-arm64.zip.sig"
-          test -s "zoo-type-$VERSION-macos-x64.zip.sig"
-          sha256sum --check ngram.bin.sha256
-          for name in "zoo-type-$VERSION-windows-x64-setup.exe" \
-            "zoo-type-$VERSION-macos-arm64.zip" \
-            "zoo-type-$VERSION-macos-x64.zip" \
-            "zoo-type-$VERSION-macos-arm64-tools.tar.gz" \
-            "zoo-type-$VERSION-macos-x64-tools.tar.gz"; do
-            test -s "$name"
-            sha256sum --check "$name.sha256"
-          done
-      - name: GitHub Release
-        run: |
-          cat > notes.md <<EOF
-          ## Windows
-          下載 zoo-type-$VERSION-windows-x64-setup.exe 執行（需要系統管理員權限，Windows 10 / 11 64 位元）。
-          安裝檔沒有程式碼簽章，Windows 可能顯示「Windows 已保護您的電腦」：按「其他資訊」→「仍要執行」。
-
-          ## macOS 輸入法（macOS 15 以上）
-          Apple Silicon：zoo-type-$VERSION-macos-arm64.zip
-          Intel：zoo-type-$VERSION-macos-x64.zip
-          包含 InputMethodKit .app 與詞庫。解壓後執行 sh install.sh，並在系統設定 → 鍵盤 → 輸入方式加入「動物園輸入法」。詳細步驟見 README.txt。
-          Apple 發行簽章與公證狀態請見壓縮包內的 README.txt。
-          支援注音、組字、鍵盤／滑鼠選字、標點、中英切換、學習、九頁原生設定、詞庫管理、git 同步與 AI 同音字修正。
-          AI 金鑰儲存於 macOS Keychain。正式版支援下載並驗證官方簽章後更新；Mac 上的遊戲偵測依全螢幕與文字輸入狀態判斷。
-          另附 -tools.tar.gz 命令列工具包，供模擬打字與評測使用。
-
-          ngram.bin 是安裝檔內含的智慧選字模型（CC BY-SA 4.0，由中文維基百科字頻統計而成），供建置與評測使用，一般使用者不需下載。
-
-          所有下載均附 SHA256 校驗檔。
-          EOF
-          flags=()
-          prerelease=false
-          if [[ "$VERSION" == *-* ]]; then
-            flags+=(--prerelease)
-            prerelease=true
-          fi
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "動物園輸入法 $VERSION" --notes-file notes.md --generate-notes "${flags[@]}"
-          fi
-          gh release upload "$RELEASE_TAG" release-assets/* --clobber
-          gh release edit "$RELEASE_TAG" --draft=false --prerelease="$prerelease"
+    uses: zoosewu/zoo-release/.github/workflows/release.yml@v1
+    with:
+      name: 動物園輸入法
+      platforms: '{"windows-x86_64": "zoo-type-windows-x64-setup.exe", "darwin-aarch64": "zoo-type-macos-arm64.zip", "darwin-x86_64": "zoo-type-macos-x64.zip"}'
+    secrets: inherit

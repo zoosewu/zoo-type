@@ -27,6 +27,6 @@ if ($new -eq $text) { throw 'Cargo.toml 的版號沒有改到（已經是這個�
 cargo update --workspace --manifest-path $cargo
 if ($LASTEXITCODE -ne 0) { throw 'cargo update 失敗' }
 
-git -C $root commit -q -am "版本 $Version"
+git -C $root commit -q -am "chore(release): v$Version"
 git -C $root tag -a "v$Version" -m "動物園輸入法 $Version"
 Write-Host "完成：v$Version。推送：git push origin main v$Version"
