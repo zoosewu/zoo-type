@@ -14,7 +14,7 @@ SOURCE="$ROOT/$OUTPUT/$NAME.app/Contents/Resources"
 DEST="$HOME/Library/Input Methods/$NAME.app"
 [ -d "$DEST" ] || { echo "尚未安裝 ${NAME}。" >&2; exit 1; }
 for icon in menu.tiff menu-dark.tiff zoo-type.icns app-icon.png; do
-    [ -f "$SOURCE/$icon" ] || { echo "缺少圖示：$icon，請先建置。" >&2; exit 1; }
+    [ -f "$SOURCE/$icon" ] || { echo "缺少圖示：${icon}，請先建置。" >&2; exit 1; }
 done
 codesign --verify --strict "$DEST"
 STAGE=$(mktemp -d "$HOME/Library/Input Methods/.zoo-type-icons.XXXXXX")

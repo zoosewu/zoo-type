@@ -25,7 +25,7 @@ fi
 # 先前用 sudo 安裝留下 root 擁有的檔案：輸入法讀寫不了，請先改回自己的
 for DIR in "$HOME/Library/Input Methods" "$HOME/Library/Application Support/ZooType" "$HOME/Library/Application Support/ZooType-dev"; do
     if [ -e "$DIR" ] && [ -n "$(find "$DIR" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
-        echo "「$DIR」裡有不屬於你的檔案（先前用 sudo 安裝留下的），請先執行：" >&2
+        echo "「${DIR}」裡有不屬於你的檔案（先前用 sudo 安裝留下的），請先執行：" >&2
         echo "  sudo chown -R \"$(id -un)\" \"$DIR\"" >&2
         echo "再重新執行 sh \"$0\" ${1:-}" >&2
         exit 1
