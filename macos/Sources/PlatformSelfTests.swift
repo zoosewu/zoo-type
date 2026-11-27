@@ -44,6 +44,11 @@ func platformSelfTests() throws {
     let backup = try UpdateFiles.replaceApp(staged: new, installed: old)
     try check(try String(contentsOf: old.appendingPathComponent("fixture"), encoding: .utf8) == "new", "更新原子替換")
     try check(try String(contentsOf: backup.appendingPathComponent("fixture"), encoding: .utf8) == "old", "更新保留舊版")
+    try check(try FileManager.default.contentsOfDirectory(atPath: temporary.path).sorted() == ["new.app", "old.app"], "更新不在安裝資料夾留下舊版")
+    try FileManager.default.removeItem(at: backup.deletingLastPathComponent())
+    try FileManager.default.createDirectory(at: temporary.appendingPathComponent("old.app.previous-1"), withIntermediateDirectories: true)
+    UpdateFiles.removeLeftovers(beside: old)
+    try check(try FileManager.default.contentsOfDirectory(atPath: temporary.path).sorted() == ["new.app", "old.app"], "清除舊版留下的備份")
     let validation = Result { try UpdateFiles.validateApp(old, version: "0.1.5", bundleID: Bundle.main.bundleIdentifier!) }
     if case .success = validation { throw EngineError(description: "不合法的 App 未拒絕") }
     print("macOS platform acceptance passed: Keychain / detection / mouse / update files")

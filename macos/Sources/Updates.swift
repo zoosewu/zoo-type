@@ -30,22 +30,31 @@ enum UpdateFiles {
         guard arch.split(separator: " ").contains(architecture == "arm64" ? "arm64" : "x86_64") else { throw EngineError(description: "更新 App 的處理器架構不符") }
     }
     // A staged copy and rollback are on the destination filesystem. No shell paths.
+    // 暫存與舊版放在 Input Methods 外面：留在裡面的每一份 .app 都會被系統當成另一個輸入法。
+    // 回傳的舊版所在資料夾由呼叫端在新版啟動後刪除。
     static func replaceApp(staged: URL, installed: URL) throws -> URL {
         let manager = FileManager.default
-        let stage = installed.deletingLastPathComponent().appendingPathComponent(".zoo-type-update-" + UUID().uuidString)
-        try manager.createDirectory(at: stage, withIntermediateDirectories: true)
-        defer { try? manager.removeItem(at: stage) }
-        let copy = stage.appendingPathComponent(installed.lastPathComponent)
-        try manager.copyItem(at: staged, to: copy)
-        let backup = installed.appendingPathExtension("previous-" + UUID().uuidString)
-        try manager.moveItem(at: installed, to: backup)
+        let stage = try manager.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: installed, create: true)
+        let copy = stage.appendingPathComponent("new.app"), backup = stage.appendingPathComponent("previous.app")
+        do {
+            try manager.copyItem(at: staged, to: copy)
+            try manager.moveItem(at: installed, to: backup)
+        } catch { try? manager.removeItem(at: stage); throw error }
         do { try manager.moveItem(at: copy, to: installed) }
         catch {
             do { try manager.moveItem(at: backup, to: installed) }
             catch let rollback { throw EngineError(description: "更新失敗且無法還原舊版：" + String(describing: rollback)) }
+            try? manager.removeItem(at: stage)
             throw error
         }
         return backup
+    }
+    // 0.1.7 以前的安裝腳本與自動更新把舊版留在 Input Methods 裡（<名稱>.app.previous-*）
+    static func removeLeftovers(beside app: URL) {
+        let manager = FileManager.default, folder = app.deletingLastPathComponent(), prefix = app.lastPathComponent + ".previous-"
+        for name in (try? manager.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasPrefix(prefix) {
+            try? manager.removeItem(at: folder.appendingPathComponent(name))
+        }
     }
 }
 
@@ -132,14 +141,18 @@ final class UpdateManager {
                     let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/sh")
                     let restart = """
                     while kill -0 "$1" 2>/dev/null; do sleep 1; done
-                    /usr/bin/open -g -n "$2" && exit 0
-                    /bin/mv "$2" "$3.failed" && /bin/mv "$3" "$2" && /usr/bin/open -g -n "$2"
+                    if /usr/bin/open -g -n "$2"; then /bin/rm -rf "${3%/*}"; exit 0; fi
+                    # 換回舊版成功才刪暫存，否則舊版只剩暫存裡那一份
+                    /bin/mv "$2" "${3%/*}/failed.app" && /bin/mv "$3" "$2" || exit 1
+                    /bin/rm -rf "${3%/*}"
+                    /usr/bin/open -g -n "$2"
                     """
                     process.arguments = ["-c", restart, "zoo-type-update", String(ProcessInfo.processInfo.processIdentifier), installed.path, backup.path]
                     do { try process.run() }
                     catch {
                         try FileManager.default.removeItem(at: installed)
                         try FileManager.default.moveItem(at: backup, to: installed)
+                        try? FileManager.default.removeItem(at: backup.deletingLastPathComponent())
                         throw error
                     }
                     self.changed("更新完成，輸入法重新啟動；若未切換，請登出再登入")

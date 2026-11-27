@@ -143,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         mainMenu.addItem(withTitle: "編輯", action: nil, keyEquivalent: "").submenu = editMenu
         NSApp.mainMenu = mainMenu
+        UpdateFiles.removeLeftovers(beside: Bundle.main.bundleURL)
         if let runtime = appRuntime { UpdateManager.shared.start(runtime: runtime) }
         saveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in appRuntime?.save() }
         if CommandLine.arguments.contains("--settings") { openSettings(nil) }

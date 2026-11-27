@@ -18,7 +18,7 @@ sh scripts/install-macos.sh
 在「系統設定 → 鍵盤 → 文字輸入 → 編輯 → ＋ → 繁體中文」加入「動物園輸入法」。
 若清單未出現，登出再登入。安裝不需要 sudo；設定與學習資料保留在 `~/Library/Application Support/ZooType`，
 也支援既有的 `location.toml` 與 `ZCT_HOME`。升級後應登出再登入，讓載入中的舊版程序結束。
-安裝腳本會將原有 .app 改名保留為 `.app.previous-<時間>`，不直接覆寫正在載入的執行檔。
+安裝腳本與自動更新不直接覆寫正在載入的執行檔：先把原有 .app 移到 Input Methods 以外的暫存處，換上新版後刪除。舊版不可留在 Input Methods 裡，否則系統會把每一份都列成另一個輸入法；0.1.7 以前留下的 `.app.previous-*` 會在安裝或輸入法啟動時清除。
 
 ```sh
 # 與正式版分開的 Bundle ID、連線名稱、資料目錄和產物

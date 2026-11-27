@@ -17,7 +17,9 @@ for icon in menu.tiff menu-dark.tiff zoo-type.icns app-icon.png; do
     [ -f "$SOURCE/$icon" ] || { echo "缺少圖示：${icon}，請先建置。" >&2; exit 1; }
 done
 codesign --verify --strict "$DEST"
-STAGE=$(mktemp -d "$HOME/Library/Input Methods/.zoo-type-icons.XXXXXX")
+# 暫存與舊版都放在 Input Methods 外面：留在裡面的每一份 .app 都會被系統當成另一個輸入法
+mkdir -p "$HOME/Library/Caches"
+STAGE=$(mktemp -d "$HOME/Library/Caches/zoo-type-icons.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 COPY="$STAGE/$NAME.app"
 ditto "$DEST" "$COPY"
@@ -26,9 +28,9 @@ for icon in menu.tiff menu-dark.tiff zoo-type.icns app-icon.png; do
 done
 codesign --force --sign - "$COPY"
 codesign --verify --strict "$COPY"
-BACKUP="$DEST.previous-icons-$(date +%Y%m%d%H%M%S)-$$"
+BACKUP="$STAGE/previous.app"
 mv "$DEST" "$BACKUP"
 if ! mv "$COPY" "$DEST"; then mv "$BACKUP" "$DEST"; exit 1; fi
+rm -rf "$DEST".previous-*
 echo "圖示已更新，已保留原執行檔與輸入法登記。"
-echo "舊版備份：$BACKUP"
 echo "macOS 若仍顯示舊圖示，可先切換輸入法；下次登入也會重新載入。"

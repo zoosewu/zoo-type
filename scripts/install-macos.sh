@@ -34,7 +34,9 @@ done
 codesign --verify --strict "$SOURCE"
 DEST="$HOME/Library/Input Methods/$NAME.app"
 mkdir -p "$HOME/Library/Input Methods"
-STAGE=$(mktemp -d "$HOME/Library/Input Methods/.zoo-type-install.XXXXXX")
+# 暫存與舊版都放在 Input Methods 外面：留在裡面的每一份 .app 都會被系統當成另一個輸入法
+mkdir -p "$HOME/Library/Caches"
+STAGE=$(mktemp -d "$HOME/Library/Caches/zoo-type-install.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 ditto "$SOURCE" "$STAGE/$NAME.app"
 codesign --verify --strict "$STAGE/$NAME.app"
@@ -42,15 +44,16 @@ BACKUP=""
 if [ -d "$DEST" ]; then
     echo "升級前請先切換至其他輸入法，並登出再登入以卸載舊版。" >&2
     echo "將以新版取代 ${DEST}；資料設定會保留。" >&2
-    # 不直接覆寫可能正在執行的 Mach-O。
-    STAMP="$(date +%Y%m%d%H%M%S)-$$"
-    BACKUP="$DEST.previous-$STAMP"
+    # 不直接覆寫可能正在執行的 Mach-O：先移走，安裝成功後隨暫存一起刪除。
+    BACKUP="$STAGE/previous.app"
     mv "$DEST" "$BACKUP"
 fi
 if ! mv "$STAGE/$NAME.app" "$DEST"; then
     if [ -n "$BACKUP" ]; then mv "$BACKUP" "$DEST"; fi
     exit 1
 fi
+# 舊版安裝腳本與自動更新留在 Input Methods 裡的備份
+rm -rf "$DEST".previous-*
 if ! "$DEST/Contents/MacOS/zoo-type" --register; then
     echo "檔案已安裝，但系統註冊未完成。詳細錯誤見上方輸出。" >&2
     printf '若偏好設定服務拒絕寫入，可在桌面 Terminal 執行：sh "%s/repair-macos-registration.command" %s\n' "$(dirname "$0")" "$CHANNEL" >&2
