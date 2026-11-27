@@ -505,7 +505,10 @@ mod tests {
             asset: |v| format!("zoo-type-{v}.zip"),
         });
         assert_eq!(u.prepare().unwrap_err(), "請先檢查更新");
-        assert!(!dir.path().join("update").exists(), "沒按更新不建立下載資料夾");
+        assert!(
+            !dir.path().join("update").exists(),
+            "沒按更新不建立下載資料夾"
+        );
         let s = u.status();
         assert_eq!((s.progress, s.installing), (None, None), "失敗後可以再按");
         assert!(s.message.starts_with("更新失敗"));

@@ -145,3 +145,7 @@
 - IMK 的 flagsChanged 不保證一次；修飾鍵按下或放開要看左右位元（NX_DEVICE*KEYMASK）的實際狀態，狀態沒變就略過。
 - `NSLog` 的參數在統一記錄裡是 `<private>`；診斷用 `os.Logger` 的 `.notice` 加上 `privacy: .public`（只記鍵的種類，不記內容），用 `/usr/bin/log show` 讀（zsh 有內建的 `log`）。
 - IMK 轉送的 `firstRect` 會回垃圾值；Chromium 的 `attributes` 位置是整份文件的。重裝開發版後要 `pkill` 輸入法程序才會生效。
+
+## commit 前最後一步跑 `cargo fmt --all --check`
+- b6bf3dc：fmt 之後又補了一個測試，沒再格式化，Windows 與 macOS CI 都停在格式檢查。
+- 規則：push 前（任何 Rust 檔案改完之後）再跑一次 `cargo fmt --all --check`，或直接跑 `sh scripts/build-macos.sh --check`。
