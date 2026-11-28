@@ -589,10 +589,15 @@ mod tests {
             !dir.path().join("update/update.zip").exists(),
             "上次沒裝的檔案清掉"
         );
-        assert!(matches!(
-            u.state(),
-            UpdateState::Available { version, feature: true } if version == "99.0.0"
-        ));
+        // 預先發行版（測試 Release 的 0.0.0-test.1）不參與更新，不會提示
+        if current().is_some() {
+            assert!(matches!(
+                u.state(),
+                UpdateState::Available { version, feature: true } if version == "99.0.0"
+            ));
+        } else {
+            assert!(!matches!(u.state(), UpdateState::Available { .. }));
+        }
     }
 
     #[test]
