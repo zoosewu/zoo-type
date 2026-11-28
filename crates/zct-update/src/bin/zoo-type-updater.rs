@@ -158,4 +158,15 @@ mod tests {
                 .unwrap();
         assert!(!name.is_empty() && !version.is_empty(), "{name} {version}");
     }
+
+    /// 實際的安裝檔（scripts/build-installer.ps1 產生）：
+    /// ZCT_SETUP=target\installer\zoo-type-<版本>-windows-x64-setup.exe cargo test -p zct-update -- --ignored
+    #[test]
+    #[ignore]
+    fn installer_carries_product_name_and_version() {
+        let path = std::env::var("ZCT_SETUP").expect("ZCT_SETUP");
+        let (name, version) = super::product_version(std::path::Path::new(&path)).unwrap();
+        assert_eq!(name, super::PRODUCT);
+        assert_eq!(version, env!("CARGO_PKG_VERSION"));
+    }
 }
