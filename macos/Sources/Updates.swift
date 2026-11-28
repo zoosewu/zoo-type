@@ -107,9 +107,9 @@ final class UpdateManager {
         guard let runtime else { return }
         zct_update_cancel(runtime.handle)
     }
-    /// 「關於」頁的更新區塊：狀態列、按鈕（id：notes／install／cancel／retry／manual）、Release 頁面
-    func view() -> (text: String, buttons: [(id: String, label: String)], page: String) {
-        guard let runtime, let raw = zct_update_view(runtime.handle) else { return ("", [], "") }
+    /// 「關於」頁的更新區塊：狀態列（文字、次要文字、下載進度 0–100）、按鈕（id：notes／install／cancel／retry／manual）、Release 頁面
+    func view() -> (text: String, detail: String, progress: Int?, buttons: [(id: String, label: String)], page: String) {
+        guard let runtime, let raw = zct_update_view(runtime.handle) else { return ("", "", nil, [], "") }
         defer { zct_string_free(raw) }
         let json = (try? JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8))) as? [String: Any] ?? [:]
         let text = local ?? json["text"] as? String ?? ""
@@ -117,7 +117,10 @@ final class UpdateManager {
             guard let id = b["id"] as? String, let label = b["label"] as? String else { return nil }
             return (id, label)
         }
-        return (text, buttons, json["release_page"] as? String ?? "")
+        // 這裡自己記的訊息（無法檢查更新等）取代狀態列時，不帶次要文字與進度
+        let detail = local == nil ? json["detail"] as? String ?? "" : ""
+        let progress = local == nil ? (json["progress"] as? NSNumber)?.intValue : nil
+        return (text, detail, progress, buttons, json["release_page"] as? String ?? "")
     }
     /// 作者的其他專案（apex-code API）；讀取失敗是空陣列（整個區塊不顯示）
     func otherProjects(_ done: @escaping ([[String: Any]]) -> Void) {

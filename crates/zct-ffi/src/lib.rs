@@ -773,10 +773,13 @@ pub unsafe extern "C" fn zct_update_view(runtime: *const ZctRuntime) -> *mut c_c
             .iter()
             .map(|b| serde_json::json!({ "id": b, "label": b.label() }))
             .collect();
+        let status = state.status();
         let view = serde_json::json!({
             "supported": state != zct_core::menu::UpdateState::Off,
             "busy": state.busy(),
-            "text": state.text().unwrap_or_default(),
+            "text": status.as_ref().map(|s| s.text.as_str()).unwrap_or_default(),
+            "detail": status.as_ref().and_then(|s| s.detail.as_deref()),
+            "progress": status.as_ref().and_then(|s| s.progress),
             "buttons": buttons,
             "release_page": state.release_page(),
         });

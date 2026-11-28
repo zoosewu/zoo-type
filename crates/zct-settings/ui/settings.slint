@@ -1,4 +1,4 @@
-import { AboutSlint, Button, ComboBox, LineEdit, Switch, SpinBox, StandardTableView, ListView, ScrollView, Palette } from "std-widgets.slint";
+import { AboutSlint, Button, ComboBox, LineEdit, Switch, SpinBox, StandardTableView, ListView, ScrollView, Palette, ProgressIndicator } from "std-widgets.slint";
 
 // 外觀頁的即時預覽（值來自外觀頁的欄位）
 export struct Theme {
@@ -321,6 +321,9 @@ export component SettingsWindow inherits Window {
     in-out property <bool> show-advanced: false;
     // 更新（與輸入法圖示選單同一份狀態，用詞照 zoo-release 的 docs/UI.md）：狀態列、旁邊的按鈕、檢查或下載中
     in property <string> update-status;
+    // 接在狀態後面的次要文字（上次檢查時間）、下載進度（0–100，不在下載是 -1）
+    in property <string> update-detail;
+    in property <int> update-progress: -1;
     in property <[UpdateAction]> update-actions;
     in-out property <bool> checking-update;
     // 作者的其他專案（讀取失敗是空的，整個區塊不顯示）
@@ -687,9 +690,11 @@ export component SettingsWindow inherits Window {
                 spacing: 10px;
                 alignment: start;
                 Section { text: "關於"; }
+                // 版面照 zoo-release 的 docs/ui-layout.svg：名稱與版本＋檢查更新 → 介紹 → 狀態列 → 自動檢查 → 連結列 → 其他專案
                 HorizontalLayout {
                     spacing: 12px;
-                    Text { text: root.app-name + "  v" + root.version; font-size: 16px; font-weight: 600; vertical-alignment: center; }
+                    Text { text: root.app-name; font-size: 18px; font-weight: 600; vertical-alignment: center; }
+                    Text { text: "v" + root.version; color: Palette.foreground.with-alpha(0.6); vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                     if root.official: Button { text: "檢查更新"; enabled: root.online && !root.checking-update; clicked => { root.check-update(); } }
                 }
@@ -698,6 +703,12 @@ export component SettingsWindow inherits Window {
                     spacing: 8px;
                     alignment: start;
                     Text { text: root.update-status; vertical-alignment: center; }
+                    if root.update-detail != "": Text { text: root.update-detail; color: Palette.foreground.with-alpha(0.6); vertical-alignment: center; }
+                    if root.update-progress >= 0: HorizontalLayout {
+                        spacing: 8px;
+                        ProgressIndicator { width: 200px; height: 8px; y: (parent.height - self.height) / 2; progress: root.update-progress / 100; }
+                        Text { text: root.update-progress + "%"; vertical-alignment: center; }
+                    }
                     for action in root.update-actions: Button {
                         text: action.label;
                         primary: action.id == "install";
@@ -716,23 +727,37 @@ export component SettingsWindow inherits Window {
                     Text { text: "·"; }
                     Link { text: "授權 AGPL-3.0"; url: "https://github.com/zoosewu/zoo-type/blob/main/LICENSE"; open(u) => { root.open-url(u); } }
                 }
-                if root.other-projects.length > 0: Section { text: "作者的其他專案"; }
-                for project in root.other-projects: HorizontalLayout {
-                    spacing: 12px;
-                    alignment: start;
-                    Rectangle {
-                        width: 128px;
-                        height: 80px;
-                        border-radius: 4px;
-                        clip: true;
-                        background: Palette.alternate-background;
-                        if project.has-cover: Image { width: parent.width; height: parent.height; source: project.cover; image-fit: cover; }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 2px;
-                        Link { text: project.name; url: project.url; font-weight: 600; open(u) => { root.open-url(u); } }
-                        Help { text: project.tagline; width: TextWidth.full - 140px; }
+                // 作者的其他專案：分隔線下方，兩欄卡片，點整張卡片開啟 repo
+                if root.other-projects.length > 0: Rectangle { height: 1px; background: Palette.border; }
+                if root.other-projects.length > 0: Text { text: "作者的其他專案"; font-weight: 600; }
+                if root.other-projects.length > 0: GridLayout {
+                    spacing: 16px;
+                    for project[i] in root.other-projects: Rectangle {
+                        col: mod(i, 2);
+                        row: floor(i / 2);
+                        width: (TextWidth.full - 16px) / 2;
+                        card := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.open-url(project.url); }
+                        }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            alignment: start;
+                            Rectangle {
+                                width: 80px;
+                                height: 50px;
+                                border-radius: 4px;
+                                clip: true;
+                                background: Palette.alternate-background;
+                                if project.has-cover: Image { width: parent.width; height: parent.height; source: project.cover; image-fit: cover; }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: project.name; font-weight: 600; color: card.has-hover ? Palette.accent-background : Palette.foreground; }
+                                Help { text: project.tagline; width: (TextWidth.full - 16px) / 2 - 90px; }
+                            }
+                        }
                     }
                 }
                 Section { text: "第三方元件"; }

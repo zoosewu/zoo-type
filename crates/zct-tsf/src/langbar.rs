@@ -180,8 +180,12 @@ pub fn set_state(
     let Ok(obj) = button.cast_object_ref::<LangBarButton>() else {
         return;
     };
+    let notice = obj.update.borrow().notice() != update.notice();
     *obj.update.borrow_mut() = update;
-    if obj.chinese.get() != chinese || obj.simplified.get() != simplified || obj.game.get() != game
+    if notice
+        || obj.chinese.get() != chinese
+        || obj.simplified.get() != simplified
+        || obj.game.get() != game
     {
         obj.chinese.set(chinese);
         obj.simplified.set(simplified);
@@ -263,7 +267,7 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
     }
 
     fn GetIcon(&self) -> Result<HICON> {
-        guard(|| make_icon(self.glyph()))
+        guard(|| make_icon(self.glyph(), self.update.borrow().notice()))
     }
 
     fn GetText(&self) -> Result<BSTR> {
@@ -307,8 +311,9 @@ fn light_taskbar() -> bool {
     ok.is_ok() && value != 0
 }
 
-/// 只有一個字的線條圖示：沒有底色，字的灰階反鋸齒當作透明度
-fn make_icon(text: &str) -> Result<HICON> {
+/// 只有一個字的線條圖示：沒有底色，字的灰階反鋸齒當作透明度。
+/// `notice`：右上角加上藍色提示點（有新版本等，見 zoo-release 的 docs/UI.md 第 4 區）
+fn make_icon(text: &str, notice: bool) -> Result<HICON> {
     // 0x00RRGGBB（DIB 的像素順序是 BGRA，數值寫法剛好是 RGB）
     let color: u32 = if light_taskbar() {
         0x0020_2020
@@ -374,6 +379,9 @@ fn make_icon(text: &str) -> Result<HICON> {
             let a = (*p & 0xFF).max((*p >> 8) & 0xFF).max((*p >> 16) & 0xFF);
             *p = if a == 0 { 0 } else { (a << 24) | color };
         }
+        if notice {
+            dot(px, size);
+        }
         let mask = CreateBitmap(size, size, 1, 1, None);
         let icon = CreateIconIndirect(&ICONINFO {
             fIcon: true.into(),
@@ -387,5 +395,23 @@ fn make_icon(text: &str) -> Result<HICON> {
         let _ = DeleteDC(dc);
         ReleaseDC(None, screen);
         icon
+    }
+}
+
+/// 右上角的提示點（藍色實心圓，邊緣反鋸齒）；像素是 0xAARRGGBB、不預乘
+fn dot(px: &mut [u32], size: i32) {
+    const BLUE: u32 = 0x0025_63EB;
+    let r = (size as f32 * 0.22).max(3.0);
+    let (cx, cy) = (size as f32 - r, r);
+    for y in 0..size {
+        for x in 0..size {
+            let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+            let cover = (r - d + 0.5).clamp(0.0, 1.0);
+            if cover > 0.0 {
+                let p = &mut px[(y * size + x) as usize];
+                let a = ((cover * 255.0) as u32).max(*p >> 24);
+                *p = (a << 24) | BLUE;
+            }
+        }
     }
 }

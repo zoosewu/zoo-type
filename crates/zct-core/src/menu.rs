@@ -89,6 +89,17 @@ pub enum UpdateState {
     Installed(String),
 }
 
+/// 「關於」頁的狀態列
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UpdateStatus {
+    /// 「已是最新版」「正在下載 v0.7.0」
+    pub text: String,
+    /// 接在後面的次要文字：「（上次檢查：今天 14:31）」
+    pub detail: Option<String>,
+    /// 下載進度（0–100）
+    pub progress: Option<u8>,
+}
+
 /// 「關於」頁狀態列旁的按鈕
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +164,33 @@ impl UpdateState {
             Failed(reason) => format!("更新失敗：{reason}"),
             Installed(v) => format!("已更新到 {}，重新開啟這個 App 後生效", tagged(v)),
         })
+    }
+
+    /// 「關於」頁的狀態列，照版面圖分開畫：上次檢查時間用次要文字、下載用進度條
+    pub fn status(&self) -> Option<UpdateStatus> {
+        let (text, detail, progress) = match self {
+            UpdateState::Latest { checked: Some(t) } => (
+                "已是最新版".into(),
+                Some(format!("（上次檢查：{t}）")),
+                None,
+            ),
+            UpdateState::Downloading { version, percent } => (
+                format!("正在下載 {}", tagged(version)),
+                None,
+                Some(*percent),
+            ),
+            _ => (self.text()?, None, None),
+        };
+        Some(UpdateStatus {
+            text,
+            detail,
+            progress,
+        })
+    }
+
+    /// 選單與圖示要提示（第一項會開啟「關於」頁）：圖示加上提示點
+    pub fn notice(&self) -> bool {
+        matches!(self.item(), Some((MenuAction::OpenAbout, _, _)))
     }
 
     /// 狀態列旁的按鈕
@@ -406,6 +444,42 @@ mod tests {
             .map(|b| b.label())
             .collect();
         assert_eq!(labels, ["版本說明", "更新", "取消", "重試", "手動下載"]);
+    }
+
+    #[test]
+    fn about_page_status_splits_detail_and_progress() {
+        use UpdateState::*;
+        let status = |s: UpdateState| s.status().unwrap();
+        let latest = status(Latest {
+            checked: Some("今天 14:31".into()),
+        });
+        assert_eq!(latest.text, "已是最新版");
+        assert_eq!(latest.detail.as_deref(), Some("（上次檢查：今天 14:31）"));
+        let downloading = status(Downloading {
+            version: "0.2.0".into(),
+            percent: 68,
+        });
+        assert_eq!(downloading.text, "正在下載 v0.2.0");
+        assert_eq!(downloading.progress, Some(68));
+        let failed = status(Failed("簽章驗證失敗".into()));
+        assert_eq!(failed.text, "更新失敗：簽章驗證失敗");
+        assert_eq!((failed.detail, failed.progress), (None, None));
+        assert!(Idle.status().is_none());
+    }
+
+    #[test]
+    fn icon_shows_a_notice_only_when_the_menu_points_to_about() {
+        use UpdateState::*;
+        let feature = Available {
+            version: "0.2.0".into(),
+            feature: true,
+        };
+        let patch = Available {
+            version: "0.1.11".into(),
+            feature: false,
+        };
+        assert!(feature.notice() && Failed("無法連線".into()).notice());
+        assert!(!patch.notice() && !Idle.notice() && !Off.notice() && !Checking.notice());
     }
 
     #[test]

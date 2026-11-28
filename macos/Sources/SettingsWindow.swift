@@ -27,6 +27,9 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     private var readingField: NSTextField?
     private var syncTimer: Timer?
     private weak var updateStatusLabel: NSTextField?
+    private weak var updateDetailLabel: NSTextField?
+    private weak var updateProgress: NSProgressIndicator?
+    private weak var updateProgressLabel: NSTextField?
     private weak var updateButtons: NSStackView?
     private weak var checkUpdateButton: NSButton?
     private var updateButtonIDs: [String] = []
@@ -225,8 +228,9 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         let id = descriptor["id"] as? String ?? ""
         let title = NSTextField(labelWithString: descriptor["title"] as? String ?? "")
         title.font = .boldSystemFont(ofSize: 22); body.addArrangedSubview(title)
-        note(descriptor["help"] as? String ?? "")
-        let fields = model.fields.filter { $0.page == id }
+        // 「關於」頁照 zoo-release 的版面圖排，自動檢查更新的欄位由 aboutView 放在狀態列下方
+        if id != "about" { note(descriptor["help"] as? String ?? "") }
+        let fields = id == "about" ? [] : model.fields.filter { $0.page == id }
         if fields.contains(where: { $0.feature.map { !model.supports($0) } ?? false }) {
             note("灰色欄位的功能尚未在此平台提供；既有值會保留，與其他平台共用設定時不會被清除。")
         }
@@ -421,19 +425,32 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         let updates = UpdateManager.shared
         let version = Bundle.main.object(forInfoDictionaryKey: "ZooTypeVersion") as? String ?? ""
         let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "動物園輸入法"
-        let heading = NSTextField(labelWithString: "\(name)  v\(version)"); heading.font = .boldSystemFont(ofSize: 16)
-        let top = NSStackView(views: [heading]); top.spacing = 12
+        // 名稱、版本（次要文字）……「檢查更新」靠右
+        let heading = NSTextField(labelWithString: name); heading.font = .boldSystemFont(ofSize: 18)
+        let versionLabel = NSTextField(labelWithString: "v\(version)"); versionLabel.textColor = .secondaryLabelColor
+        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let top = NSStackView(views: [heading, versionLabel, spacer]); top.spacing = 12; top.alignment = .centerY
         if updates.supported {
             let check = button("檢查更新", #selector(checkUpdate(_:))); top.addArrangedSubview(check); checkUpdateButton = check
         }
         body.addArrangedSubview(top)
+        top.widthAnchor.constraint(equalTo: body.widthAnchor, constant: -48).isActive = true
         note("大千注音輸入法：中英混打、智慧選字，Windows 與 macOS 共用設定。")
         if updates.supported {
+            // 狀態列：文字、次要文字（上次檢查）、下載進度、按鈕
             let label = NSTextField(labelWithString: "")
+            let detail = NSTextField(labelWithString: ""); detail.textColor = .secondaryLabelColor
+            let progress = NSProgressIndicator(); progress.style = .bar; progress.isIndeterminate = false
+            progress.minValue = 0; progress.maxValue = 100
+            progress.widthAnchor.constraint(equalToConstant: 200).isActive = true
+            let percent = NSTextField(labelWithString: "")
             let actions = NSStackView(); actions.spacing = 8
-            let row = NSStackView(views: [label, actions]); row.spacing = 8
-            body.addArrangedSubview(row); updateStatusLabel = label; updateButtons = actions; updateButtonIDs = []
+            let row = NSStackView(views: [label, detail, progress, percent, actions]); row.spacing = 8; row.alignment = .centerY
+            body.addArrangedSubview(row)
+            updateStatusLabel = label; updateDetailLabel = detail; updateProgress = progress; updateProgressLabel = percent
+            updateButtons = actions; updateButtonIDs = []
             refreshUpdateStatus()
+            if let field = model.fields.first(where: { $0.path == "update.auto_check" }) { render(field) }
         }
         let links = NSStackView(); links.spacing = 6
         let base = "https://github.com/zoosewu/zoo-type"
@@ -444,8 +461,19 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         }
         body.addArrangedSubview(links)
         if let projects = otherProjects {
-            if !projects.isEmpty { header("作者的其他專案") }
-            for project in projects { body.addArrangedSubview(projectCard(project)) }
+            // 分隔線下方，兩欄卡片，點整張卡片開啟 repo
+            if !projects.isEmpty {
+                let line = NSBox(); line.boxType = .separator
+                body.addArrangedSubview(line)
+                line.widthAnchor.constraint(equalTo: body.widthAnchor, constant: -48).isActive = true
+                let title = NSTextField(labelWithString: "作者的其他專案"); title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+                body.addArrangedSubview(title)
+                let grid = NSGridView(numberOfColumns: 2, rows: 0); grid.columnSpacing = 16; grid.rowSpacing = 12
+                for start in stride(from: 0, to: projects.count, by: 2) {
+                    grid.addRow(with: projects[start..<min(start + 2, projects.count)].map { projectCard($0) })
+                }
+                body.addArrangedSubview(grid)
+            }
         } else {
             updates.otherProjects { [weak self] list in
                 guard let self else { return }
@@ -467,15 +495,25 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     private func projectCard(_ project: [String: Any]) -> NSView {
         let image = NSImageView(); image.imageScaling = .scaleProportionallyUpOrDown
         image.wantsLayer = true; image.layer?.cornerRadius = 4; image.layer?.masksToBounds = true
-        image.widthAnchor.constraint(equalToConstant: 128).isActive = true
-        image.heightAnchor.constraint(equalToConstant: 80).isActive = true
+        image.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+        image.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        image.heightAnchor.constraint(equalToConstant: 50).isActive = true
         if let path = project["cover"] as? String { image.image = NSImage(contentsOfFile: path) }
-        let name = link(project["name"] as? String ?? "", project["url"] as? String ?? "")
+        let name = NSTextField(labelWithString: project["name"] as? String ?? "")
         name.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         let tagline = NSTextField(wrappingLabelWithString: project["tagline"] as? String ?? "")
-        tagline.textColor = .secondaryLabelColor; tagline.preferredMaxLayoutWidth = 420
+        tagline.textColor = .secondaryLabelColor; tagline.preferredMaxLayoutWidth = 200
         let text = NSStackView(views: [name, tagline]); text.orientation = .vertical; text.alignment = .leading; text.spacing = 2
-        let card = NSStackView(views: [image, text]); card.spacing = 12; card.alignment = .centerY
+        let card = NSStackView(views: [image, text]); card.spacing = 10; card.alignment = .centerY
+        // 整張卡片可以點：蓋一個透明按鈕
+        let open = NSButton(title: "", target: self, action: #selector(openLink(_:)))
+        open.isBordered = false; open.isTransparent = true; open.toolTip = project["url"] as? String
+        open.setAccessibilityLabel(project["name"] as? String)
+        open.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(open)
+        NSLayoutConstraint.activate([
+            open.leadingAnchor.constraint(equalTo: card.leadingAnchor), open.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            open.topAnchor.constraint(equalTo: card.topAnchor), open.bottomAnchor.constraint(equalTo: card.bottomAnchor)
+        ])
         return card
     }
     private func refreshUpdateStatus() {
@@ -483,6 +521,9 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         guard updates.supported, let label = updateStatusLabel, let actions = updateButtons else { return }
         let view = updates.view()
         label.stringValue = view.text
+        updateDetailLabel?.stringValue = view.detail; updateDetailLabel?.isHidden = view.detail.isEmpty
+        updateProgress?.doubleValue = Double(view.progress ?? 0); updateProgress?.isHidden = view.progress == nil
+        updateProgressLabel?.stringValue = view.progress.map { "\($0)%" } ?? ""; updateProgressLabel?.isHidden = view.progress == nil
         releasePage = view.page
         checkUpdateButton?.isEnabled = !updates.busy
         let ids = view.buttons.map(\.id)

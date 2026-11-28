@@ -1054,7 +1054,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(_) => {}
                     Err(e) => {
                         ui.set_checking_update(false);
-                        ui.set_update_status(e.into());
+                        show_update_status(&ui, &e, None, None);
                     }
                 }
             },
@@ -1067,7 +1067,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let ui = ui_weak.unwrap();
             match state.borrow_mut().service.call(Request::Command(command)) {
                 Ok(_) => ui.set_checking_update(true),
-                Err(e) => ui.set_update_status(e.into()),
+                Err(e) => show_update_status(&ui, &e, None, None),
             }
         }
     };
@@ -1294,7 +1294,13 @@ fn pick_folder(_start: &std::path::Path) -> Option<std::path::PathBuf> {
 /// 更新走到哪一步（與輸入法圖示選單同一份狀態）；`page` 記下「版本說明」「手動下載」要開的頁面
 fn show_update(ui: &SettingsWindow, update: &zct_core::menu::UpdateState, page: &RefCell<String>) {
     ui.set_checking_update(update.busy());
-    ui.set_update_status(update.text().unwrap_or_default().into());
+    let status = update.status();
+    show_update_status(
+        ui,
+        status.as_ref().map_or("", |s| &s.text),
+        status.as_ref().and_then(|s| s.detail.as_deref()),
+        status.as_ref().and_then(|s| s.progress),
+    );
     let actions: Vec<UpdateAction> = update
         .buttons()
         .iter()
@@ -1309,6 +1315,13 @@ fn show_update(ui: &SettingsWindow, update: &zct_core::menu::UpdateState, page: 
         .collect();
     ui.set_update_actions(ModelRc::new(VecModel::from(actions)));
     *page.borrow_mut() = update.release_page();
+}
+
+/// 「關於」頁的狀態列（文字、次要文字、下載進度）
+fn show_update_status(ui: &SettingsWindow, text: &str, detail: Option<&str>, progress: Option<u8>) {
+    ui.set_update_status(text.into());
+    ui.set_update_detail(detail.unwrap_or_default().into());
+    ui.set_update_progress(progress.map_or(-1, i32::from));
 }
 
 /// 用預設瀏覽器開啟網址
@@ -1657,10 +1670,23 @@ mod ui_tests {
             &page,
         );
         assert!(ui.get_checking_update());
-        assert_eq!(ui.get_update_status(), "正在下載 v0.2.0　68%");
+        // 進度條與百分比分開畫（與橫幅相同的進度）
+        assert_eq!(ui.get_update_status(), "正在下載 v0.2.0");
+        assert_eq!(ui.get_update_progress(), 68);
         let labels = button_labels(&ui);
         assert!(labels.iter().any(|l| l == "取消"), "{labels:?}");
         assert!(!labels.iter().any(|l| l == "更新"), "{labels:?}");
+        // 已是最新版：上次檢查時間是次要文字；進度條消失
+        show_update(
+            &ui,
+            &UpdateState::Latest {
+                checked: Some("今天 14:31".into()),
+            },
+            &page,
+        );
+        assert_eq!(ui.get_update_status(), "已是最新版");
+        assert_eq!(ui.get_update_detail(), "（上次檢查：今天 14:31）");
+        assert_eq!(ui.get_update_progress(), -1);
         // 作者的其他專案：沒有資料就不顯示標題
         let has_section = |ui: &SettingsWindow| {
             i_slint_backend_testing::ElementQuery::from_root(ui)
