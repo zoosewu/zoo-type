@@ -181,7 +181,7 @@ T0 用自己訓練的字 n-gram 語言模型重新打分、選最通順的當首
 - [x] Release 說明的固定文字（Windows / macOS 安裝方式、ngram.bin）移到 `.github/release-notes.md`
 - [x] 簽章：新增不含版號的更新檔（`zoo-type-windows-x64-setup.exe`、`zoo-type-macos-arm64.zip`、`zoo-type-macos-x64.zip`）由 zoo-release 用共用金鑰簽、寫進 latest.json；
       含版號的檔名＋舊格式 `.sig`（`ZOO_TYPE_SIGNING_KEY`）照發給已安裝的 0.1.x，過幾版後移除
-- [ ] 測試：`publish: false` 推 `v0.0.0-test.1`，確認草稿後刪掉草稿與 tag，再移除 `publish: false`
+- [x] 測試：`publish: false` 推 `v0.0.0-test.1`，確認草稿後刪掉草稿與 tag，再移除 `publish: false`（2026-11-28 完成：四個建置與 release job 都成功）
 - [ ] 使用者：在 zoo-type repo 設定 `ZOO_SIGNING_KEY`、`ZOO_SIGNING_PASSWORD`
 
 ### B. 更新機制與 UI
