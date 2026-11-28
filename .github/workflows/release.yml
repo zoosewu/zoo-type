@@ -210,4 +210,6 @@ jobs:
     with:
       name: 動物園輸入法
       platforms: '{"windows-x86_64": "zoo-type-windows-x64-setup.exe", "darwin-aarch64": "zoo-type-macos-arm64.zip", "darwin-x86_64": "zoo-type-macos-x64.zip"}'
+      # 測試 Release（ADOPTION A.6）：只建草稿，確認後移除這行
+      publish: false
     secrets: inherit
