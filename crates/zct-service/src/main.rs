@@ -246,7 +246,8 @@ mod app {
         crate::update::fix_autostart();
         let update = match zct_host::update::Target::windows() {
             Some(target) if zct_host::update::manages_updates() && !version::read_only() => {
-                let updater = zct_host::update::Updater::new(target);
+                let state = host.data().local().join("update-state.json");
+                let updater = zct_host::update::Updater::new(target, state);
                 updater.spawn_schedule(host.clone())?;
                 Some(updater)
             }

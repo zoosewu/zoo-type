@@ -342,7 +342,7 @@ final class InputController: IMKInputController {
         defer { zct_string_free(raw) }
         let items = (try? JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8))) as? [[String: Any]] ?? []
         let actions: [String: Selector] = [
-            "install_update": #selector(installUpdate(_:)), "check_update": #selector(checkUpdate(_:)),
+            "open_about": #selector(openAbout(_:)), "check_update": #selector(checkUpdate(_:)),
             "toggle_mode": #selector(toggleMode(_:)),
             "toggle_output": #selector(toggleOutput(_:)), "toggle_game": #selector(toggleGame(_:)),
             "open_settings": #selector(editSettings(_:)), "restart": #selector(restart(_:))
@@ -361,14 +361,18 @@ final class InputController: IMKInputController {
 
     @objc private func settingsDidChange(_ sender: Any?) { refreshIdleSettings() }
     @objc private func prepareUpdate(_ sender: Any?) { commitComposition(client()); aiTimer?.invalidate() }
-    @objc private func installUpdate(_ sender: Any?) { UpdateManager.shared.install() }
-    @objc private func checkUpdate(_ sender: Any?) { UpdateManager.shared.check() }
+    // 檢查更新的結果與「有新版本」都在設定的「關於」頁
+    @objc private func openAbout(_ sender: Any?) { openSettings(page: "about") }
+    @objc private func checkUpdate(_ sender: Any?) { UpdateManager.shared.check(); openSettings(page: "about") }
     @objc private func toggleMode(_ sender: Any?) { performCommand(0) }
     @objc private func toggleOutput(_ sender: Any?) { performCommand(1) }
     @objc private func toggleGame(_ sender: Any?) { performCommand(2) }
 
-    @objc private func editSettings(_ sender: Any?) {
-        NotificationCenter.default.post(name: .zctOpenSettings, object: nil)
+    @objc private func editSettings(_ sender: Any?) { openSettings(page: nil) }
+
+    /// 開啟設定；`page` 是設定頁的 id（例如 about）
+    private func openSettings(page: String?) {
+        NotificationCenter.default.post(name: .zctOpenSettings, object: page)
     }
 
     override func showPreferences(_ sender: Any!) { editSettings(sender) }

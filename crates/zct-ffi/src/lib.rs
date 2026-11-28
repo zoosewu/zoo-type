@@ -240,10 +240,11 @@ pub unsafe extern "C" fn zct_runtime_new(dict: *const c_char) -> *mut ZctRuntime
         let dict = unsafe { text(dict)? };
         let (data, _) = zct_core::paths::prepare_data()?;
         let target = zct_host::update::Target::macos(&data);
+        let state_file = data.local().join("update-state.json");
         let host = Host::open(zct_host::Platform::Macos, data, dict.into())?;
         let mut runtime = ZctRuntime::new(host);
         if zct_host::update::manages_updates() {
-            let updater = zct_host::update::Updater::new(target);
+            let updater = zct_host::update::Updater::new(target, state_file);
             updater
                 .spawn_schedule(runtime.host.clone())
                 .map_err(|e| e.to_string())?;
@@ -675,8 +676,9 @@ pub struct ZctUpdateStatus {
     pub checking: bool,
     /// 正在檢查、下載或安裝
     pub busy: bool,
-    /// 已下載驗證、等使用者按更新的版本；沒有是空字串
+    /// 有新版本（或正在下載、安裝）的版號；沒有是空字串
     pub available: *const c_char,
+    /// 「關於」頁的狀態列（與 Windows 相同的用詞）；沒事可說是空字串
     pub message: *const c_char,
 }
 
@@ -698,25 +700,88 @@ pub unsafe extern "C" fn zct_update_status(runtime: *mut ZctRuntime) -> ZctUpdat
     let Some(updater) = &runtime.updater else {
         return out;
     };
-    let status = updater.status();
-    runtime.update_available = string(status.available.as_deref().unwrap_or_default());
-    runtime.update_message = string(&status.message);
+    use zct_core::menu::UpdateState;
+    let state = updater.state();
+    let version = match &state {
+        UpdateState::Available { version, .. }
+        | UpdateState::Downloading { version, .. }
+        | UpdateState::Installing(version) => version.as_str(),
+        _ => "",
+    };
+    runtime.update_available = string(version);
+    runtime.update_message = string(&state.text().unwrap_or_default());
     out.supported = true;
-    out.checking = status.checking;
-    out.busy = status.state().busy();
+    out.checking = state == UpdateState::Checking;
+    out.busy = state.busy();
     out.available = runtime.update_available.as_ptr();
     out.message = runtime.update_message.as_ptr();
     out
 }
 
-/// 平台開始（`true`）或放棄（`false`）安裝新版：選單顯示「正在安裝 vX…」
+/// 平台開始安裝 `version`（選單顯示「正在安裝 vX…」）；NULL 是放棄安裝
+/// # Safety
+/// `runtime` is live; `version` is NULL or a C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_update_installing(runtime: *mut ZctRuntime, version: *const c_char) {
+    if let Some(updater) = unsafe { runtime.as_ref() }.and_then(|r| r.updater.as_ref()) {
+        let version = unsafe { version.as_ref() }
+            .map(|v| unsafe { CStr::from_ptr(v) }.to_string_lossy().into_owned());
+        updater.set_installing(version.as_deref());
+    }
+}
+
+/// 取消下載
 /// # Safety
 /// `runtime` is live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zct_update_installing(runtime: *mut ZctRuntime, on: bool) {
+pub unsafe extern "C" fn zct_update_cancel(runtime: *const ZctRuntime) {
     if let Some(updater) = unsafe { runtime.as_ref() }.and_then(|r| r.updater.as_ref()) {
-        updater.set_installing(on);
+        updater.cancel();
     }
+}
+
+/// 「關於」頁的「作者的其他專案」（apex-code API，與 Windows 共用）：JSON 陣列
+/// `[{"name", "tagline", "url", "cover"}]`，`cover` 是下載到快取的圖檔路徑或 null。
+/// 會連網，請在背景執行緒呼叫；讀取失敗是 NULL（整個區塊不顯示）。用 `zct_string_free` 釋放
+/// # Safety
+/// `runtime` is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_other_projects(runtime: *const ZctRuntime) -> *mut c_char {
+    let json = guard(|| {
+        let runtime = unsafe { runtime.as_ref() }.ok_or("空 runtime")?;
+        let cache = runtime.host.data().local().join("cache").join("projects");
+        let projects = zct_host::projects::fetch(&cache)?;
+        let json = serde_json::to_string(&projects).map_err(|e| e.to_string())?;
+        Ok(Some(string(&json)))
+    });
+    json.map_or(std::ptr::null_mut(), CString::into_raw)
+}
+
+/// 「關於」頁的更新區塊（與 Windows 共用）：JSON
+/// `{"supported", "busy", "text", "buttons": [{"id": "notes", "label": "版本說明"}], "release_page"}`。
+/// `id` 是 notes／install／cancel／retry／manual。用 `zct_string_free` 釋放
+/// # Safety
+/// `runtime` is NULL or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zct_update_view(runtime: *const ZctRuntime) -> *mut c_char {
+    guard(|| {
+        let state = unsafe { runtime.as_ref() }
+            .and_then(|r| r.updater.as_ref())
+            .map_or(zct_core::menu::UpdateState::Off, |u| u.state());
+        let buttons: Vec<_> = state
+            .buttons()
+            .iter()
+            .map(|b| serde_json::json!({ "id": b, "label": b.label() }))
+            .collect();
+        let view = serde_json::json!({
+            "supported": state != zct_core::menu::UpdateState::Off,
+            "busy": state.busy(),
+            "text": state.text().unwrap_or_default(),
+            "buttons": buttons,
+            "release_page": state.release_page(),
+        });
+        Ok(string(&view.to_string()).into_raw())
+    })
 }
 
 /// 在背景立刻檢查更新；結果看 `zct_update_status`
@@ -732,7 +797,7 @@ pub unsafe extern "C" fn zct_update_check(runtime: *mut ZctRuntime) -> bool {
     })
 }
 
-/// 使用者按「更新」：下載（已下載就略過）並驗證，回傳要安裝的檔案路徑（用 `zct_string_free` 釋放）。
+/// 使用者按「更新」：下載並驗證，回傳要安裝的檔案路徑（用 `zct_string_free` 釋放）。
 /// 會等下載完，請在背景執行緒呼叫；下載進度看 `zct_update_status`。失敗是 NULL 並設定錯誤
 /// # Safety
 /// `runtime` is live.
@@ -1006,7 +1071,7 @@ pub unsafe extern "C" fn zct_menu_items(
     guard(|| {
         let update = unsafe { runtime.as_ref() }
             .and_then(|r| r.updater.as_ref())
-            .map_or(zct_core::menu::UpdateState::Off, |u| u.status().state());
+            .map_or(zct_core::menu::UpdateState::Off, |u| u.state());
         let state = zct_core::menu::MenuState {
             chinese,
             simplified,

@@ -89,7 +89,7 @@ Release 說明（慣例式提交）與 `latest.json`。
 - 另附 `-tools.tar.gz` 命令列工具包；每個檔案皆附 `.sha256`。
 
 輸入法壓縮包內包含 .app、`install.sh` 與 README，雙擊「安裝.command」或執行 `sh install.sh` 安裝到目前使用者的 Input Methods。
-正式版在「設定 → 關於」可檢查更新；啟用自動檢查後，啟動約五分鐘進行第一次檢查，此後每天檢查。安裝前會驗證 ZIP 的 Ed25519 簽章、版本、App 身分、程式碼簽章與架構，再替換使用者 Input Methods 內的 App 並重新啟動。
+正式版在「設定 → 關於」可檢查更新；啟用自動檢查後，啟動 1 分鐘後檢查（距上次成功檢查不到 24 小時就沿用結果），此後每 24 小時檢查。主版或次版較新時輸入法選單出現「有新版本 vX」；在「關於」頁按「更新」才下載，驗證共用金鑰簽章與 sha256、版本、App 身分、程式碼簽章與架構後，替換使用者 Input Methods 內的 App 並重新啟動。
 
 更新檔的簽章用 zoo-release 的 `ZOO_SIGNING_KEY`、`ZOO_SIGNING_PASSWORD`；過渡期的舊格式 `.sig` 用 `ZOO_TYPE_SIGNING_KEY`。Apple 的發行簽章另用以下 GitHub Secrets：
 

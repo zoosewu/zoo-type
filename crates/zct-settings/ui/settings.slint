@@ -26,6 +26,32 @@ export struct Day {
     accuracy: float,        // 0–1
 }
 
+/// 「關於」頁更新狀態列旁的按鈕（id：notes／install／cancel／retry／manual）
+export struct UpdateAction {
+    id: string,
+    label: string,
+}
+
+/// 「作者的其他專案」的一個專案（apex-code API）
+export struct OtherProject {
+    name: string,
+    tagline: string,
+    url: string,
+    cover: image,
+    has-cover: bool,
+}
+
+/// 開啟網址的文字連結
+component Link inherits Text {
+    in property <string> url;
+    callback open(string);
+    color: Palette.accent-background;
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.open(root.url); }
+    }
+}
+
 component Row inherits HorizontalLayout {
     in property <string> label;
     spacing: 12px;
@@ -293,10 +319,12 @@ export component SettingsWindow inherits Window {
     in property <bool> official: true;
     // 各操作習慣固定的選字對象、選字後游標（以 general.habit 為索引，自訂那格不用）
     in-out property <bool> show-advanced: false;
-    // 檢查更新：可以安裝的新版版號（空字串是沒有；按更新才下載）
-    in property <string> update-version;
+    // 更新（與輸入法圖示選單同一份狀態，用詞照 zoo-release 的 docs/UI.md）：狀態列、旁邊的按鈕、檢查或下載中
     in property <string> update-status;
-    in property <bool> checking-update;
+    in property <[UpdateAction]> update-actions;
+    in-out property <bool> checking-update;
+    // 作者的其他專案（讀取失敗是空的，整個區塊不顯示）
+    in property <[OtherProject]> other-projects;
     title: root.window-title;
     preferred-width: 820px;
     preferred-height: 600px;
@@ -361,7 +389,8 @@ export component SettingsWindow inherits Window {
     // 外觀頁的欄位改了：更新預覽
     callback appearance-edited();
     callback check-update();
-    callback install-update();
+    callback update-action(string);
+    callback open-url(string);
     callback save-api-key(string);
     callback test-ai();
     callback change-data-root();
@@ -657,17 +686,55 @@ export component SettingsWindow inherits Window {
               VerticalLayout {
                 spacing: 10px;
                 alignment: start;
-                Section { text: root.app-name; }
-                Text { text: "版本 " + root.version; }
-                if root.official: Row { label: "自動檢查更新"; Switch { checked <=> root.auto-update; } }
-                if root.official: Note { text: "每天檢查一次；有新版時，輸入法圖示的選單會出現「更新到」。"; }
-                if root.official: Row {
-                    label: "";
-                    Button { text: "立即檢查"; enabled: root.online && !root.checking-update; clicked => { root.check-update(); } }
-                    if root.update-version != "": Button { text: "更新到 v" + root.update-version; primary: true; clicked => { root.install-update(); } }
-                    Text { text: root.update-status; vertical-alignment: center; }
+                Section { text: "關於"; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: root.app-name + "  v" + root.version; font-size: 16px; font-weight: 600; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.official: Button { text: "檢查更新"; enabled: root.online && !root.checking-update; clicked => { root.check-update(); } }
                 }
-                Help { text: "注音輸入法，以 GNU AGPL-3.0 授權。\n原始碼與問題回報：https://github.com/zoosewu/zoo-type"; }
+                Help { text: "大千注音輸入法：中英混打、智慧選字，Windows 與 macOS 共用設定。"; }
+                if root.official && (root.update-status != "" || root.update-actions.length > 0): HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text { text: root.update-status; vertical-alignment: center; }
+                    for action in root.update-actions: Button {
+                        text: action.label;
+                        primary: action.id == "install";
+                        clicked => { root.update-action(action.id); }
+                    }
+                }
+                if root.official: HorizontalLayout { alignment: start; Switch { text: "自動檢查更新"; checked <=> root.auto-update; } }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Link { text: "版本說明"; url: "https://github.com/zoosewu/zoo-type/releases"; open(u) => { root.open-url(u); } }
+                    Text { text: "·"; }
+                    Link { text: "原始碼"; url: "https://github.com/zoosewu/zoo-type"; open(u) => { root.open-url(u); } }
+                    Text { text: "·"; }
+                    Link { text: "回報問題"; url: "https://github.com/zoosewu/zoo-type/issues"; open(u) => { root.open-url(u); } }
+                    Text { text: "·"; }
+                    Link { text: "授權 AGPL-3.0"; url: "https://github.com/zoosewu/zoo-type/blob/main/LICENSE"; open(u) => { root.open-url(u); } }
+                }
+                if root.other-projects.length > 0: Section { text: "作者的其他專案"; }
+                for project in root.other-projects: HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    Rectangle {
+                        width: 128px;
+                        height: 80px;
+                        border-radius: 4px;
+                        clip: true;
+                        background: Palette.alternate-background;
+                        if project.has-cover: Image { width: parent.width; height: parent.height; source: project.cover; image-fit: cover; }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Link { text: project.name; url: project.url; font-weight: 600; open(u) => { root.open-url(u); } }
+                        Help { text: project.tagline; width: TextWidth.full - 140px; }
+                    }
+                }
                 Section { text: "第三方元件"; }
                 Help { text: "libchewing：注音轉換引擎（LGPL-2.1-or-later）\nlibchewing-data：詞庫（LGPL-2.1-or-later）與語言模型（CC-BY-4.0）\nOpenCC：繁簡轉換字表（Apache-2.0）\nUnicode CLDR：Emoji 中文關鍵字（Unicode-3.0）\ndwyl/english-words：英文單字表（Unlicense）\nSlint：設定程式介面\n完整清單見安裝資料夾中的 THIRD-PARTY-NOTICES.txt"; }
                 // Slint 授權（Royalty-free 2.0）要求在「關於」畫面顯示；限制大小，不要佔滿畫面

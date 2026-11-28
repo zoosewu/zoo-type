@@ -915,8 +915,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui.set_phrase_edit_row(-1);
         }
     };
+    // 「版本說明」「手動下載」要開的 Release 頁面
+    let update_page = Rc::new(RefCell::new(String::new()));
     let refresh = {
         let (ui_weak, state, show_phrases) = (ui.as_weak(), state.clone(), show_phrases.clone());
+        let update_page = update_page.clone();
         move || {
             let ui = ui_weak.unwrap();
             let mut st = state.borrow_mut();
@@ -962,7 +965,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_backups(ModelRc::new(VecModel::from(b)));
             }
             if let Ok(Response::Status { update, .. }) = st.service.call(Request::Status) {
-                show_update(&ui, &update);
+                show_update(&ui, &update, &update_page);
             }
             ui.set_online(st.service.client.is_some());
             let sync_status = std::fs::read_to_string(st.data.local().join("sync-status.txt"))
@@ -1037,7 +1040,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 檢查、下載、安裝都在服務程序背景進行：送出後每秒問一次走到哪一步（與輸入法圖示選單同一份狀態）
     let update_poll = slint::Timer::default();
     {
-        let (ui_weak, state) = (ui.as_weak(), state.clone());
+        let (ui_weak, state, page) = (ui.as_weak(), state.clone(), update_page.clone());
         update_poll.start(
             slint::TimerMode::Repeated,
             Duration::from_secs(1),
@@ -1047,7 +1050,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return;
                 }
                 match state.borrow_mut().service.call(Request::Status) {
-                    Ok(Response::Status { update, .. }) => show_update(&ui, &update),
+                    Ok(Response::Status { update, .. }) => show_update(&ui, &update, &page),
                     Ok(_) => {}
                     Err(e) => {
                         ui.set_checking_update(false);
@@ -1057,23 +1060,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         );
     }
-    for (command, on) in [
-        (
-            Command::CheckUpdate,
-            SettingsWindow::on_check_update as fn(_, _),
-        ),
-        (Command::InstallUpdate, SettingsWindow::on_install_update),
-    ] {
+    // 送出更新指令後，狀態由上面的計時器接手
+    let send_update = {
         let (ui_weak, state) = (ui.as_weak(), state.clone());
-        on(&ui, move || {
+        move |command: Command| {
             let ui = ui_weak.unwrap();
             match state.borrow_mut().service.call(Request::Command(command)) {
-                // 狀態由上面的計時器接手
                 Ok(_) => ui.set_checking_update(true),
                 Err(e) => ui.set_update_status(e.into()),
             }
+        }
+    };
+    {
+        let send = send_update.clone();
+        ui.on_check_update(move || send(Command::CheckUpdate));
+    }
+    {
+        let (send, page) = (send_update.clone(), update_page.clone());
+        ui.on_update_action(move |id| match id.as_str() {
+            "install" => send(Command::InstallUpdate),
+            "cancel" => send(Command::CancelUpdate),
+            "retry" => send(Command::CheckUpdate),
+            // 版本說明、手動下載：開啟 Release 頁面
+            _ => open_url(&page.borrow()),
         });
     }
+    ui.on_open_url(|url| open_url(&url));
+    show_other_projects(&ui, &state.borrow().data);
     refresh();
     {
         let (state, show_phrases) = (state.clone(), show_phrases.clone());
@@ -1278,21 +1291,72 @@ fn pick_folder(_start: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
-/// 首選正確率：沒有修正的字數比例
-/// 更新走到哪一步（與輸入法圖示選單同一份狀態）
-fn show_update(ui: &SettingsWindow, update: &zct_core::menu::UpdateState) {
-    use zct_core::menu::UpdateState;
-    let ready = match update {
-        UpdateState::Ready(v) => v.trim_start_matches('v'),
-        _ => "",
-    };
-    ui.set_update_version(ready.into());
+/// 更新走到哪一步（與輸入法圖示選單同一份狀態）；`page` 記下「版本說明」「手動下載」要開的頁面
+fn show_update(ui: &SettingsWindow, update: &zct_core::menu::UpdateState, page: &RefCell<String>) {
     ui.set_checking_update(update.busy());
-    // 可以更新時按鈕已經寫了版號
-    let text = (ready.is_empty()).then(|| update.text()).flatten();
-    ui.set_update_status(text.unwrap_or_default().into());
+    ui.set_update_status(update.text().unwrap_or_default().into());
+    let actions: Vec<UpdateAction> = update
+        .buttons()
+        .iter()
+        .map(|b| UpdateAction {
+            id: serde_json::to_value(b)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default()
+                .into(),
+            label: b.label().into(),
+        })
+        .collect();
+    ui.set_update_actions(ModelRc::new(VecModel::from(actions)));
+    *page.borrow_mut() = update.release_page();
 }
 
+/// 用預設瀏覽器開啟網址
+fn open_url(url: &str) {
+    if !url.starts_with("https://") {
+        return;
+    }
+    #[cfg(windows)]
+    let r = std::process::Command::new("explorer").arg(url).spawn();
+    #[cfg(not(windows))]
+    let r = std::process::Command::new("open").arg(url).spawn();
+    if let Err(e) = r {
+        eprintln!("無法開啟 {url}：{e}");
+    }
+}
+
+/// 作者的其他專案：在背景讀 apex-code 的 API，讀取失敗就不顯示這個區塊
+fn show_other_projects(ui: &SettingsWindow, data: &DataRoot) {
+    let ui_weak = ui.as_weak();
+    let cache = data.local().join("cache").join("projects");
+    std::thread::spawn(move || {
+        let Ok(projects) = zct_host::projects::fetch(&cache) else {
+            return;
+        };
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let items: Vec<OtherProject> = projects
+                .into_iter()
+                .map(|p| {
+                    let cover = p
+                        .cover
+                        .as_deref()
+                        .and_then(|c| slint::Image::load_from_path(c).ok());
+                    OtherProject {
+                        name: p.name.into(),
+                        tagline: p.tagline.into(),
+                        url: p.url.into(),
+                        has_cover: cover.is_some(),
+                        cover: cover.unwrap_or_default(),
+                    }
+                })
+                .collect();
+            ui.set_other_projects(ModelRc::new(VecModel::from(items)));
+        });
+    });
+}
+
+/// 首選正確率：沒有修正的字數比例
 fn accuracy(chars: u64, corrections: u64) -> f32 {
     zct_preferences::accuracy(chars, corrections) as f32
 }
@@ -1546,6 +1610,73 @@ mod ui_tests {
             })
             .find_first()
             .unwrap_or_else(|| panic!("找不到 {placeholder}"))
+    }
+
+    fn button_labels(ui: &SettingsWindow) -> Vec<String> {
+        i_slint_backend_testing::ElementQuery::from_root(ui)
+            .match_descendants()
+            .match_accessible_role(i_slint_backend_testing::AccessibleRole::Button)
+            .find_all()
+            .into_iter()
+            .filter_map(|b| b.accessible_label().map(|l| l.to_string()))
+            .collect()
+    }
+
+    /// 「關於」頁照共用的更新狀態顯示狀態列與按鈕（用詞照 zoo-release 的 UI.md）
+    #[test]
+    fn about_page_shows_update_status_and_actions() {
+        use zct_core::menu::UpdateState;
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = SettingsWindow::new().unwrap();
+        ui.set_online(true);
+        ui.set_official(true);
+        ui.set_page(8);
+        ui.show().unwrap();
+        let page = RefCell::new(String::new());
+        let available = UpdateState::Available {
+            version: "0.2.0".into(),
+            feature: true,
+        };
+        show_update(&ui, &available, &page);
+        assert_eq!(ui.get_update_status(), "有新版本 v0.2.0");
+        let labels = button_labels(&ui);
+        for want in ["檢查更新", "版本說明", "更新"] {
+            assert!(labels.iter().any(|l| l == want), "{want}：{labels:?}");
+        }
+        assert_eq!(
+            *page.borrow(),
+            "https://github.com/zoosewu/zoo-type/releases/tag/v0.2.0"
+        );
+        // 下載中：「檢查更新」停用，只有「取消」
+        show_update(
+            &ui,
+            &UpdateState::Downloading {
+                version: "0.2.0".into(),
+                percent: 68,
+            },
+            &page,
+        );
+        assert!(ui.get_checking_update());
+        assert_eq!(ui.get_update_status(), "正在下載 v0.2.0　68%");
+        let labels = button_labels(&ui);
+        assert!(labels.iter().any(|l| l == "取消"), "{labels:?}");
+        assert!(!labels.iter().any(|l| l == "更新"), "{labels:?}");
+        // 作者的其他專案：沒有資料就不顯示標題
+        let has_section = |ui: &SettingsWindow| {
+            i_slint_backend_testing::ElementQuery::from_root(ui)
+                .match_descendants()
+                .match_predicate(|e| e.accessible_label().as_deref() == Some("作者的其他專案"))
+                .find_first()
+                .is_some()
+        };
+        assert!(!has_section(&ui));
+        ui.set_other_projects(ModelRc::new(VecModel::from(vec![OtherProject {
+            name: "zing-explore".into(),
+            tagline: "檔案總管".into(),
+            url: "https://github.com/zoosewu/zing-explore".into(),
+            ..Default::default()
+        }])));
+        assert!(has_section(&ui));
     }
 
     fn dictionary_page() -> SettingsWindow {

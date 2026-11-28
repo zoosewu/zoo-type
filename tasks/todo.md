@@ -174,36 +174,39 @@ T0 用自己訓練的字 n-gram 語言模型重新打分、選最通順的當首
 規範：https://github.com/zoosewu/zoo-release（ADOPTION / RELEASE / UPDATE / UI / LICENSING）
 
 ### A. 發布流程
-- [ ] 之後的 commit 用慣例式提交（`feat(...)`、`fix(...)`…，說明用中文）；`release.ps1` 的版號 commit 改成 `chore(release): vX.Y.Z`
-- [ ] `release.yml`：保留 Windows / macOS 的建置、測試、打包，上傳 `release-*` artifact；發布改用 `zoo-release/.github/workflows/release.yml@v1`
+- [x] 之後的 commit 用慣例式提交（`feat(...)`、`fix(...)`…，說明用中文）；`release.ps1` 的版號 commit 改成 `chore(release): vX.Y.Z`
+- [x] `release.yml`：保留 Windows / macOS 的建置、測試、打包，上傳 `release-*` artifact；發布改用 `zoo-release/.github/workflows/release.yml@v1`
       （移除自己的 Release、sha256、說明；`platforms`：windows-x86_64 / darwin-aarch64 / darwin-x86_64）
-- [ ] 版本以 tag 為準：建置時把 tag 的版號寫進 Cargo.toml（取代「tag 與 Cargo.toml 一致」檢查）
-- [ ] Release 說明的固定文字（Windows / macOS 安裝方式、ngram.bin）移到 `.github/release-notes.md`
-- [ ] 簽章：新增不含版號的更新檔（`zoo-type-windows-x64-setup.exe`、`zoo-type-macos-arm64.zip`、`zoo-type-macos-x64.zip`）由 zoo-release 用共用金鑰簽、寫進 latest.json；
+- [x] 版本以 tag 為準：建置時把 tag 的版號寫進 Cargo.toml（取代「tag 與 Cargo.toml 一致」檢查）
+- [x] Release 說明的固定文字（Windows / macOS 安裝方式、ngram.bin）移到 `.github/release-notes.md`
+- [x] 簽章：新增不含版號的更新檔（`zoo-type-windows-x64-setup.exe`、`zoo-type-macos-arm64.zip`、`zoo-type-macos-x64.zip`）由 zoo-release 用共用金鑰簽、寫進 latest.json；
       含版號的檔名＋舊格式 `.sig`（`ZOO_TYPE_SIGNING_KEY`）照發給已安裝的 0.1.x，過幾版後移除
 - [ ] 測試：`publish: false` 推 `v0.0.0-test.1`，確認草稿後刪掉草稿與 tag，再移除 `publish: false`
 - [ ] 使用者：在 zoo-type repo 設定 `ZOO_SIGNING_KEY`、`ZOO_SIGNING_PASSWORD`
 
 ### B. 更新機制與 UI
-- [ ] `zct_host::update` 改用 `zoo-update`：讀 `releases/latest/download/latest.json`（不再用 GitHub API）、minisign 驗證＋sha256、只接受本 repo 的下載網址、不降版
-- [ ] 狀態存 `local/update-state.json`（last_check / latest / skipped）；`auto_check` 沿用設定檔 `[update] auto_check`
-- [ ] 時機：啟動 1 分鐘後（距上次成功檢查不到 24 小時就沿用結果）、每 24 小時、手動不受限；自動檢查失敗不顯示
-- [ ] 提示：主版或次版較新 → 輸入法選單顯示「有新版本 vX」，點了開啟設定的「關於」頁；只有修補版較新 → 只在「關於」頁顯示
-- [ ] Windows 安裝檔 updater（SYSTEM 排程工作）改用 zoo-update 驗證
-- [ ] 「關於」頁（Windows Slint、macOS）：名稱＋版本＋［檢查更新］、一句話介紹、狀態列（檢查中…／已是最新版（上次檢查：今天 14:31）／有新版本 vX［版本說明］［更新］／正在下載 vX N%［取消］／無法檢查更新［重試］）、自動檢查更新開關、版本說明 · 原始碼 · 回報問題 · 授權 AGPL-3.0、作者的其他專案（apex-code API，讀取失敗整區不顯示）
-- [ ] 用詞照 UI.md 第 3 節（選單與設定頁的現有文字一併改）
+- [x] `zct_host::update` 改用 `zoo-update`：讀 `releases/latest/download/latest.json`（不再用 GitHub API）、minisign 驗證＋sha256、只接受本 repo 的下載網址、不降版
+- [x] 狀態存 `local/update-state.json`（last_check / latest / skipped）；`auto_check` 沿用設定檔 `[update] auto_check`
+- [x] 時機：啟動 1 分鐘後（距上次成功檢查不到 24 小時就沿用結果）、每 24 小時、手動不受限；自動檢查失敗不顯示
+- [x] 提示：主版或次版較新 → 輸入法選單顯示「有新版本 vX」，點了開啟設定的「關於」頁；只有修補版較新 → 只在「關於」頁顯示
+- [x] Windows 安裝檔 updater（SYSTEM 排程工作）改用 zoo-update 驗證；共用金鑰也簽其他專案，另外確認安裝檔版本資訊的產品名稱與版號（installer 加上 VersionInfo）
+- [x] 「關於」頁（Windows Slint、macOS）：名稱＋版本＋［檢查更新］、一句話介紹、狀態列（檢查中…／已是最新版（上次檢查：今天 14:31）／有新版本 vX［版本說明］［更新］／正在下載 vX N%［取消］／無法檢查更新［重試］）、自動檢查更新開關、版本說明 · 原始碼 · 回報問題 · 授權 AGPL-3.0、作者的其他專案（apex-code API，讀取失敗整區不顯示）
+- [x] 用詞照 UI.md 第 3 節（選單與設定頁的現有文字一併改）
 
 ### C. 授權（已是 AGPL-3.0-only）
-- [ ] README「授權」段落加上商業授權說明
-- [ ] `CONTRIBUTING.md`（貢獻授權）、`.github/pull_request_template.md`（同意勾選行）、`.github/workflows/contributor-license.yml`
+- [x] README「授權」段落加上商業授權說明
+- [x] `CONTRIBUTING.md`（貢獻授權）、`.github/pull_request_template.md`（同意勾選行）、`.github/workflows/contributor-license.yml`
 - [ ] 使用者：repo 分支保護把 `contributor-license / agreement` 設為必要檢查
-- [ ] 回報：libchewing 與詞庫是 LGPL-2.1-or-later（不是 GPL／AGPL，但閉源商業版要允許替換函式庫）
+- [x] 回報：libchewing 與詞庫是 LGPL-2.1-or-later（不是 GPL／AGPL，但閉源商業版要允許替換函式庫）
 
 ### D. CLAUDE.md 加入 zoo-release 段落（原文照貼）
+- [x] 完成
 
 ### E. 回報
 
 ## macOS 待驗證（Windows 先改、CI 編譯通過；等使用者到 macOS 實測時一起看）
+- [ ] zoo-release 更新：選單「檢查更新」「有新版本 vX」開啟設定的「關於」頁；「關於」頁的狀態列與按鈕（版本說明／更新／取消／重試／手動下載）、連結、作者的其他專案（apex-code API 上線後）
+- [ ] 從 0.1.11 自動更新到下一版：latest.json、共用金鑰簽章、取消下載
 - [x] 不用 sudo 執行 install.sh 註冊成功（0.1.7，11/27 實測）
 - [ ] 壓縮包的「安裝.command」雙擊能否通過 Gatekeeper
 - [ ] 選單更新項目：檢查更新中… → 下載更新 N% → 更新到 vX → 正在安裝 vX…（`zct_menu_items` 改簽名）

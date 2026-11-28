@@ -8,6 +8,9 @@
 #ifndef Version
   #error 請用 scripts/build-installer.ps1 建置（需要 /DVersion=x.y.z）
 #endif
+#ifndef NumericVersion
+  #define NumericVersion Version
+#endif
 #ifndef Stage
   #define Stage "..\target\installer\stage"
 #endif
@@ -21,6 +24,13 @@ AppPublisher=zoosewu
 AppPublisherURL=https://github.com/zoosewu/zoo-type
 AppSupportURL=https://github.com/zoosewu/zoo-type/issues
 AppUpdatesURL=https://github.com/zoosewu/zoo-type/releases
+; 自動更新的 updater（SYSTEM）讀安裝檔的產品名稱與版號：確認是動物園輸入法、而且比目前新
+VersionInfoVersion={#NumericVersion}
+VersionInfoCompany=zoosewu
+VersionInfoProductName=動物園輸入法
+VersionInfoProductVersion={#NumericVersion}
+VersionInfoProductTextVersion={#Version}
+VersionInfoDescription=動物園輸入法 安裝程式
 ; 安裝位置固定（與開發版相同，可互相覆蓋）；改名前是 {autopf}\ZCT，不沿用舊位置
 DefaultDirName={autopf}\ZooType
 UsePreviousAppDir=no

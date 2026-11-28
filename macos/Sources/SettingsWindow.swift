@@ -27,7 +27,11 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     private var readingField: NSTextField?
     private var syncTimer: Timer?
     private weak var updateStatusLabel: NSTextField?
-    private weak var updateInstallButton: NSButton?
+    private weak var updateButtons: NSStackView?
+    private weak var checkUpdateButton: NSButton?
+    private var updateButtonIDs: [String] = []
+    private var releasePage = ""
+    private var otherProjects: [[String: Any]]?
     private weak var syncStatusLabel: NSTextField?
     private var backupPicker: NSPopUpButton?
 
@@ -47,6 +51,11 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
     deinit { syncTimer?.invalidate() }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func previewPage(_ index: Int) { collect(); page = index; showPage() }
+    /// 換到 id 為 `page` 的設定頁（例如 about）
+    func show(page id: String) {
+        guard let index = model.pages.firstIndex(where: { $0["id"] as? String == id }) else { return }
+        previewPage(index)
+    }
     func open() { showWindow(nil); NSApp.activate(ignoringOtherApps: true); window?.makeKeyAndOrderFront(nil) }
     private func buildWindow() {
         guard let root = window?.contentView else { return }
@@ -247,16 +256,7 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
             do { let present = try model.manage(["op": "api_key_status"])["present"] as? Bool == true
                 note(present ? "API Key 已存於 macOS Keychain。" : "未設定 API Key；本機免金鑰服務可留空。")
             } catch { note("無法讀取 Keychain：" + String(describing: error)) }
-        case "about":
-            let version = Bundle.main.object(forInfoDictionaryKey: "ZooTypeVersion") as? String ?? ""
-            body.addArrangedSubview(NSTextField(labelWithString: "版本 \(version)"))
-            note("設定欄位、預設值、驗證、儲存與管理操作由共用設定層提供。")
-            let update = button("檢查更新", #selector(checkUpdate(_:))); update.isEnabled = UpdateManager.shared.supported
-            body.addArrangedSubview(update)
-            let install = button("安裝更新並重新啟動", #selector(installUpdate(_:))); body.addArrangedSubview(install); updateInstallButton = install
-            let label = NSTextField(wrappingLabelWithString: ""); label.preferredMaxLayoutWidth = 520
-            body.addArrangedSubview(label); updateStatusLabel = label; refreshUpdateStatus()
-            body.addArrangedSubview(button("編輯設定檔…", #selector(editFile(_:))))
+        case "about": aboutView()
         default: break
         }
         body.layoutSubtreeIfNeeded()
@@ -416,13 +416,96 @@ final class SettingsWindowController: NSWindowController, NSSearchFieldDelegate,
         do { _ = try model.manage(["op": "write_api_key", "key": field.stringValue]); collect(); showPage(); status.stringValue = "憑證已更新" }
         catch { showError(error) }
     }
+    /// 「關於」頁：順序與用詞照 zoo-release 的 docs/UI.md（與 Windows 相同）
+    private func aboutView() {
+        let updates = UpdateManager.shared
+        let version = Bundle.main.object(forInfoDictionaryKey: "ZooTypeVersion") as? String ?? ""
+        let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "動物園輸入法"
+        let heading = NSTextField(labelWithString: "\(name)  v\(version)"); heading.font = .boldSystemFont(ofSize: 16)
+        let top = NSStackView(views: [heading]); top.spacing = 12
+        if updates.supported {
+            let check = button("檢查更新", #selector(checkUpdate(_:))); top.addArrangedSubview(check); checkUpdateButton = check
+        }
+        body.addArrangedSubview(top)
+        note("大千注音輸入法：中英混打、智慧選字，Windows 與 macOS 共用設定。")
+        if updates.supported {
+            let label = NSTextField(labelWithString: "")
+            let actions = NSStackView(); actions.spacing = 8
+            let row = NSStackView(views: [label, actions]); row.spacing = 8
+            body.addArrangedSubview(row); updateStatusLabel = label; updateButtons = actions; updateButtonIDs = []
+            refreshUpdateStatus()
+        }
+        let links = NSStackView(); links.spacing = 6
+        let base = "https://github.com/zoosewu/zoo-type"
+        for (i, (title, url)) in [("版本說明", base + "/releases"), ("原始碼", base), ("回報問題", base + "/issues"),
+                                  ("授權 AGPL-3.0", base + "/blob/main/LICENSE")].enumerated() {
+            if i > 0 { links.addArrangedSubview(NSTextField(labelWithString: "·")) }
+            links.addArrangedSubview(link(title, url))
+        }
+        body.addArrangedSubview(links)
+        if let projects = otherProjects {
+            if !projects.isEmpty { header("作者的其他專案") }
+            for project in projects { body.addArrangedSubview(projectCard(project)) }
+        } else {
+            updates.otherProjects { [weak self] list in
+                guard let self else { return }
+                self.otherProjects = list
+                if !list.isEmpty, self.model.pages[self.page]["id"] as? String == "about" { self.showPage() }
+            }
+        }
+        body.addArrangedSubview(button("編輯設定檔…", #selector(editFile(_:))))
+    }
+    private func link(_ title: String, _ url: String) -> NSButton {
+        let b = NSButton(title: title, target: self, action: #selector(openLink(_:)))
+        b.isBordered = false; b.contentTintColor = .linkColor; b.toolTip = url
+        return b
+    }
+    @objc private func openLink(_ sender: NSButton) {
+        guard let url = sender.toolTip.flatMap(URL.init(string:)), url.scheme == "https" else { return }
+        NSWorkspace.shared.open(url)
+    }
+    private func projectCard(_ project: [String: Any]) -> NSView {
+        let image = NSImageView(); image.imageScaling = .scaleProportionallyUpOrDown
+        image.wantsLayer = true; image.layer?.cornerRadius = 4; image.layer?.masksToBounds = true
+        image.widthAnchor.constraint(equalToConstant: 128).isActive = true
+        image.heightAnchor.constraint(equalToConstant: 80).isActive = true
+        if let path = project["cover"] as? String { image.image = NSImage(contentsOfFile: path) }
+        let name = link(project["name"] as? String ?? "", project["url"] as? String ?? "")
+        name.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let tagline = NSTextField(wrappingLabelWithString: project["tagline"] as? String ?? "")
+        tagline.textColor = .secondaryLabelColor; tagline.preferredMaxLayoutWidth = 420
+        let text = NSStackView(views: [name, tagline]); text.orientation = .vertical; text.alignment = .leading; text.spacing = 2
+        let card = NSStackView(views: [image, text]); card.spacing = 12; card.alignment = .centerY
+        return card
+    }
     private func refreshUpdateStatus() {
         let updates = UpdateManager.shared
-        updateStatusLabel?.stringValue = updates.supported ? updates.message : "開發版或隔離測試不檢查更新"
-        updateInstallButton?.isEnabled = updates.available != nil && !updates.busy
+        guard updates.supported, let label = updateStatusLabel, let actions = updateButtons else { return }
+        let view = updates.view()
+        label.stringValue = view.text
+        releasePage = view.page
+        checkUpdateButton?.isEnabled = !updates.busy
+        let ids = view.buttons.map(\.id)
+        guard ids != updateButtonIDs else { return }
+        updateButtonIDs = ids
+        for old in actions.arrangedSubviews { actions.removeArrangedSubview(old); old.removeFromSuperview() }
+        for (i, b) in view.buttons.enumerated() {
+            let control = button(b.label, #selector(updateAction(_:))); control.tag = i
+            if b.id == "install" { control.keyEquivalent = "\r" }
+            actions.addArrangedSubview(control)
+        }
     }
     @objc private func checkUpdate(_ sender: Any?) { UpdateManager.shared.check(); refreshUpdateStatus() }
-    @objc private func installUpdate(_ sender: Any?) { UpdateManager.shared.install(); refreshUpdateStatus() }
+    @objc private func updateAction(_ sender: NSButton) {
+        guard sender.tag < updateButtonIDs.count else { return }
+        switch updateButtonIDs[sender.tag] {
+        case "install": UpdateManager.shared.install()
+        case "cancel": UpdateManager.shared.cancel()
+        case "retry": UpdateManager.shared.check()
+        default: if let url = URL(string: releasePage), url.scheme == "https" { NSWorkspace.shared.open(url) }
+        }
+        refreshUpdateStatus()
+    }
     @objc private func testAi(_ sender: Any?) {
         collect()
         guard let config = model.config["ai"] as? [String: Any] else { return }

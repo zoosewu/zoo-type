@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MenuAction {
-    InstallUpdate,
-    /// 立即檢查更新（在背景查；有新版時選單換成「更新到 vX」）
+    /// 開啟設定的「關於」頁（有新版本、下載中、更新失敗時）
+    OpenAbout,
+    /// 開啟「關於」頁並立即檢查更新
     CheckUpdate,
     ToggleMode,
     ToggleOutput,
@@ -27,7 +28,7 @@ impl MenuAction {
     pub fn from_code(code: u32) -> Option<MenuAction> {
         use MenuAction::*;
         [
-            InstallUpdate,
+            OpenAbout,
             CheckUpdate,
             ToggleMode,
             ToggleOutput,
@@ -52,69 +53,142 @@ pub enum MenuItem {
     Separator,
 }
 
-/// 更新走到哪一步：選單、圖示提示與設定畫面都照這個顯示
+/// GitHub repo（Release 頁面、原始碼、回報問題）
+pub const REPO_URL: &str = "https://github.com/zoosewu/zoo-type";
+
+/// 更新走到哪一步：選單、圖示提示與設定的「關於」頁都照這個顯示
+/// （規範：zoo-release 的 docs/UPDATE.md、docs/UI.md；用詞照 UI.md 第 3 節）
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UpdateState {
     /// 這個版本不管更新（開發版、ZCT_HOME 隔離測試）
     #[default]
     Off,
+    /// 還沒檢查過
     Idle,
-    /// 上次檢查：已是最新版
-    Latest,
-    /// 上次檢查失敗（原因）
-    Failed(String),
     Checking,
-    /// 下載新版中：已下載的百分比
-    Downloading(u8),
-    /// 已下載、驗證過，等使用者按「更新到 vX」
-    Ready(String),
+    /// 已是最新版；`checked` 是上次成功檢查的時間（「今天 14:31」）
+    Latest {
+        checked: Option<String>,
+    },
+    /// 手動檢查失敗（自動檢查失敗不顯示）
+    CheckFailed,
+    /// 有新版本；`feature`：主版或次版較新、沒有略過 → 選單也提示（修補版只在「關於」頁顯示）
+    Available {
+        version: String,
+        feature: bool,
+    },
+    Downloading {
+        version: String,
+        percent: u8,
+    },
+    /// 安裝程式在背景執行
     Installing(String),
+    /// 下載或驗證失敗（原因）
+    Failed(String),
     /// 新版已經裝好；這個 App 還載著舊版，重新開啟才會換新
     Installed(String),
+}
+
+/// 「關於」頁狀態列旁的按鈕
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateButton {
+    /// 開啟這個版本的 Release 頁面
+    Notes,
+    /// 下載並安裝
+    Install,
+    Cancel,
+    /// 再檢查一次
+    Retry,
+    /// 開啟 Release 頁面手動下載
+    Manual,
+}
+
+impl UpdateButton {
+    pub fn label(self) -> &'static str {
+        match self {
+            UpdateButton::Notes => "版本說明",
+            UpdateButton::Install => "更新",
+            UpdateButton::Cancel => "取消",
+            UpdateButton::Retry => "重試",
+            UpdateButton::Manual => "手動下載",
+        }
+    }
 }
 
 impl UpdateState {
     /// 選單項目：（動作, 文字, 能不能按）
     fn item(&self) -> Option<(MenuAction, String, bool)> {
         use UpdateState::*;
+        let about = MenuAction::OpenAbout;
         Some(match self {
             Off => return None,
-            Idle | Latest | Failed(_) => (MenuAction::CheckUpdate, "檢查更新".into(), true),
-            Ready(v) => (
-                MenuAction::InstallUpdate,
-                format!("更新到 v{}", bare(v)),
-                true,
-            ),
-            _ => (MenuAction::CheckUpdate, self.text()?, false),
+            Checking => (MenuAction::CheckUpdate, "檢查中…".into(), false),
+            Available {
+                feature: true,
+                version,
+            } => (about, format!("有新版本 {}", tagged(version)), true),
+            Downloading { .. } | Failed(_) => (about, self.text()?, true),
+            Installing(_) | Installed(_) => (about, self.text()?, false),
+            Idle | Latest { .. } | CheckFailed | Available { .. } => {
+                (MenuAction::CheckUpdate, "檢查更新".into(), true)
+            }
         })
     }
 
-    /// 進行中或有結果時的說明（圖示提示、設定畫面）；沒事可說是 `None`
+    /// 「關於」頁的狀態列；沒事可說是 `None`
     pub fn text(&self) -> Option<String> {
         use UpdateState::*;
         Some(match self {
             Off | Idle => return None,
-            Latest => "已是最新版".into(),
-            Failed(e) => format!("檢查更新失敗：{e}"),
-            Checking => "檢查更新中…".into(),
-            Downloading(p) => format!("下載更新 {p}%"),
-            Ready(v) => format!("可以更新到 v{}", bare(v)),
-            Installing(v) => format!("正在安裝 v{}…", bare(v)),
-            Installed(v) => format!("已更新到 v{}，重新開啟這個 App 後生效", bare(v)),
+            Checking => "檢查中…".into(),
+            Latest { checked: None } => "已是最新版".into(),
+            Latest { checked: Some(t) } => format!("已是最新版（上次檢查：{t}）"),
+            CheckFailed => "無法檢查更新".into(),
+            Available { version, .. } => format!("有新版本 {}", tagged(version)),
+            Downloading { version, percent } => {
+                format!("正在下載 {}　{percent}%", tagged(version))
+            }
+            Installing(v) => format!("正在安裝 {}…", tagged(v)),
+            Failed(reason) => format!("更新失敗：{reason}"),
+            Installed(v) => format!("已更新到 {}，重新開啟這個 App 後生效", tagged(v)),
         })
     }
 
-    /// 還在進行（檢查、下載、安裝）：設定畫面持續更新狀態
+    /// 狀態列旁的按鈕
+    pub fn buttons(&self) -> &'static [UpdateButton] {
+        use UpdateButton::*;
+        match self {
+            UpdateState::Available { .. } => &[Notes, Install],
+            UpdateState::Downloading { .. } => &[Cancel],
+            UpdateState::CheckFailed => &[Retry],
+            UpdateState::Failed(_) => &[Manual],
+            _ => &[],
+        }
+    }
+
+    /// 「版本說明」「手動下載」開啟的頁面
+    pub fn release_page(&self) -> String {
+        match self {
+            UpdateState::Available { version, .. } | UpdateState::Downloading { version, .. } => {
+                format!("{REPO_URL}/releases/tag/{}", tagged(version))
+            }
+            _ => format!("{REPO_URL}/releases"),
+        }
+    }
+
+    /// 還在進行（檢查、下載、安裝）：「關於」頁持續更新狀態、「檢查更新」停用
     pub fn busy(&self) -> bool {
         matches!(
             self,
-            UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
+            UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Installing(_)
         )
     }
 }
 
-fn bare(version: &str) -> &str {
-    version.trim_start_matches('v')
+/// 版號一律帶 v（「v0.7.0」）
+fn tagged(version: &str) -> String {
+    format!("v{}", version.trim_start_matches('v'))
 }
 
 /// 畫選單需要的狀態
@@ -171,9 +245,13 @@ pub fn tooltip(state: &MenuState) -> String {
         (true, false) => "中文",
     };
     let name = crate::channel::CURRENT.name;
+    // 選單上有提示的才接在圖示提示後面
     let update = match &state.update {
-        UpdateState::Latest | UpdateState::Failed(_) => None,
-        u => u.text(),
+        UpdateState::Available { feature: true, .. }
+        | UpdateState::Downloading { .. }
+        | UpdateState::Installing(_)
+        | UpdateState::Installed(_) => state.update.text(),
+        _ => None,
     };
     match update {
         Some(update) => format!("{name}：{mode}　{update}"),
@@ -236,33 +314,50 @@ mod tests {
     }
 
     #[test]
-    fn update_item_shows_each_step_first_in_the_menu() {
+    fn update_item_follows_the_zoo_release_wording() {
         use UpdateState::*;
-        let check = MenuAction::CheckUpdate;
+        let (check, about) = (MenuAction::CheckUpdate, MenuAction::OpenAbout);
         assert_eq!(first(Idle), (check, "檢查更新".into(), true));
-        assert_eq!(first(Latest), (check, "檢查更新".into(), true));
+        assert_eq!(first(Checking), (check, "檢查中…".into(), false));
         assert_eq!(
-            first(Failed("離線".into())),
+            first(Latest { checked: None }),
             (check, "檢查更新".into(), true)
         );
-        assert_eq!(first(Checking), (check, "檢查更新中…".into(), false));
+        assert_eq!(first(CheckFailed), (check, "檢查更新".into(), true));
+        let available = |feature| Available {
+            version: "0.2.0".into(),
+            feature,
+        };
         assert_eq!(
-            first(Downloading(42)),
-            (check, "下載更新 42%".into(), false)
+            first(available(true)),
+            (about, "有新版本 v0.2.0".into(), true),
+            "主版或次版較新：選單提示，點了開啟「關於」頁"
         );
         assert_eq!(
-            first(Ready("0.1.6".into())),
-            (MenuAction::InstallUpdate, "更新到 v0.1.6".into(), true)
+            first(available(false)),
+            (check, "檢查更新".into(), true),
+            "修補版只在「關於」頁顯示"
         );
         assert_eq!(
-            first(Installing("v0.1.6".into())),
-            (check, "正在安裝 v0.1.6…".into(), false)
+            first(Downloading {
+                version: "0.2.0".into(),
+                percent: 68
+            }),
+            (about, "正在下載 v0.2.0　68%".into(), true)
         );
         assert_eq!(
-            first(Installed("0.1.6".into())),
+            first(Installing("0.2.0".into())),
+            (about, "正在安裝 v0.2.0…".into(), false)
+        );
+        assert_eq!(
+            first(Failed("簽章驗證失敗".into())),
+            (about, "更新失敗：簽章驗證失敗".into(), true)
+        );
+        assert_eq!(
+            first(Installed("0.2.0".into())),
             (
-                check,
-                "已更新到 v0.1.6，重新開啟這個 App 後生效".into(),
+                about,
+                "已更新到 v0.2.0，重新開啟這個 App 後生效".into(),
                 false
             )
         );
@@ -270,10 +365,47 @@ mod tests {
         assert!(items(&MenuState::default()).iter().all(|i| !matches!(
             i,
             MenuItem::Action {
-                action: MenuAction::CheckUpdate | MenuAction::InstallUpdate,
+                action: MenuAction::CheckUpdate | MenuAction::OpenAbout,
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn about_page_status_and_buttons() {
+        use UpdateButton::*;
+        use UpdateState::*;
+        let checked = Latest {
+            checked: Some("今天 14:31".into()),
+        };
+        assert_eq!(
+            checked.text().unwrap(),
+            "已是最新版（上次檢查：今天 14:31）"
+        );
+        assert_eq!(CheckFailed.text().unwrap(), "無法檢查更新");
+        assert_eq!(CheckFailed.buttons(), [Retry]);
+        let available = Available {
+            version: "0.1.11".into(),
+            feature: false,
+        };
+        assert_eq!(available.text().unwrap(), "有新版本 v0.1.11");
+        assert_eq!(available.buttons(), [Notes, Install]);
+        assert_eq!(
+            available.release_page(),
+            "https://github.com/zoosewu/zoo-type/releases/tag/v0.1.11"
+        );
+        let failed = Failed("無法連線".into());
+        assert_eq!(failed.buttons(), [Manual]);
+        assert_eq!(
+            failed.release_page(),
+            "https://github.com/zoosewu/zoo-type/releases"
+        );
+        assert!(Checking.busy() && !available.busy());
+        let labels: Vec<_> = [Notes, Install, Cancel, Retry, Manual]
+            .iter()
+            .map(|b| b.label())
+            .collect();
+        assert_eq!(labels, ["版本說明", "更新", "取消", "重試", "手動下載"]);
     }
 
     #[test]
@@ -285,14 +417,17 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(tooltip(&state), format!("{name}：中文"));
-        state.update = UpdateState::Latest;
+        state.update = UpdateState::Latest { checked: None };
         assert_eq!(
             tooltip(&state),
             format!("{name}：中文"),
-            "檢查的結果只在設定畫面顯示"
+            "檢查的結果只在「關於」頁顯示"
         );
-        state.update = UpdateState::Installing("0.1.6".into());
-        assert_eq!(tooltip(&state), format!("{name}：中文　正在安裝 v0.1.6…"));
+        state.update = UpdateState::Available {
+            version: "0.2.0".into(),
+            feature: true,
+        };
+        assert_eq!(tooltip(&state), format!("{name}：中文　有新版本 v0.2.0"));
     }
 
     #[test]

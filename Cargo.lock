@@ -3074,6 +3074,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
+name = "minisign-verify"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "871285dc19d8d0ebe0eef3d0e99a205f2a71363b122632cbbfa4a6c370a960ce"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4521,9 +4527,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
+checksum = "5b0e5c7d67bc53f435386b2130fdc900488c5703770f6d8a4633060e34288a27"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -6612,6 +6618,7 @@ dependencies = [
 name = "zct-host"
 version = "0.1.10"
 dependencies = [
+ "chrono",
  "log",
  "serde",
  "serde_json",
@@ -6621,6 +6628,7 @@ dependencies = [
  "zct-core",
  "zct-preferences",
  "zct-update",
+ "zoo-update",
 ]
 
 [[package]]
@@ -6671,6 +6679,7 @@ dependencies = [
  "windows",
  "zct-ai",
  "zct-core",
+ "zct-host",
  "zct-ipc",
  "zct-preferences",
 ]
@@ -6704,6 +6713,8 @@ dependencies = [
  "getrandom 0.4.3",
  "semver",
  "sha2",
+ "windows",
+ "zoo-update",
 ]
 
 [[package]]
@@ -6805,6 +6816,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zoo-update"
+version = "1.0.0"
+source = "git+https://github.com/zoosewu/zoo-release?tag=v1.0.0#b7d8582a01f327faa9a4c495bd00f83a7a6f6315"
+dependencies = [
+ "base64",
+ "minisign-verify",
+ "serde",
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "zune-core"

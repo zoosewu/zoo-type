@@ -6,7 +6,9 @@
 //! - 每個輸入 context 一個 [`HostSession`]：AI 請求、組字提示列、中英狀態記憶、提示文字
 
 mod ai;
+mod net;
 pub mod notice;
+pub mod projects;
 mod runtime;
 mod session;
 pub mod settings;

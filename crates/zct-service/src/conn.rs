@@ -42,37 +42,46 @@ fn update_state(shared: &Shared) -> zct_core::menu::UpdateState {
     };
     match crate::version::installed() {
         Some(v) => UpdateState::Installed(v),
-        None => updater.status().state(),
+        None => updater.state(),
+    }
+}
+
+fn open_settings(args: &[&str]) {
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("zoo-type-settings.exe")));
+    match exe.filter(|p| p.exists()) {
+        Some(exe) => {
+            if let Err(e) = std::process::Command::new(exe).args(args).spawn() {
+                log::warn!("無法開啟設定程式：{e}");
+            }
+        }
+        None => log::warn!("找不到設定程式 zoo-type-settings.exe"),
     }
 }
 
 /// 輸入法圖示右鍵選單
 fn run_command(cmd: Command, shared: &Shared) {
     match cmd {
-        Command::OpenSettings => {
-            let exe = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.join("zoo-type-settings.exe")));
-            match exe.filter(|p| p.exists()) {
-                Some(exe) => {
-                    if let Err(e) = std::process::Command::new(exe).spawn() {
-                        log::warn!("無法開啟設定程式：{e}");
-                    }
-                }
-                None => log::warn!("找不到設定程式 zoo-type-settings.exe"),
-            }
-        }
+        Command::OpenSettings => open_settings(&[]),
+        // 「關於」是設定的第 9 頁（編號 8）
+        Command::OpenAbout => open_settings(&["--page", "8"]),
         Command::ToggleGame => {
             shared.host.toggle_game();
         }
         Command::CheckUpdate => {
-            log::info!("輸入法圖示：檢查更新");
+            log::info!("檢查更新");
             if let Some(u) = &shared.update {
                 u.check_in_background();
             }
         }
+        Command::CancelUpdate => {
+            if let Some(u) = &shared.update {
+                u.cancel();
+            }
+        }
         Command::InstallUpdate => {
-            log::info!("輸入法圖示：安裝更新");
+            log::info!("安裝更新");
             let Some(updater) = &shared.update else {
                 return;
             };
@@ -324,7 +333,7 @@ pub fn serve(id: u64, mut conn: ServerConn, shared: &Shared) {
                     Response::Error(e)
                 }
             },
-            Request::CheckUpdate => match shared.update.as_ref().map(|u| u.check()) {
+            Request::CheckUpdate => match shared.update.as_ref().map(|u| u.check(true)) {
                 Some(Ok(version)) => Response::Update(version),
                 Some(Err(e)) => Response::Error(e),
                 None => Response::Error("只有正式版會檢查更新".into()),

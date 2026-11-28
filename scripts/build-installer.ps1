@@ -21,6 +21,8 @@ $stage = Join-Path $root 'target\installer\stage'
 $cargo = Get-Content (Join-Path $root 'Cargo.toml') -Raw
 if ($cargo -notmatch '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"') { throw '讀不到 Cargo.toml 的 workspace 版號' }
 $version = $Matches[1]
+# 檔案版本資訊只能是數字（0.1.11-rc.1 → 0.1.11）；完整版號另外寫在 ProductVersion
+$numeric = ($version -split '[-+]')[0]
 
 if (-not $Iscc) {
     $Iscc = @(
@@ -45,7 +47,7 @@ Copy-Item (Join-Path $root 'LICENSE') $stage
 Copy-Item (Join-Path $root 'installer\THIRD-PARTY-NOTICES.txt') $stage
 
 Write-Host "建置安裝檔：版本 $version"
-& $Iscc /Q "/DVersion=$version" "/DStage=$stage" (Join-Path $root 'installer\zoo-type.iss')
+& $Iscc /Q "/DVersion=$version" "/DNumericVersion=$numeric" "/DStage=$stage" (Join-Path $root 'installer\zoo-type.iss')
 if ($LASTEXITCODE -ne 0) { throw "ISCC 失敗（$LASTEXITCODE）" }
 
 $setup = Join-Path $root "target\installer\zoo-type-$version-windows-x64-setup.exe"

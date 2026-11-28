@@ -152,6 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let runtime = appRuntime else { return }
         do {
             if settingsWindow == nil { settingsWindow = try SettingsWindowController(runtime: runtime) }
+            // 輸入法選單的「有新版本」「檢查更新」直接開「關於」頁
+            if let page = (sender as? Notification)?.object as? String { settingsWindow?.show(page: page) }
             settingsWindow?.open()
         } catch {
             let alert = NSAlert(); alert.messageText = "無法開啟設定"; alert.informativeText = String(describing: error)

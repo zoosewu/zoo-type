@@ -484,8 +484,18 @@ impl TextService_Impl {
             }
             Action::ToggleGame => Command::ToggleGame,
             Action::Restart => Command::Restart,
-            Action::InstallUpdate => Command::InstallUpdate,
-            Action::CheckUpdate => Command::CheckUpdate,
+            // 檢查更新的結果與「有新版本」都在設定的「關於」頁
+            Action::OpenAbout | Action::CheckUpdate => {
+                if matches!(action, Action::CheckUpdate) {
+                    self.call(&Request::Command(Command::CheckUpdate));
+                }
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                        windows::Win32::UI::WindowsAndMessaging::ASFW_ANY,
+                    );
+                }
+                Command::OpenAbout
+            }
             Action::Refresh => {
                 self.refresh_langbar();
                 return;

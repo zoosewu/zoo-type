@@ -58,7 +58,7 @@ enum UpdateFiles {
     }
 }
 
-// 查、下載、驗證、排程在共用層（與 Windows 相同；檢查只看版號，按「更新」才下載）；這裡只顯示狀態與安裝（解壓、驗 App、替換、重新啟動）。
+// 查、下載、驗證、排程與顯示的用詞在共用層（與 Windows 相同，依 zoo-release 的 UPDATE.md／UI.md）；這裡只負責安裝（解壓、驗 App、替換、重新啟動）。
 // All state belongs to the main thread. Extraction uses a background queue.
 final class UpdateManager {
     static let shared = UpdateManager()
@@ -100,8 +100,37 @@ final class UpdateManager {
     func check() {
         guard supported, !busy, let runtime else { return }
         local = nil
-        if !zct_update_check(runtime.handle) { changed("檢查更新失敗：" + EngineError.current.description); return }
+        if !zct_update_check(runtime.handle) { changed("無法檢查更新"); return }
         refresh()
+    }
+    func cancel() {
+        guard let runtime else { return }
+        zct_update_cancel(runtime.handle)
+    }
+    /// 「關於」頁的更新區塊：狀態列、按鈕（id：notes／install／cancel／retry／manual）、Release 頁面
+    func view() -> (text: String, buttons: [(id: String, label: String)], page: String) {
+        guard let runtime, let raw = zct_update_view(runtime.handle) else { return ("", [], "") }
+        defer { zct_string_free(raw) }
+        let json = (try? JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8))) as? [String: Any] ?? [:]
+        let text = local ?? json["text"] as? String ?? ""
+        let buttons = (json["buttons"] as? [[String: Any]] ?? []).compactMap { b -> (String, String)? in
+            guard let id = b["id"] as? String, let label = b["label"] as? String else { return nil }
+            return (id, label)
+        }
+        return (text, buttons, json["release_page"] as? String ?? "")
+    }
+    /// 作者的其他專案（apex-code API）；讀取失敗是空陣列（整個區塊不顯示）
+    func otherProjects(_ done: @escaping ([[String: Any]]) -> Void) {
+        guard let runtime else { done([]); return }
+        let handle = runtime.handle
+        queue.async {
+            var list: [[String: Any]] = []
+            if let raw = zct_other_projects(handle) {
+                list = (try? JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8))) as? [[String: Any]] ?? []
+                zct_string_free(raw)
+            }
+            DispatchQueue.main.async { done(list) }
+        }
     }
     func install() {
         guard supported, !busy, let version = available, let runtime else { return }
@@ -116,8 +145,11 @@ final class UpdateManager {
         let handle = runtime.handle
         queue.async { [weak self] in
             var work: URL?
+            // 下載失敗、取消時共用層已經更新狀態，這裡不再另外標記失敗
+            var downloaded = false
             let result = Result { () throws -> URL in
                 guard let pending = zct_update_prepare(handle) else { throw EngineError.current }
+                downloaded = true
                 let file = URL(fileURLWithPath: String(cString: pending)); zct_string_free(pending)
                 let staging = file.deletingLastPathComponent().appendingPathComponent("staged-" + UUID().uuidString)
                 work = staging
@@ -132,12 +164,12 @@ final class UpdateManager {
                 guard let self else { return }
                 defer {
                     self.installing = false; self.busy = self.checking
-                    zct_update_installing(runtime.handle, false)
+                    zct_update_installing(runtime.handle, nil)
                 }
                 var frozen = false
                 do {
                     let staged = try result.get()
-                    zct_update_installing(runtime.handle, true)
+                    version.withCString { zct_update_installing(runtime.handle, $0) }
                     NotificationCenter.default.post(name: .zctWillInstallUpdate, object: nil)
                     try runtime.freeze()
                     frozen = true
@@ -166,7 +198,7 @@ final class UpdateManager {
                         do { try runtime.recover() } catch { self.changed("更新失敗，請重新啟動輸入法：" + String(describing: error)); return }
                         NotificationCenter.default.post(name: .zctSettingsChanged, object: nil)
                     }
-                    zct_update_failed(runtime.handle, String(describing: error))
+                    if downloaded { zct_update_failed(runtime.handle, String(describing: error)) }
                     self.refresh()
                 }
             }

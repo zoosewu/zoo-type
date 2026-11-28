@@ -1,11 +1,10 @@
-//! 自動更新的信任基礎：安裝檔的數位簽章（ed25519）
+//! 自動更新的共用常數（inbox 位置、排程工作名稱），以及過渡期的舊格式簽章（ed25519）
 //!
-//! 發布時用私鑰（GitHub Secrets `ZOO_TYPE_SIGNING_KEY`）簽安裝檔，程式內建公鑰驗證。
-//! 以 SYSTEM 執行的 `zoo-type-updater` 只安裝簽章正確、而且比目前新的版本：
-//! SHA256 和安裝檔放在同一個 Release，能改安裝檔的人也能改 SHA256，所以只比對雜湊不夠。
+//! 0.1.11 起更新檔用 zoo-release 的共用金鑰簽章（`zoo-update` 驗證）。這裡的舊格式只給 `zct-release` 在發布時
+//! 替含版號的檔名簽章（GitHub Secrets `ZOO_TYPE_SIGNING_KEY`），讓已安裝的 0.1.10 以前的版本還能自動更新；
+//! 過幾版後與 `zct-release` 一起移除。
 //!
-//! 簽的內容是「格式標記 + 版號 + 安裝檔的 SHA256」：版號也在簽章裡，拿舊版的合法安裝檔改名也無法降級。
-//! `.sig` 檔是三行文字：格式標記、版號、簽章（hex）。
+//! 舊格式簽的內容是「格式標記 + 版號 + 安裝檔的 SHA256」；`.sig` 檔是三行文字：格式標記、版號、簽章（hex）。
 
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};

@@ -63,7 +63,7 @@ remote = ""                # 例：git@github.com:you/zoo-type-data.git（請用
 interval_minutes = 10
 
 [update]                   # 自動更新（只有正式版）
-auto_check = true          # 每天檢查 GitHub Releases（只看版號）；有新版時輸入法圖示的選單出現「更新到 vX」，按下才下載，驗證後不跳 UAC 直接安裝
+auto_check = true          # 自動檢查更新（啟動 1 分鐘後、之後每 24 小時）；主版或次版較新時輸入法選單出現「有新版本 vX」，在設定的「關於」頁按「更新」才下載
 
 [ai]                       # AI 同音字修正（OpenAI 相容 API）；API Key 在設定程式輸入，存在 Windows 認證管理員
 enabled = false

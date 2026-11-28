@@ -12,7 +12,7 @@ pub mod secret;
 /// 協定版本；DLL 與服務程序版本不一致時拒絕連線，避免解碼錯亂
 /// 12：程式改名為 zoo-type-*（舊版服務程序不能讓位給不同檔名的新版，改走協定不同的唯讀模式）
 /// 19：設定程式的「檢查更新」（CheckUpdate → Update）
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// 單一訊息上限（詞庫清單等管理用回應可能較大）
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
@@ -28,10 +28,14 @@ pub enum Command {
     Restart,
     /// 設定程式要變更資料位置：立即存檔，之後不再寫入（搬移完成後再送 Restart）
     PrepareMove,
-    /// 下載驗證新版，再啟動以 SYSTEM 執行的更新工作
+    /// 下載驗證新版，再啟動以 SYSTEM 執行的更新工作（「關於」頁的「更新」）
     InstallUpdate,
-    /// 在背景立即檢查更新（輸入法圖示選單）
+    /// 在背景立即手動檢查更新
     CheckUpdate,
+    /// 取消下載
+    CancelUpdate,
+    /// 開啟設定的「關於」頁（輸入法圖示選單）
+    OpenAbout,
 }
 
 /// 螢幕座標（實體像素）

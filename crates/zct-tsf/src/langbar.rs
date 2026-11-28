@@ -39,7 +39,7 @@ pub enum Action {
     Restart,
     /// 打開選單前重新查詢狀態（例如背景下載好的新版）
     Refresh,
-    InstallUpdate,
+    OpenAbout,
     CheckUpdate,
 }
 
@@ -156,7 +156,7 @@ impl LangBarButton_Impl {
                 .and_then(MenuAction::from_code);
             if let Some(action) = chosen {
                 self.act(match action {
-                    MenuAction::InstallUpdate => Action::InstallUpdate,
+                    MenuAction::OpenAbout => Action::OpenAbout,
                     MenuAction::CheckUpdate => Action::CheckUpdate,
                     MenuAction::ToggleMode => Action::ToggleMode,
                     MenuAction::ToggleOutput => Action::ToggleOutput,
